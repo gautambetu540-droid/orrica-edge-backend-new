@@ -1,0 +1,579 @@
+// Orrica Edge Comprehensive ATS & Recruitment Engine Database Schema
+// Optimized for PostgreSQL (AWS RDS / Aurora)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// -------------------------------------------------------------
+// ENUMS
+// -------------------------------------------------------------
+
+enum Role {
+  SUPER_ADMIN
+  ADMIN
+  RECRUITER
+  CLIENT
+  CANDIDATE
+}
+
+enum JobStatus {
+  DRAFT
+  PUBLISHED
+  PAUSED
+  CLOSED
+  ARCHIVED
+}
+
+enum CandidateStatus {
+  NEW
+  SCREENING
+  SHORTLISTED
+  INTERVIEW
+  SELECTED
+  REJECTED
+  ON_HOLD
+  JOINED
+  DROPPED
+}
+
+enum ApplicationStage {
+  APPLIED
+  SCREENING
+  ASSESSMENT
+  INTERVIEW
+  SHORTLISTED
+  SELECTED
+  OFFERED
+  JOINED
+  REJECTED
+}
+
+enum WorkMode {
+  WORK_FROM_OFFICE
+  HYBRID
+  REMOTE
+}
+
+enum EmploymentType {
+  FULL_TIME
+  PART_TIME
+  CONTRACT
+  INTERNSHIP
+}
+
+enum ClientStatus {
+  PENDING
+  ACTIVE
+  SUSPENDED
+  CLOSED
+}
+
+enum InterviewStatus {
+  SCHEDULED
+  COMPLETED
+  CANCELLED
+  RESCHEDULED
+  NO_SHOW
+}
+
+enum PayoutStatus {
+  PENDING
+  APPROVED
+  PROCESSING
+  PAID
+  REJECTED
+}
+
+enum ReplacementStatus {
+  REQUESTED
+  UNDER_REVIEW
+  APPROVED
+  REPLACED
+  REJECTED
+  CLOSED
+}
+
+enum InvoiceStatus {
+  DRAFT
+  SENT
+  PAID
+  OVERDUE
+  CANCELLED
+}
+
+enum BlogStatus {
+  DRAFT
+  PUBLISHED
+}
+
+enum InquiryType {
+  EMPLOYER_HIRE_TALENT
+  RECRUITER_PARTNER
+  CONTACT_US
+}
+
+enum InquiryStatus {
+  NEW
+  IN_PROGRESS
+  CONTACTED
+  CLOSED
+}
+
+enum EmailStatus {
+  QUEUED
+  SENT
+  FAILED
+}
+
+// -------------------------------------------------------------
+// AUTH & USERS
+// -------------------------------------------------------------
+
+model User {
+  id                   String    @id @default(uuid())
+  email                String    @unique
+  passwordHash         String
+  fullName             String
+  role                 Role      @default(CANDIDATE)
+  phone                String?
+  avatarUrl            String?
+  isActive             Boolean   @default(true)
+  isEmailVerified      Boolean   @default(false)
+  emailVerifyToken     String?
+  resetPasswordToken   String?
+  resetPasswordExpires DateTime?
+  failedLoginAttempts  Int       @default(0)
+  lockUntil            DateTime?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  // Relationships
+  refreshTokens        RefreshToken[]
+  jobsCreated          Job[]             @relation("CreatedJobs")
+  candidateProfile     Candidate?
+  assignedApplications Application[]     @relation("RecruiterApplications")
+  payouts              Payout[]
+  notifications        Notification[]
+  auditLogs            AuditLog[]
+
+  @@map("users")
+}
+
+model RefreshToken {
+  id               String   @id @default(uuid())
+  token            String   @unique
+  userId           String
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt        DateTime
+  isRevoked        Boolean  @default(false)
+  replacedByToken  String?
+  createdAt        DateTime @default(now())
+
+  @@map("refresh_tokens")
+}
+
+// -------------------------------------------------------------
+// CLIENTS & CORPORATE PARTNERS
+// -------------------------------------------------------------
+
+model Client {
+  id             String       @id @default(uuid())
+  companyName    String
+  industry       String
+  contactPerson  String
+  contactEmail   String
+  contactPhone   String
+  gstNumber      String?
+  website        String?
+  address        String?
+  billingDetails Json?
+  status         ClientStatus @default(ACTIVE)
+  notes          String?      @db.Text
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  jobs              Job[]
+  invoices          Invoice[]
+  payouts           Payout[]
+  replacementCases  ReplacementCase[]
+
+  @@map("clients")
+}
+
+// -------------------------------------------------------------
+// JOBS
+// -------------------------------------------------------------
+
+model Job {
+  id                   String         @id @default(uuid())
+  jobCode              String         @unique
+  title                String
+  slug                 String         @unique
+  clientId             String
+  client               Client         @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  department           String
+  category             String
+  location             String
+  workMode             WorkMode       @default(WORK_FROM_OFFICE)
+  employmentType       EmploymentType @default(FULL_TIME)
+  experienceMin        Int            @default(0)
+  experienceMax        Int            @default(3)
+  salaryMin            Decimal?       @db.Decimal(10, 2)
+  salaryMax            Decimal?       @db.Decimal(10, 2)
+  salaryText           String?
+  vacancies            Int            @default(1)
+  skills               String[]
+  languages            String[]       @default(["English", "Hindi"])
+  contentHtml          String         @db.Text
+  eligibilityCriteria  String?        @db.Text
+  requirements         String?        @db.Text
+  applicationQuestions Json?
+  status               JobStatus      @default(DRAFT)
+  views                Int            @default(0)
+  publishedAt          DateTime?
+  metaTitle            String?
+  metaDescription      String?        @db.Text
+  createdById          String
+  createdBy            User           @relation("CreatedJobs", fields: [createdById], references: [id])
+  createdAt            DateTime       @default(now())
+  updatedAt            DateTime       @updatedAt
+
+  applications         Application[]
+  payouts              Payout[]
+  replacementCases     ReplacementCase[]
+
+  @@index([status, department, location])
+  @@map("jobs")
+}
+
+// -------------------------------------------------------------
+// CANDIDATES
+// -------------------------------------------------------------
+
+model Candidate {
+  id                 String          @id @default(uuid())
+  userId             String?         @unique
+  user               User?           @relation(fields: [userId], references: [id], onDelete: SetNull)
+  fullName           String
+  email              String          @unique
+  phone              String
+  location           String
+  education          String?
+  experienceYears    Decimal         @default(0) @db.Decimal(4, 1)
+  currentCompany     String?
+  currentDesignation String?
+  currentCtc         Decimal?        @db.Decimal(10, 2)
+  expectedCtc        Decimal?        @db.Decimal(10, 2)
+  noticePeriodDays   Int?
+  skills             String[]
+  languages          String[]        @default(["English"])
+  resumeUrl          String
+  resumeText         String?         @db.Text
+  source             String          @default("Website Direct")
+  tags               String[]        @default([])
+  notes              String?         @db.Text
+  status             CandidateStatus @default(NEW)
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+
+  applications       Application[]
+  assessmentAttempts AssessmentAttempt[]
+  payouts            Payout[]
+  replacementCases   ReplacementCase[] @relation("PrimaryCandidate")
+  replacedByCases    ReplacementCase[] @relation("ReplacementCandidate")
+
+  @@index([status, email, phone])
+  @@map("candidates")
+}
+
+// -------------------------------------------------------------
+// APPLICATIONS & ATS PIPELINE
+// -------------------------------------------------------------
+
+model Application {
+  id              String           @id @default(uuid())
+  jobId           String
+  job             Job              @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  candidateId     String
+  candidate       Candidate        @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  recruiterId     String?
+  recruiter       User?            @relation("RecruiterApplications", fields: [recruiterId], references: [id], onDelete: SetNull)
+  stage           ApplicationStage @default(APPLIED)
+  atsScore        Int              @default(0)
+  matchReason     String?          @db.Text
+  missingSkills   String[]         @default([])
+  rejectionReason String?          @db.Text
+  internalNotes   Json?
+  timeline        Json?
+  appliedAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  interviews      Interview[]
+
+  @@unique([jobId, candidateId])
+  @@index([jobId, stage])
+  @@map("applications")
+}
+
+// -------------------------------------------------------------
+// INTERVIEWS
+// -------------------------------------------------------------
+
+model Interview {
+  id               String          @id @default(uuid())
+  applicationId    String
+  application      Application     @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  roundName        String
+  scheduledAt      DateTime
+  interviewerName  String
+  meetingLink      String?
+  status           InterviewStatus @default(SCHEDULED)
+  feedbackRating   Int?
+  feedbackNotes    String?         @db.Text
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  @@map("interviews")
+}
+
+// -------------------------------------------------------------
+// ASSESSMENTS
+// -------------------------------------------------------------
+
+model Assessment {
+  id          String   @id @default(uuid())
+  title       String
+  category    String
+  timeLimit   Int      @default(30) // in minutes
+  passingScore Int     @default(60) // percentage
+  questions   Json     // Array of MCQs { id, question, options, correctIndex, marks }
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  attempts    AssessmentAttempt[]
+
+  @@map("assessments")
+}
+
+model AssessmentAttempt {
+  id           String     @id @default(uuid())
+  assessmentId String
+  assessment   Assessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  candidateId  String
+  candidate    Candidate  @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  score        Int
+  totalMarks   Int
+  percentage   Decimal    @db.Decimal(5, 2)
+  isPassed     Boolean
+  answers      Json?
+  submittedAt  DateTime   @default(now())
+
+  @@map("assessment_attempts")
+}
+
+// -------------------------------------------------------------
+// PAYOUTS & REPLACEMENTS
+// -------------------------------------------------------------
+
+model Payout {
+  id            String       @id @default(uuid())
+  recruiterId   String
+  recruiter     User         @relation(fields: [recruiterId], references: [id])
+  candidateId   String
+  candidate     Candidate    @relation(fields: [candidateId], references: [id])
+  clientId      String
+  client        Client       @relation(fields: [clientId], references: [id])
+  jobId         String
+  job           Job          @relation(fields: [jobId], references: [id])
+  amount        Decimal      @db.Decimal(10, 2)
+  status        PayoutStatus @default(PENDING)
+  invoiceNumber String?
+  notes         String?      @db.Text
+  paidAt        DateTime?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  @@map("payouts")
+}
+
+model ReplacementCase {
+  id                     String            @id @default(uuid())
+  clientId               String
+  client                 Client            @relation(fields: [clientId], references: [id])
+  jobId                  String
+  job                    Job               @relation(fields: [jobId], references: [id])
+  primaryCandidateId     String
+  primaryCandidate       Candidate         @relation("PrimaryCandidate", fields: [primaryCandidateId], references: [id])
+  replacementCandidateId String?
+  replacementCandidate   Candidate?        @relation("ReplacementCandidate", fields: [replacementCandidateId], references: [id])
+  reason                 String            @db.Text
+  status                 ReplacementStatus @default(REQUESTED)
+  windowDays             Int               @default(90)
+  requestedAt            DateTime          @default(now())
+  resolvedAt             DateTime?
+
+  @@map("replacement_cases")
+}
+
+// -------------------------------------------------------------
+// INVOICES
+// -------------------------------------------------------------
+
+model Invoice {
+  id            String        @id @default(uuid())
+  invoiceNumber String        @unique
+  clientId      String
+  client        Client        @relation(fields: [clientId], references: [id])
+  amount        Decimal       @db.Decimal(10, 2)
+  gstAmount     Decimal       @db.Decimal(10, 2)
+  totalAmount   Decimal       @db.Decimal(10, 2)
+  billingDate   DateTime      @default(now())
+  dueDate       DateTime
+  status        InvoiceStatus @default(DRAFT)
+  pdfUrl        String?
+  notes         String?       @db.Text
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  @@map("invoices")
+}
+
+// -------------------------------------------------------------
+// BLOGS / CAREER RESOURCES (CMS)
+// -------------------------------------------------------------
+
+model BlogPost {
+  id              String     @id @default(uuid())
+  title           String
+  slug            String     @unique
+  category        String
+  excerpt         String     @db.Text
+  contentMarkdown String     @db.Text
+  featuredImage   String
+  authorName      String
+  authorRole      String
+  readingTime     String
+  isFeatured      Boolean    @default(false)
+  status          BlogStatus @default(DRAFT)
+  views           Int        @default(0)
+  publishedAt     DateTime?
+  metaTitle       String?
+  metaDescription String?    @db.Text
+  ogImage         String?
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+
+  @@index([status, category])
+  @@map("blog_posts")
+}
+
+// -------------------------------------------------------------
+// INQUIRIES & LEAD CAPTURE
+// -------------------------------------------------------------
+
+model Inquiry {
+  id           String        @id @default(uuid())
+  type         InquiryType
+  fullName     String
+  email        String
+  phone        String
+  companyName  String?
+  requirements String?       @db.Text
+  status       InquiryStatus @default(NEW)
+  notes        String?       @db.Text
+  assignedToId String?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  @@map("inquiries")
+}
+
+// -------------------------------------------------------------
+// IN-APP NOTIFICATIONS
+// -------------------------------------------------------------
+
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String
+  message   String
+  type      String   @default("INFO")
+  link      String?
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([userId, isRead])
+  @@map("notifications")
+}
+
+// -------------------------------------------------------------
+// DYNAMIC EMAIL TEMPLATES (ADMIN CONTROLLED)
+// -------------------------------------------------------------
+
+model EmailTemplate {
+  id          String   @id @default(uuid())
+  templateKey String   @unique
+  name        String
+  category    String   @default("Candidate")
+  subject     String
+  htmlBody    String   @db.Text
+  plainText   String?  @db.Text
+  variables   String[] @default([])
+  isActive    Boolean  @default(true)
+  isDefault   Boolean  @default(false)
+  updatedBy   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([templateKey, isActive])
+  @@map("email_templates")
+}
+
+// -------------------------------------------------------------
+// EMAIL LOGGING (RESEND AUDIT TRAIL)
+// -------------------------------------------------------------
+
+model EmailLog {
+  id        String      @id @default(uuid())
+  recipient String
+  subject   String
+  template  String
+  status    EmailStatus @default(SENT)
+  messageId String?
+  error     String?     @db.Text
+  payload   Json?
+  createdAt DateTime    @default(now())
+
+  @@index([recipient, template])
+  @@map("email_logs")
+}
+
+// -------------------------------------------------------------
+// AUDIT LOGS
+// -------------------------------------------------------------
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  userId     String?
+  user       User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action     String
+  module     String
+  entity     String
+  entityId   String
+  oldValue   Json?
+  newValue   Json?
+  ipAddress  String?
+  userAgent  String?
+  createdAt  DateTime @default(now())
+
+  @@index([entity, entityId])
+  @@map("audit_logs")
+}
