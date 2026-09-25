@@ -2,7 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import { prisma } from '../prisma/client';
 import { sendSuccess, sendError } from '../utils/response';
-import { sendInterviewScheduledEmail } from '../services/email.service';
+import { sendInterviewScheduledEmailAsync } from '../services/email.service';
 import { logAudit } from '../services/audit.service';
 
 const scheduleInterviewSchema = z.object({
@@ -51,7 +51,7 @@ export const scheduleInterview = async (req: Request, res: Response, next: NextF
     });
 
     // Send automatic email to candidate
-    await sendInterviewScheduledEmail(
+    sendInterviewScheduledEmailAsync(
       application.candidate.fullName,
       application.candidate.email,
       application.job.title,
