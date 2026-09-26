@@ -4,6 +4,117 @@ import { prisma } from '../prisma/client';
 import { cache } from '../utils/cache';
 import { sendSuccess, sendError } from '../utils/response';
 
+
+const parseExperienceRange = (value: unknown): { min: number; max: number } | null => {
+  if (typeof value !== 'string') return null;
+
+  const text = value.trim();
+
+  const range = text.match(
+    /(\d+(?:\.\d+)?)\s*(?:-|–|—|to)\s*(\d+(?:\.\d+)?)/i,
+  );
+
+  if (range) {
+    return {
+      min: Number(range[1]),
+      max: Number(range[2]),
+    };
+  }
+
+  const plus = text.match(/(\d+(?:\.\d+)?)\s*\+/i);
+
+  if (plus) {
+    const min = Number(plus[1]);
+    return {
+      min,
+      max: min,
+    };
+  }
+
+  if (/fresher/i.test(text)) {
+    return {
+      min: 0,
+      max: 0,
+    };
+  }
+
+  return null;
+};
+
+const parseSalaryRange = (value: unknown): { min: number; max: number } | null => {
+  if (typeof value !== 'string') return null;
+
+  const text = value.replace(/,/g, '').trim();
+
+  const numbers = text.match(/\d+(?:\.\d+)?/g);
+
+  if (!numbers || numbers.length < 2) return null;
+
+  const parsed = numbers
+    .slice(0, 2)
+    .map((number) => Number(number))
+    .filter((number) => Number.isFinite(number));
+
+  if (parsed.length < 2) return null;
+
+  return {
+    min: parsed[0],
+    max: parsed[1],
+  };
+};
+
+const normalizeJobNumericFields = (body: Record<string, any>) => {
+  const experienceFromText = parseExperienceRange(body.experienceText);
+  const salaryFromText = parseSalaryRange(body.salaryText);
+
+  const experienceMin =
+    body.experienceMin !== undefined &&
+    body.experienceMin !== null &&
+    body.experienceMin !== ''
+      ? Number(body.experienceMin)
+      : undefined;
+
+  const experienceMax =
+    body.experienceMax !== undefined &&
+    body.experienceMax !== null &&
+    body.experienceMax !== ''
+      ? Number(body.experienceMax)
+      : undefined;
+
+  const salaryMin =
+    body.salaryMin !== undefined &&
+    body.salaryMin !== null &&
+    body.salaryMin !== ''
+      ? Number(body.salaryMin)
+      : undefined;
+
+  const salaryMax =
+    body.salaryMax !== undefined &&
+    body.salaryMax !== null &&
+    body.salaryMax !== ''
+      ? Number(body.salaryMax)
+      : undefined;
+
+  return {
+    experienceMin:
+      experienceFromText && (!Number.isFinite(experienceMin) || experienceMin === 0)
+        ? experienceFromText.min
+        : experienceMin,
+    experienceMax:
+      experienceFromText && (!Number.isFinite(experienceMax) || experienceMax === 0)
+        ? experienceFromText.max
+        : experienceMax,
+    salaryMin:
+      salaryFromText && (!Number.isFinite(salaryMin) || salaryMin === 0)
+        ? salaryFromText.min
+        : salaryMin,
+    salaryMax:
+      salaryFromText && (!Number.isFinite(salaryMax) || salaryMax === 0)
+        ? salaryFromText.max
+        : salaryMax,
+  };
+};
+
 const createJobSchema = z.object({
   title: z.string().min(3),
   clientId: z.string().uuid(),
@@ -184,7 +295,24 @@ export const getJobBySlug = async (req: Request, res: Response, next: NextFuncti
 // 3. Create Job (Admin / Recruiter) - Invalidates Cache
 export const createJob = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const data = createJobSchema.parse(req.body);
+    const normalized = normalizeJobNumericFields(req.body || {});
+
+    const data = createJobSchema.parse({
+      ...req.body,
+      ...(normalized.experienceMin !== undefined
+        ? { experienceMin: normalized.experienceMin }
+        : {}),
+      ...(normalized.experienceMax !== undefined
+        ? { experienceMax: normalized.experienceMax }
+        : {}),
+      ...(normalized.salaryMin !== undefined
+        ? { salaryMin: normalized.salaryMin }
+        : {}),
+      ...(normalized.salaryMax !== undefined
+        ? { salaryMax: normalized.salaryMax }
+        : {}),
+    });
+
     const userId = req.user!.userId;
 
     const jobCode = await generateJobCode();
@@ -266,43 +394,25 @@ export const updateJob = async (req: Request, res: Response, next: NextFunction)
       updateData[field] = body[field];
     }
 
-    // Derive numeric experience/salary values from the editor's display text when
-    // the frontend does not provide usable numeric values.
-    const parseExperienceRange = (value: unknown): { min: number; max: number } | null => {
-      if (typeof value !== 'string') return null;
-      const match = value.match(/(\d+(?:\.\d+)?)\s*(?:-|–|—|to)\s*(\d+(?:\.\d+)?)/i);
-      if (!match) return null;
-      return { min: Number(match[1]), max: Number(match[2]) };
-    };
+    // Derive numeric experience/salary values from the editor's display text.
+    // This keeps the existing editor data intact while ensuring the database
+    // receives usable numeric values for Additional Information/public details.
+    const normalized = normalizeJobNumericFields(body);
 
-    const parseSalaryRange = (value: unknown): { min: number; max: number } | null => {
-      if (typeof value !== 'string') return null;
-      const numbers = value.match(/\d[\d,]*(?:\.\d+)?/g);
-      if (!numbers || numbers.length < 2) return null;
-      const parsed = numbers.slice(0, 2).map((n) => Number(n.replace(/,/g, '')));
-      if (parsed.some((n) => !Number.isFinite(n))) return null;
-      return { min: parsed[0], max: parsed[1] };
-    };
-
-    const experienceFromText = parseExperienceRange(body.experienceText);
-    const salaryFromText = parseSalaryRange(body.salaryText);
-
-    if (experienceFromText) {
-      if (body.experienceMin === undefined || Number(body.experienceMin) === 0) {
-        updateData.experienceMin = experienceFromText.min;
-      }
-      if (body.experienceMax === undefined || Number(body.experienceMax) === 0) {
-        updateData.experienceMax = experienceFromText.max;
-      }
+    if (normalized.experienceMin !== undefined && Number.isFinite(normalized.experienceMin)) {
+      updateData.experienceMin = normalized.experienceMin;
     }
 
-    if (salaryFromText) {
-      if (body.salaryMin === undefined || Number(body.salaryMin) === 0) {
-        updateData.salaryMin = salaryFromText.min;
-      }
-      if (body.salaryMax === undefined || Number(body.salaryMax) === 0) {
-        updateData.salaryMax = salaryFromText.max;
-      }
+    if (normalized.experienceMax !== undefined && Number.isFinite(normalized.experienceMax)) {
+      updateData.experienceMax = normalized.experienceMax;
+    }
+
+    if (normalized.salaryMin !== undefined && Number.isFinite(normalized.salaryMin)) {
+      updateData.salaryMin = normalized.salaryMin;
+    }
+
+    if (normalized.salaryMax !== undefined && Number.isFinite(normalized.salaryMax)) {
+      updateData.salaryMax = normalized.salaryMax;
     }
 
     // Frontend sends clientId; Prisma relation updates use `client`.
@@ -322,23 +432,6 @@ export const updateJob = async (req: Request, res: Response, next: NextFunction)
       updateData.client = {
         connect: { id: clientId },
       };
-    }
-
-    // Keep numeric database fields numeric even when the frontend sends strings.
-    if (body.experienceMin !== undefined) {
-      updateData.experienceMin = Number(body.experienceMin);
-    }
-
-    if (body.experienceMax !== undefined) {
-      updateData.experienceMax = Number(body.experienceMax);
-    }
-
-    if (body.salaryMin !== undefined && body.salaryMin !== null && body.salaryMin !== '') {
-      updateData.salaryMin = Number(body.salaryMin);
-    }
-
-    if (body.salaryMax !== undefined && body.salaryMax !== null && body.salaryMax !== '') {
-      updateData.salaryMax = Number(body.salaryMax);
     }
 
     if (body.vacancies !== undefined) {
