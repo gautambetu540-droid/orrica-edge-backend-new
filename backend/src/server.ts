@@ -6,6 +6,7 @@ import cookieParser from 'cookie-parser';
 import rateLimit from 'express-rate-limit';
 import { config } from './config';
 import { errorHandler } from './middlewares/error.middleware';
+import { prisma } from './prisma/client';
 
 // Routes
 import authRoutes from './routes/auth.routes';
@@ -95,6 +96,25 @@ app.use('*', (req, res) => {
 
 // Centralized Error Handler Middleware
 app.use(errorHandler);
+
+// Repair legacy client naming left by earlier DynamoDB migrations.
+// This only changes the exact legacy company name and keeps all client IDs/relations intact.
+const repairLegacyClientNames = async () => {
+  try {
+    const result = await prisma.client.updateMany({
+      where: { companyName: 'Legacy DynamoDB' },
+      data: { companyName: 'Orrica Edge' },
+    });
+
+    if (result.count > 0) {
+      console.log(`[DATA REPAIR] Renamed ${result.count} legacy client record(s) to Orrica Edge.`);
+    }
+  } catch (error) {
+    console.error('[DATA REPAIR] Legacy client name repair failed:', error);
+  }
+};
+
+repairLegacyClientNames();
 
 // Graceful Shutdown & Server Startup
 if (process.env.NODE_ENV !== 'test') {
