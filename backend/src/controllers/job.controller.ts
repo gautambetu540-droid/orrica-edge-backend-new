@@ -214,12 +214,94 @@ export const createJob = async (req: Request, res: Response, next: NextFunction)
 export const updateJob = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const { id } = req.params;
-    const updateData = req.body;
 
     const existing = await prisma.job.findUnique({ where: { id } });
     if (!existing) {
       sendError(res, 'Job not found', 404);
       return;
+    }
+
+    // The frontend editor sends UI-only fields. Never pass the complete
+    // frontend object directly to Prisma.
+    const body = req.body || {};
+    const updateData: any = {};
+
+    const scalarFields = [
+      'jobCode',
+      'title',
+      'slug',
+      'department',
+      'category',
+      'location',
+      'workMode',
+      'employmentType',
+      'experienceMin',
+      'experienceMax',
+      'salaryMin',
+      'salaryMax',
+      'salaryText',
+      'vacancies',
+      'skills',
+      'languages',
+      'contentHtml',
+      'eligibilityCriteria',
+      'requirements',
+      'applicationQuestions',
+      'status',
+      'views',
+      'publishedAt',
+      'metaTitle',
+      'metaDescription',
+    ];
+
+    for (const field of scalarFields) {
+      if (body[field] !== undefined) {
+        updateData[field] = body[field];
+      }
+    }
+
+    // Frontend sends clientId; Prisma relation updates use `client`.
+    if (body.clientId !== undefined && body.clientId !== null && body.clientId !== '') {
+      const clientId = String(body.clientId);
+
+      const client = await prisma.client.findUnique({
+        where: { id: clientId },
+        select: { id: true },
+      });
+
+      if (!client) {
+        sendError(res, 'Selected client not found', 400);
+        return;
+      }
+
+      updateData.client = {
+        connect: { id: clientId },
+      };
+    }
+
+    // Keep numeric database fields numeric even when the frontend sends strings.
+    if (body.experienceMin !== undefined) {
+      updateData.experienceMin = Number(body.experienceMin);
+    }
+
+    if (body.experienceMax !== undefined) {
+      updateData.experienceMax = Number(body.experienceMax);
+    }
+
+    if (body.salaryMin !== undefined && body.salaryMin !== null && body.salaryMin !== '') {
+      updateData.salaryMin = Number(body.salaryMin);
+    }
+
+    if (body.salaryMax !== undefined && body.salaryMax !== null && body.salaryMax !== '') {
+      updateData.salaryMax = Number(body.salaryMax);
+    }
+
+    if (body.vacancies !== undefined) {
+      updateData.vacancies = Number(body.vacancies);
+    }
+
+    if (body.status === 'PUBLISHED' && existing.status !== 'PUBLISHED' && body.publishedAt === undefined) {
+      updateData.publishedAt = new Date();
     }
 
     const updatedJob = await prisma.job.update({
@@ -228,7 +310,11 @@ export const updateJob = async (req: Request, res: Response, next: NextFunction)
     });
 
     cache.del('jobs:');
-    cache.del(`job:slug:${existing.slug}`);
+    cache.del('job:slug:' + existing.slug);
+
+    if (updatedJob.slug && updatedJob.slug !== existing.slug) {
+      cache.del('job:slug:' + updatedJob.slug);
+    }
 
     sendSuccess(res, { job: updatedJob }, 'Job updated successfully');
   } catch (err) {
