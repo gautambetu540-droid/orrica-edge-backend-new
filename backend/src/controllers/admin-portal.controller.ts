@@ -10,7 +10,43 @@ export const getAdminPortalData = async (req: Request, res: Response, next: Next
       blogPosts, inquiries, notifications, emailTemplates, auditLogs
     ] = await Promise.all([
       prisma.client.findMany({ orderBy: { createdAt: 'desc' } }),
-      prisma.candidate.findMany({ orderBy: { createdAt: 'desc' }, take: 1000 }),
+      prisma.candidate.findMany({
+        orderBy: { createdAt: 'desc' },
+        take: 1000,
+        include: {
+          applications: {
+            orderBy: { appliedAt: 'desc' },
+            select: {
+              id: true,
+              jobId: true,
+              stage: true,
+              appliedAt: true,
+              updatedAt: true,
+              job: {
+                select: {
+                  id: true,
+                  title: true,
+                  jobCode: true,
+                  department: true,
+                },
+              },
+              recruiter: {
+                select: {
+                  id: true,
+                  fullName: true,
+                  email: true,
+                },
+              },
+            },
+          },
+          _count: {
+            select: {
+              applications: true,
+              assessmentAttempts: true,
+            },
+          },
+        },
+      }),
       prisma.job.findMany({ include: { client: true, createdBy: { select: { id: true, fullName: true, email: true, role: true } } }, orderBy: { createdAt: 'desc' }, take: 1000 }),
       prisma.user.findMany({ where: { role: { in: ['RECRUITER', 'ADMIN', 'SUPER_ADMIN'] } }, select: { id: true, email: true, fullName: true, role: true, phone: true, isActive: true, createdAt: true }, orderBy: { createdAt: 'desc' } }),
       prisma.interview.findMany({ orderBy: { scheduledAt: 'desc' }, take: 500 }),
