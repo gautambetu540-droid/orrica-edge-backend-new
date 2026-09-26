@@ -67,6 +67,7 @@ export const getCandidates = async (req: Request, res: Response, next: NextFunct
         orderBy: { createdAt: 'desc' },
         include: {
           applications: {
+            orderBy: { appliedAt: 'desc' },
             include: {
               job: { select: { id: true, title: true, jobCode: true } },
             },
