@@ -108,6 +108,7 @@ export const getJobs = async (req: Request, res: Response, next: NextFunction): 
           salaryText: true,
           vacancies: true,
           skills: true,
+          contentHtml: true,
           status: true,
           views: true,
           publishedAt: true,
