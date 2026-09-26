@@ -287,6 +287,17 @@ export async function runDynamoMigration(apply = false) {
     });
   }
 
+  // Repair any older client record created with the legacy display name.
+  if (APPLY) {
+    const repaired = await prisma.client.updateMany({
+      where: { companyName: 'Legacy DynamoDB' },
+      data: { companyName: 'Orrica Edge' },
+    });
+    if (repaired.count > 0) {
+      console.log(`[DDB MIGRATION] Renamed ${repaired.count} legacy client record(s) to Orrica Edge.`);
+    }
+  }
+
   const recruiterUserIdByLegacyId = new Map<string, string>();
   for (const r of recruiters) {
     recruiterUserIdByLegacyId.set(str(r.recruiterId), uuidFrom(`ddb-recruiter:${str(r.recruiterId)}`));
