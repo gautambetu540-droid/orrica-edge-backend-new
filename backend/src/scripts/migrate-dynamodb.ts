@@ -151,22 +151,6 @@ export async function runDynamoMigration(apply = false) {
   };
 
   console.log(JSON.stringify(summary, null, 2));
-    scanned: {
-      candidatesTable: candidateRows.length,
-      recruitersTable: recruiterRows.length,
-      questionsTable: questionRows.length,
-      assessmentsTable: assessmentRows.length,
-      jobsTable: jobRows.length,
-    },
-    classified: {
-      candidates: candidates.length,
-      recruiters: recruiters.length,
-      questions: questionRows.length,
-      assessments: assessmentRows.length,
-      jobs: jobs.length,
-      unclassifiedCandidateTableRows: candidateRows.length - candidates.length,
-    },
-  }, null, 2));
 
   if (!APPLY) {
     console.log('\nDRY-RUN ONLY. Review counts above. Re-run with --apply only after verification.');
