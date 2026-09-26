@@ -82,6 +82,25 @@ function mapStatus(v: string): CandidateStatus {
   return (Object.values(CandidateStatus) as string[]).includes(v) ? v as CandidateStatus : CandidateStatus.NEW;
 }
 
+function sanitizeLegacyValue(value: any, depth = 0): any {
+  if (depth > 3) return '[TRUNCATED]';
+  if (Array.isArray(value)) return value.slice(0, 20).map(v => sanitizeLegacyValue(v, depth + 1));
+  if (value && typeof value === 'object') {
+    const out: AnyRecord = {};
+    for (const [key, v] of Object.entries(value)) {
+      const lower = key.toLowerCase();
+      if (lower.includes('password') || lower.includes('token') || lower.includes('secret') || lower.includes('accesskey')) {
+        out[key] = '[REDACTED]';
+      } else {
+        out[key] = sanitizeLegacyValue(v, depth + 1);
+      }
+    }
+    return out;
+  }
+  if (typeof value === 'string' && value.length > 1000) return value.slice(0, 1000) + '…';
+  return value;
+}
+
 function legacyType(x: AnyRecord): string {
   const raw = str(x.candidateId || x.jobId || x.assessmentId || x.interviewId || x.resultId || x.logId || x.id || x.pk || x.itemType || 'UNKNOWN');
   const upper = raw.toUpperCase();
@@ -128,6 +147,15 @@ export async function runDynamoMigration(apply = false) {
     return acc;
   }, {});
 
+  const inspectTypes = new Set(['JOB', 'INTERVIEW', 'RESULT', 'ASSESSMENT', 'QUESTION_BANK', 'EMAIL_TEMPLATE', 'CATIQ_ATTEMPT', 'PROFILE', 'OTHER']);
+  const legacyRecordSamples = candidateRows.reduce<Record<string, AnyRecord[]>>((acc, row) => {
+    const type = legacyType(row);
+    if (!inspectTypes.has(type)) return acc;
+    if (!acc[type]) acc[type] = [];
+    if (acc[type].length < 2) acc[type].push(sanitizeLegacyValue(row));
+    return acc;
+  }, {});
+
   const summary = {
     scanned: {
       candidatesTable: candidateRows.length,
@@ -147,6 +175,7 @@ export async function runDynamoMigration(apply = false) {
     legacyCandidateTable: {
       typeCounts: legacyTypeCounts,
       sampleIds: legacyTypeSamples,
+      recordSamples: legacyRecordSamples,
     },
   };
 
