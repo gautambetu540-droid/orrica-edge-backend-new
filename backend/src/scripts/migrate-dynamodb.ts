@@ -82,6 +82,21 @@ function mapStatus(v: string): CandidateStatus {
   return (Object.values(CandidateStatus) as string[]).includes(v) ? v as CandidateStatus : CandidateStatus.NEW;
 }
 
+function legacyType(x: AnyRecord): string {
+  const raw = str(x.candidateId || x.jobId || x.assessmentId || x.interviewId || x.resultId || x.logId || x.id || x.pk || x.itemType || 'UNKNOWN');
+  const upper = raw.toUpperCase();
+  if (upper.startsWith('JOB-')) return 'JOB';
+  if (upper.startsWith('ASM-')) return 'ASSESSMENT';
+  if (upper.startsWith('INT-')) return 'INTERVIEW';
+  if (upper.startsWith('LOG-')) return 'LOG';
+  if (upper.startsWith('CATIQ-')) return 'QUESTION_BANK';
+  if (upper.startsWith('EMAILTEMPLATE-')) return 'EMAIL_TEMPLATE';
+  if (upper.startsWith('RESULT-')) return 'RESULT';
+  if (upper.includes('COUNTER')) return 'SYSTEM';
+  if (looksLikeCandidate(x)) return 'CANDIDATE';
+  return str(x.itemType || x.action || 'OTHER').toUpperCase() || 'OTHER';
+}
+
 export async function runDynamoMigration(apply = false) {
   const APPLY = apply;
   console.log(`DynamoDB → PostgreSQL migration | mode=${APPLY ? 'APPLY' : 'DRY-RUN'}`);
@@ -99,7 +114,43 @@ export async function runDynamoMigration(apply = false) {
   const jobs = jobRows.filter(x => x.jobId || x.id || x.jobCode || x.title);
   const recruiters = recruiterRows.filter(x => x.recruiterId && x.email && !str(x.recruiterId).includes('COUNTER'));
 
-  console.log(JSON.stringify({
+  const legacyTypeCounts = candidateRows.reduce<Record<string, number>>((acc, row) => {
+    const type = legacyType(row);
+    acc[type] = (acc[type] || 0) + 1;
+    return acc;
+  }, {});
+
+  const legacyTypeSamples = candidateRows.reduce<Record<string, string[]>>((acc, row) => {
+    const type = legacyType(row);
+    if (!acc[type]) acc[type] = [];
+    const id = str(row.candidateId || row.jobId || row.assessmentId || row.interviewId || row.resultId || row.logId || row.id || row.pk);
+    if (id && acc[type].length < 10 && !acc[type].includes(id)) acc[type].push(id);
+    return acc;
+  }, {});
+
+  const summary = {
+    scanned: {
+      candidatesTable: candidateRows.length,
+      recruitersTable: recruiterRows.length,
+      questionsTable: questionRows.length,
+      assessmentsTable: assessmentRows.length,
+      jobsTable: jobRows.length,
+    },
+    classified: {
+      candidates: candidates.length,
+      recruiters: recruiters.length,
+      questions: questionRows.length,
+      assessments: assessmentRows.length,
+      jobs: jobs.length,
+      unclassifiedCandidateTableRows: candidateRows.length - candidates.length,
+    },
+    legacyCandidateTable: {
+      typeCounts: legacyTypeCounts,
+      sampleIds: legacyTypeSamples,
+    },
+  };
+
+  console.log(JSON.stringify(summary, null, 2));
     scanned: {
       candidatesTable: candidateRows.length,
       recruitersTable: recruiterRows.length,
@@ -119,7 +170,7 @@ export async function runDynamoMigration(apply = false) {
 
   if (!APPLY) {
     console.log('\nDRY-RUN ONLY. Review counts above. Re-run with --apply only after verification.');
-    return;
+    return summary;
   }
 
   // Import recruiters as User records, preserving an existing bcrypt passwordHash when present.
@@ -257,6 +308,7 @@ export async function runDynamoMigration(apply = false) {
   console.log(`Imported candidates: ${importedCandidates}`);
   console.log(`Jobs imported: 0 from ${TABLES.jobs} unless that table contains actual job records.`);
   console.log('Recruiters, assessments and questions were imported through the structured mappings above.');
+  return summary;
 }
 
 if (process.argv[1] && process.argv[1].endsWith('migrate-dynamodb.ts')) {
