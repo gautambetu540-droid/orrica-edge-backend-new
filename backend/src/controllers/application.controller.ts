@@ -31,6 +31,9 @@ const applySchema = z.object({
   currentCtc: z.coerce.number().optional(),
   expectedCtc: z.coerce.number().optional(),
   noticePeriodDays: z.coerce.number().optional(),
+  education: z.string().optional(),
+  source: z.string().optional(),
+  notes: z.string().optional(),
 });
 
 // 1. Submit Application with Resume Upload (High Performance & Non-blocking Email)
@@ -103,6 +106,9 @@ export const applyForJob = async (req: Request, res: Response, next: NextFunctio
           currentCtc: data.currentCtc,
           expectedCtc: data.expectedCtc,
           noticePeriodDays: data.noticePeriodDays,
+          education: data.education,
+          source: data.source || 'Website Direct',
+          notes: data.notes,
         },
         create: {
           fullName: data.fullName,
@@ -118,6 +124,9 @@ export const applyForJob = async (req: Request, res: Response, next: NextFunctio
           currentCtc: data.currentCtc,
           expectedCtc: data.expectedCtc,
           noticePeriodDays: data.noticePeriodDays,
+          education: data.education,
+          source: data.source || 'Website Direct',
+          notes: data.notes,
         },
       });
 
