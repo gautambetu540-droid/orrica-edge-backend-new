@@ -9,7 +9,7 @@ const registerSchema = z.object({
   email: z.string().email(),
   password: z.string().min(6, 'Password must be at least 6 characters'),
   fullName: z.string().min(2, 'Full name is required'),
-  role: z.enum(['SUPER_ADMIN', 'ADMIN', 'RECRUITER', 'CLIENT', 'CANDIDATE']).optional(),
+  role: z.enum(['CANDIDATE']).optional(),
   phone: z.string().optional(),
 });
 
@@ -36,7 +36,7 @@ export const register = async (req: Request, res: Response, next: NextFunction):
         email: data.email,
         passwordHash,
         fullName: data.fullName,
-        role: data.role || 'CANDIDATE',
+        role: 'CANDIDATE',
         phone: data.phone,
       },
       select: {
