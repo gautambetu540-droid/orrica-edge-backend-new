@@ -266,6 +266,45 @@ export const updateJob = async (req: Request, res: Response, next: NextFunction)
       updateData[field] = body[field];
     }
 
+    // Derive numeric experience/salary values from the editor's display text when
+    // the frontend does not provide usable numeric values.
+    const parseExperienceRange = (value: unknown): { min: number; max: number } | null => {
+      if (typeof value !== 'string') return null;
+      const match = value.match(/(\d+(?:\.\d+)?)\s*(?:-|–|—|to)\s*(\d+(?:\.\d+)?)/i);
+      if (!match) return null;
+      return { min: Number(match[1]), max: Number(match[2]) };
+    };
+
+    const parseSalaryRange = (value: unknown): { min: number; max: number } | null => {
+      if (typeof value !== 'string') return null;
+      const numbers = value.match(/\d[\d,]*(?:\.\d+)?/g);
+      if (!numbers || numbers.length < 2) return null;
+      const parsed = numbers.slice(0, 2).map((n) => Number(n.replace(/,/g, '')));
+      if (parsed.some((n) => !Number.isFinite(n))) return null;
+      return { min: parsed[0], max: parsed[1] };
+    };
+
+    const experienceFromText = parseExperienceRange(body.experienceText);
+    const salaryFromText = parseSalaryRange(body.salaryText);
+
+    if (experienceFromText) {
+      if (body.experienceMin === undefined || Number(body.experienceMin) === 0) {
+        updateData.experienceMin = experienceFromText.min;
+      }
+      if (body.experienceMax === undefined || Number(body.experienceMax) === 0) {
+        updateData.experienceMax = experienceFromText.max;
+      }
+    }
+
+    if (salaryFromText) {
+      if (body.salaryMin === undefined || Number(body.salaryMin) === 0) {
+        updateData.salaryMin = salaryFromText.min;
+      }
+      if (body.salaryMax === undefined || Number(body.salaryMax) === 0) {
+        updateData.salaryMax = salaryFromText.max;
+      }
+    }
+
     // Frontend sends clientId; Prisma relation updates use `client`.
     if (body.clientId !== undefined && body.clientId !== null && body.clientId !== '') {
       const clientId = String(body.clientId);
