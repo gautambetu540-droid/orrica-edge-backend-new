@@ -268,7 +268,7 @@ export async function runDynamoMigration(apply = false) {
       update: {},
       create: {
         id: legacyClientId,
-        companyName: 'Legacy DynamoDB',
+        companyName: 'Orrica Edge',
         industry: 'Legacy Recruitment Data',
         contactPerson: 'Orrica Edge',
         contactEmail: 'no-reply@orricaedge.com',
