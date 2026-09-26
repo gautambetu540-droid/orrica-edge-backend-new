@@ -260,6 +260,30 @@ export async function runDynamoMigration(apply = false) {
     });
   }
 
+  // Ensure a deterministic legacy client exists because the current Job schema requires clientId.
+  const legacyClientId = uuidFrom('ddb-client:legacy');
+  if (APPLY) {
+    await prisma.client.upsert({
+      where: { id: legacyClientId },
+      update: {},
+      create: {
+        id: legacyClientId,
+        companyName: 'Legacy DynamoDB',
+        industry: 'Legacy Recruitment Data',
+        contactPerson: 'Orrica Edge',
+        contactEmail: 'no-reply@orricaedge.com',
+        contactPhone: 'N/A',
+        status: 'ACTIVE',
+        notes: 'System-created client used to preserve legacy DynamoDB job records during migration.',
+      },
+    });
+  }
+
+  const recruiterUserIdByLegacyId = new Map<string, string>();
+  for (const r of recruiters) {
+    recruiterUserIdByLegacyId.set(str(r.recruiterId), uuidFrom(`ddb-recruiter:${str(r.recruiterId)}`));
+  }
+
   // Import candidates conservatively. We never overwrite an existing candidate's identity fields.
   let importedCandidates = 0;
   for (const raw of candidates) {
@@ -316,10 +340,98 @@ export async function runDynamoMigration(apply = false) {
     importedCandidates++;
   }
 
-  // Jobs are imported only from the dedicated legacy jobs table.
-  // We intentionally do NOT reinterpret mixed JOB-* records from orrica_candidates as jobs.
+  // Import jobs from the mixed legacy candidate table as well as the dedicated jobs table.
+  // The legacy table currently contains the real JOB-* records while orrica_jobs is empty.
+  const legacyJobRows = candidateRows.filter(x => legacyType(x) === 'JOB');
+  const allJobRows = [...jobs, ...legacyJobRows];
+  const jobIdByLegacyId = new Map<string, string>();
+  let importedJobs = 0;
+
+  const superAdmin = await prisma.user.findFirst({
+    where: { role: Role.SUPER_ADMIN },
+    orderBy: { createdAt: 'asc' },
+  });
+
+  for (const raw of allJobRows) {
+    const legacyId = str(raw.jobId || raw.id || raw.jobCode);
+    const title = str(raw.title, 'Legacy Job');
+    if (!legacyId) continue;
+
+    const jobId = uuidFrom(`ddb-job:${legacyId}`);
+    const recruiterId = str(raw.recruiterId);
+    const createdById = recruiterUserIdByLegacyId.get(recruiterId) || superAdmin?.id;
+    if (!createdById) {
+      console.warn(`SKIP job ${legacyId}: no creator user available`);
+      continue;
+    }
+
+    const publishedAt = raw.publishedAt ? date(raw.publishedAt) : null;
+    const rawEmployment = str(raw.employmentType, 'Full-time').toUpperCase().replace(/[- ]/g, '_');
+    const employmentType = rawEmployment === 'PART_TIME' ? EmploymentType.PART_TIME
+      : rawEmployment === 'CONTRACT' ? EmploymentType.CONTRACT
+      : rawEmployment === 'INTERNSHIP' ? EmploymentType.INTERNSHIP
+      : EmploymentType.FULL_TIME;
+
+    const contentHtml = str(raw.description || raw.contentHtml || raw.content || raw.requirements || '', '');
+    const location = str(raw.location || raw.jobLocation, 'India');
+    const category = str(raw.category, 'General');
+    const salaryMin = raw.salaryMin !== undefined && raw.salaryMin !== null ? Number(String(raw.salaryMin).replace(/[^0-9.]/g, '')) || null : null;
+    const salaryMax = raw.salaryMax !== undefined && raw.salaryMax !== null ? Number(String(raw.salaryMax).replace(/[^0-9.]/g, '')) || null : null;
+
+    if (APPLY) {
+      await prisma.job.upsert({
+        where: { id: jobId },
+        update: {
+          title,
+          category,
+          location,
+          employmentType,
+          salaryMin,
+          salaryMax,
+          salaryText: salaryMin || salaryMax ? `Rs. ${salaryMin ?? ''} - Rs. ${salaryMax ?? ''}` : str(raw.salaryMin || raw.salaryMax || ''),
+          skills: arr(raw.skills),
+          contentHtml,
+          status: publishedAt ? JobStatus.PUBLISHED : JobStatus.DRAFT,
+          publishedAt,
+          updatedAt: date(raw.updatedAt, publishedAt || date(raw.createdAt)),
+        },
+        create: {
+          id: jobId,
+          jobCode: legacyId,
+          title,
+          slug: `${slugify(title)}-${legacyId.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
+          clientId: legacyClientId,
+          department: category,
+          category,
+          location,
+          workMode: WorkMode.WORK_FROM_OFFICE,
+          employmentType,
+          experienceMin: 0,
+          experienceMax: 3,
+          salaryMin,
+          salaryMax,
+          salaryText: salaryMin || salaryMax ? `Rs. ${salaryMin ?? ''} - Rs. ${salaryMax ?? ''}` : str(raw.salaryMin || raw.salaryMax || ''),
+          vacancies: Number(raw.vacancies || 1) || 1,
+          skills: arr(raw.skills),
+          languages: arr(raw.languages).length ? arr(raw.languages) : ['English', 'Hindi'],
+          contentHtml,
+          eligibilityCriteria: raw.eligibilityCriteria || null,
+          requirements: raw.requirements || null,
+          applicationQuestions: raw.applicationQuestions || null,
+          status: publishedAt ? JobStatus.PUBLISHED : JobStatus.DRAFT,
+          publishedAt,
+          createdById,
+          createdAt: date(raw.createdAt, publishedAt || new Date()),
+          updatedAt: date(raw.updatedAt, date(raw.createdAt, publishedAt || new Date())),
+        },
+      });
+    }
+    jobIdByLegacyId.set(legacyId, jobId);
+    importedJobs++;
+  }
+
   console.log(`Imported candidates: ${importedCandidates}`);
-  console.log(`Jobs imported: 0 from ${TABLES.jobs} unless that table contains actual job records.`);
+  console.log(`Jobs detected from DynamoDB: ${allJobRows.length}; jobs mapped: ${importedJobs}`);
   console.log('Recruiters, assessments and questions were imported through the structured mappings above.');
   return summary;
 }
