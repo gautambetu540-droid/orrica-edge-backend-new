@@ -166,6 +166,7 @@ export const applyForJob = async (req: Request, res: Response, next: NextFunctio
         applicationId: application.id,
         candidateId: candidate.id,
         jobTitle: job.title,
+        appliedAt: application.appliedAt,
         atsScore: atsMatch.score,
         matchReason: atsMatch.matchReason,
       },
