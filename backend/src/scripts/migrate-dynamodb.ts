@@ -6,7 +6,6 @@ import crypto from 'node:crypto';
 const prisma = new PrismaClient();
 const dynamo = new DynamoDBClient({ region: process.env.AWS_REGION || 'ap-south-1' });
 
-const APPLY = process.argv.includes('--apply');
 const TABLES = {
   candidates: process.env.DDB_CANDIDATES_TABLE || 'orrica_candidates',
   recruiters: process.env.DDB_RECRUITERS_TABLE || 'orrica_recruiters',
@@ -83,7 +82,8 @@ function mapStatus(v: string): CandidateStatus {
   return (Object.values(CandidateStatus) as string[]).includes(v) ? v as CandidateStatus : CandidateStatus.NEW;
 }
 
-async function main() {
+export async function runDynamoMigration(apply = false) {
+  const APPLY = apply;
   console.log(`DynamoDB → PostgreSQL migration | mode=${APPLY ? 'APPLY' : 'DRY-RUN'}`);
   console.log('No DynamoDB records are modified or deleted.');
 
@@ -259,11 +259,13 @@ async function main() {
   console.log('Recruiters, assessments and questions were imported through the structured mappings above.');
 }
 
-main()
-  .catch(err => {
-    console.error('Migration failed:', err);
-    process.exitCode = 1;
-  })
-  .finally(async () => {
-    await prisma.$disconnect();
-  });
+if (process.argv[1] && process.argv[1].endsWith('migrate-dynamodb.ts')) {
+  runDynamoMigration(process.argv.includes('--apply'))
+    .catch(err => {
+      console.error('Migration failed:', err);
+      process.exitCode = 1;
+    })
+    .finally(async () => {
+      await prisma.$disconnect();
+    });
+}
