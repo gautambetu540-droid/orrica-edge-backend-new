@@ -255,9 +255,15 @@ export const updateJob = async (req: Request, res: Response, next: NextFunction)
     ];
 
     for (const field of scalarFields) {
-      if (body[field] !== undefined) {
-        updateData[field] = body[field];
+      if (body[field] === undefined) continue;
+
+      // requirements is a String in Prisma. The frontend editor may send
+      // its UI representation as an array, so ignore that invalid UI value.
+      if (field === 'requirements' && typeof body[field] !== 'string' && body[field] !== null) {
+        continue;
       }
+
+      updateData[field] = body[field];
     }
 
     // Frontend sends clientId; Prisma relation updates use `client`.
