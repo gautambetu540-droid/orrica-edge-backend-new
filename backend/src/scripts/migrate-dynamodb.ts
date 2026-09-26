@@ -265,7 +265,15 @@ export async function runDynamoMigration(apply = false) {
   if (APPLY) {
     await prisma.client.upsert({
       where: { id: legacyClientId },
-      update: {},
+      update: {
+        companyName: 'Orrica Edge',
+        industry: 'Legacy Recruitment Data',
+        contactPerson: 'Orrica Edge',
+        contactEmail: 'no-reply@orricaedge.com',
+        contactPhone: 'N/A',
+        status: 'ACTIVE',
+        notes: 'System-created client used to preserve legacy DynamoDB job records during migration.',
+      },
       create: {
         id: legacyClientId,
         companyName: 'Orrica Edge',
