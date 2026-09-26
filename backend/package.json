@@ -12,7 +12,8 @@
     "prisma:migrate:deploy": "prisma migrate deploy",
     "prisma:seed": "tsx src/prisma/seed.ts",
     "prisma:studio": "prisma studio",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "migrate:dynamodb": "tsx src/scripts/migrate-dynamodb.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.712.0",
