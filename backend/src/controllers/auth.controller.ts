@@ -52,7 +52,7 @@ export const register = async (req: Request, res: Response, next: NextFunction):
     const accessToken = jwt.sign(
       { userId: newUser.id, email: newUser.email, role: newUser.role },
       config.jwt.accessSecret,
-      { expiresIn: '1d' }
+      { expiresIn: '1h' }
     );
 
     res.status(201).json({
@@ -129,6 +129,37 @@ export const getMe = async (req: Request, res: Response, next: NextFunction): Pr
     }
 
     res.json({ success: true, data: { user } });
+  } catch (err) {
+    next(err);
+  }
+};
+
+
+export const keepAlive = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) {
+      res.status(401).json({ success: false, message: 'Unauthorized' });
+      return;
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, email: true, role: true, isActive: true },
+    });
+
+    if (!user || !user.isActive) {
+      res.status(401).json({ success: false, message: 'Session inactive' });
+      return;
+    }
+
+    const token = jwt.sign(
+      { userId: user.id, email: user.email, role: user.role },
+      config.jwt.accessSecret,
+      { expiresIn: '1h' }
+    );
+
+    res.json({ success: true, data: { token } });
   } catch (err) {
     next(err);
   }
