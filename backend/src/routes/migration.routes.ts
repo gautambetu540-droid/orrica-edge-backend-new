@@ -26,13 +26,14 @@ router.post(
 
     try {
       console.log(`[DDB MIGRATION] Started by ${req.user?.email}; apply=${apply}`);
-      await runDynamoMigration(apply);
+      const summary = await runDynamoMigration(apply);
       res.json({
         success: true,
         mode: apply ? 'APPLY' : 'DRY-RUN',
         message: apply
           ? 'DynamoDB migration completed successfully.'
           : 'DynamoDB dry-run completed successfully. No PostgreSQL writes were performed.',
+        summary,
       });
     } catch (error) {
       next(error);
