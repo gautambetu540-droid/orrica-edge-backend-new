@@ -18,6 +18,7 @@ import interviewRoutes from './routes/interview.routes';
 import dashboardRoutes from './routes/dashboard.routes';
 import seoRoutes from './routes/seo.routes';
 import templateRoutes from './routes/template.routes';
+import migrationRoutes from './routes/migration.routes';
 import swaggerRouter from './swagger/swagger';
 
 const app = express();
@@ -78,6 +79,7 @@ app.use('/api/v1/interviews', interviewRoutes);
 app.use('/api/v1/dashboard', dashboardRoutes);
 app.use('/api/v1/seo', seoRoutes);
 app.use('/api/v1/email-templates', templateRoutes);
+app.use('/api/v1/admin/migrate', migrationRoutes);
 
 // 404 Route Handler
 app.use('*', (req, res) => {
