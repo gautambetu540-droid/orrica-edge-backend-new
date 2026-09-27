@@ -26,6 +26,10 @@ import swaggerRouter from './swagger/swagger';
 
 const app = express();
 
+// Render runs the service behind a reverse proxy and forwards the client IP.
+// Trust the first proxy hop so express-rate-limit can safely use X-Forwarded-For.
+app.set('trust proxy', 1);
+
 // Security Middlewares
 app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
 app.use(cookieParser());
