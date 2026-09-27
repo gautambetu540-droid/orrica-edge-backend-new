@@ -577,3 +577,38 @@ model AuditLog {
   @@index([entity, entityId])
   @@map("audit_logs")
 }
+// -------------------------------------------------------------
+// RECRUITER APPLICATIONS
+// -------------------------------------------------------------
+
+enum RecruiterApplicationStatus {
+  NEW
+  REVIEWING
+  CONTACTED
+  APPROVED
+  REJECTED
+}
+
+model RecruiterApplication {
+  id              String                     @id @default(uuid())
+  fullName        String
+  email           String
+  phone           String
+  location        String
+  experienceYears Decimal                    @default(0) @db.Decimal(4, 1)
+  primaryDomain   String?
+  currentCompany  String?
+  linkedinUrl     String?
+  message         String?                    @db.Text
+  resumeUrl       String?
+  resumeFileName  String?
+  status          RecruiterApplicationStatus @default(NEW)
+  adminNotes      String?                    @db.Text
+  createdAt       DateTime                   @default(now())
+  updatedAt       DateTime                   @updatedAt
+
+  @@index([email])
+  @@index([status])
+  @@index([createdAt])
+  @@map("recruiter_applications")
+}
