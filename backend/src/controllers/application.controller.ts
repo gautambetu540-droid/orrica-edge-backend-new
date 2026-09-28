@@ -91,6 +91,29 @@ export const applyForJob = async (req: Request, res: Response, next: NextFunctio
     // Atomic transaction for Candidate upsert and Application creation
     const { candidate, application } = await prisma.$transaction(async (tx) => {
       // Upsert candidate
+      const existingCandidate = await tx.candidate.findUnique({
+        where: { email: data.email },
+        select: { candidateCode: true },
+      });
+
+      const nextCode = async () => {
+        if (existingCandidate?.candidateCode) return existingCandidate.candidateCode;
+
+        const rows = await tx.candidate.findMany({
+          select: { candidateCode: true },
+          orderBy: { candidateCode: 'desc' },
+          take: 1,
+        });
+
+        const current = rows[0]?.candidateCode
+          ? Number(rows[0].candidateCode.replace('OE-CAND-', ''))
+          : 0;
+
+        return `OE-CAND-${String((Number.isFinite(current) ? current : 0) + 1).padStart(4, '0')}`;
+      };
+
+      const generatedCandidateCode = await nextCode();
+
       const cand = await tx.candidate.upsert({
         where: { email: data.email },
         update: {
@@ -111,6 +134,7 @@ export const applyForJob = async (req: Request, res: Response, next: NextFunctio
           notes: data.notes,
         },
         create: {
+          candidateCode: generatedCandidateCode,
           fullName: data.fullName,
           email: data.email,
           phone: data.phone,
