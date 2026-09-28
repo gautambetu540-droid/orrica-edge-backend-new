@@ -288,6 +288,7 @@ model Candidate {
   payouts            Payout[]
   replacementCases   ReplacementCase[] @relation("PrimaryCandidate")
   replacedByCases    ReplacementCase[] @relation("ReplacementCandidate")
+  universalFormSubmissions UniversalFormSubmission[]
 
   @@index([status, email, phone])
   @@map("candidates")
@@ -612,4 +613,42 @@ model RecruiterApplication {
   @@index([status])
   @@index([createdAt])
   @@map("recruiter_applications")
+}
+
+// -------------------------------------------------------------
+// UNIVERSAL CANDIDATE FORMS
+// -------------------------------------------------------------
+
+model UniversalForm {
+  id             String                    @id @default(uuid())
+  name           String
+  slug           String                    @unique
+  description    String?                   @db.Text
+  fields         Json
+  successMessage String?                   @db.Text
+  isActive       Boolean                   @default(true)
+  createdById    String?
+  createdAt      DateTime                  @default(now())
+  updatedAt      DateTime                  @updatedAt
+
+  submissions    UniversalFormSubmission[]
+
+  @@index([isActive])
+  @@index([createdAt])
+  @@map("universal_forms")
+}
+
+model UniversalFormSubmission {
+  id             String        @id @default(uuid())
+  formId         String
+  form           UniversalForm @relation(fields: [formId], references: [id], onDelete: Cascade)
+  candidateId    String?
+  payload        Json
+  resumeUrl      String?
+  resumeFileName String?
+  createdAt      DateTime      @default(now())
+
+  @@index([formId, createdAt])
+  @@index([candidateId])
+  @@map("universal_form_submissions")
 }
