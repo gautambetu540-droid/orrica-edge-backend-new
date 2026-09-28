@@ -47,3 +47,10 @@ ALTER TABLE "universal_form_submissions"
 ADD CONSTRAINT "universal_form_submissions_formId_fkey"
 FOREIGN KEY ("formId") REFERENCES "universal_forms"("id")
 ON DELETE CASCADE ON UPDATE CASCADE;
+
+
+-- Add candidate relation so a candidate can be traced back to Universal Form submissions.
+ALTER TABLE "universal_form_submissions"
+ADD CONSTRAINT "universal_form_submissions_candidateId_fkey"
+FOREIGN KEY ("candidateId") REFERENCES "candidates"("id")
+ON DELETE SET NULL ON UPDATE CASCADE;
