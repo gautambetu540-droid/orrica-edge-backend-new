@@ -258,6 +258,7 @@ model Job {
 
 model Candidate {
   id                 String          @id @default(uuid())
+  candidateCode      String          @unique
   userId             String?         @unique
   user               User?           @relation(fields: [userId], references: [id], onDelete: SetNull)
   fullName           String
