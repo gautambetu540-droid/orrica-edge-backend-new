@@ -40,8 +40,8 @@ export const getCandidates = async (req: Request, res: Response, next: NextFunct
   try {
     const { search, status, location, skill, page = '1', limit = '20' } = req.query;
 
-    const pageNum = Math.max(1, parseInt(page as string, 10));
-    const limitNum = Math.min(100, Math.max(1, parseInt(limit as string, 10)));
+    const pageNum = Math.max(1, parseInt(page as string, 10) || 1);
+    const limitNum = Math.min(100, Math.max(1, parseInt(limit as string, 10) || 100));
     const skip = (pageNum - 1) * limitNum;
 
     const where: any = {};
@@ -56,6 +56,7 @@ export const getCandidates = async (req: Request, res: Response, next: NextFunct
         { phone: { contains: search as string, mode: 'insensitive' } },
         { currentCompany: { contains: search as string, mode: 'insensitive' } },
         { currentDesignation: { contains: search as string, mode: 'insensitive' } },
+        { candidateCode: { contains: search as string, mode: 'insensitive' } },
       ];
     }
 
@@ -137,6 +138,33 @@ const getNextCandidateCode = async (): Promise<string> => {
 };
 
 // 3. Update Candidate Profile & Status
+export const deleteCandidate = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const existing = await prisma.candidate.findUnique({
+      where: { id },
+      select: { id: true, candidateCode: true, fullName: true, email: true },
+    });
+    if (!existing) {
+      sendError(res, 'Candidate not found', 404);
+      return;
+    }
+    await prisma.candidate.delete({ where: { id } });
+    await logAudit({
+      req,
+      action: 'DELETE_CANDIDATE',
+      module: 'CANDIDATES',
+      entity: 'Candidate',
+      entityId: id,
+      oldValue: existing,
+      newValue: null,
+    });
+    sendSuccess(res, { candidateId: id, candidateCode: existing.candidateCode }, 'Candidate deleted successfully');
+  } catch (err) {
+    next(err);
+  }
+};
+
 export const deleteCandidate = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const { id } = req.params;
