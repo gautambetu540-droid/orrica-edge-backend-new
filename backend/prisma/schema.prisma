@@ -643,6 +643,7 @@ model UniversalFormSubmission {
   formId         String
   form           UniversalForm @relation(fields: [formId], references: [id], onDelete: Cascade)
   candidateId    String?
+  candidate      Candidate?    @relation(fields: [candidateId], references: [id], onDelete: SetNull)
   payload        Json
   resumeUrl      String?
   resumeFileName String?
