@@ -337,6 +337,7 @@ export async function runDynamoMigration(apply = false) {
       },
       create: {
         id: uuidFrom(`ddb-candidate:${c.id}`),
+        candidateCode: `OE-CAND-${String(importedCandidates + 1).padStart(4, '0')}`,
         fullName: c.fullName,
         email: c.email.toLowerCase(),
         phone: c.phone,
