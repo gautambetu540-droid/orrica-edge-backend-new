@@ -126,18 +126,6 @@ export const getCandidateById = async (req: Request, res: Response, next: NextFu
   }
 };
 
-const getNextCandidateCode = async (): Promise<string> => {
-  const latest = await prisma.candidate.findFirst({
-    orderBy: { candidateCode: 'desc' },
-    select: { candidateCode: true },
-  });
-  const current = latest?.candidateCode
-    ? Number(latest.candidateCode.replace('OE-CAND-', ''))
-    : 0;
-  return `OE-CAND-${String((Number.isFinite(current) ? current : 0) + 1).padStart(4, '0')}`;
-};
-
-// 3. Update Candidate Profile & Status
 export const deleteCandidate = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const { id } = req.params;
