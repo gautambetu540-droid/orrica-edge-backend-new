@@ -32,7 +32,7 @@ const updateCandidateSchema = z.object({
     .optional(),
   tags: z.array(z.string()).optional(),
   notes: z.string().optional(),
-  candidateCode: z.string().regex(/^OE-CAND-\\d{4}$/).optional(),
+  candidateCode: z.string().regex(/^OE-CAND-\d{4}$/).optional(),
 });
 
 // 1. List Candidates with Filtering, Search, Pagination
@@ -121,33 +121,6 @@ export const getCandidateById = async (req: Request, res: Response, next: NextFu
     }
 
     sendSuccess(res, { candidate });
-  } catch (err) {
-    next(err);
-  }
-};
-
-export const deleteCandidate = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-  try {
-    const { id } = req.params;
-    const existing = await prisma.candidate.findUnique({
-      where: { id },
-      select: { id: true, candidateCode: true, fullName: true, email: true },
-    });
-    if (!existing) {
-      sendError(res, 'Candidate not found', 404);
-      return;
-    }
-    await prisma.candidate.delete({ where: { id } });
-    await logAudit({
-      req,
-      action: 'DELETE_CANDIDATE',
-      module: 'CANDIDATES',
-      entity: 'Candidate',
-      entityId: id,
-      oldValue: existing,
-      newValue: null,
-    });
-    sendSuccess(res, { candidateId: id, candidateCode: existing.candidateCode }, 'Candidate deleted successfully');
   } catch (err) {
     next(err);
   }
