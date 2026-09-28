@@ -23,6 +23,8 @@ import dashboardRoutes from './routes/dashboard.routes';
 import seoRoutes from './routes/seo.routes';
 import templateRoutes from './routes/template.routes';
 import migrationRoutes from './routes/migration.routes';
+import universalFormRoutes from './routes/universal-form.routes';
+import { ensureDefaultUniversalForm } from './controllers/universal-form.controller';
 import swaggerRouter from './swagger/swagger';
 
 const app = express();
@@ -91,6 +93,7 @@ app.use('/api/v1/dashboard', dashboardRoutes);
 app.use('/api/v1/seo', seoRoutes);
 app.use('/api/v1/email-templates', templateRoutes);
 app.use('/api/v1/admin/migrate', migrationRoutes);
+app.use('/api/v1/universal-forms', universalFormRoutes);
 
 // 404 Route Handler
 app.use('*', (req, res) => {
@@ -121,6 +124,7 @@ const repairLegacyClientNames = async () => {
 };
 
 repairLegacyClientNames();
+ensureDefaultUniversalForm();
 
 // Graceful Shutdown & Server Startup
 if (process.env.NODE_ENV !== 'test') {
