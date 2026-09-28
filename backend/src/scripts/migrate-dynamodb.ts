@@ -315,10 +315,24 @@ export async function runDynamoMigration(apply = false) {
     // The current schema requires a resumeUrl. If legacy data has no resume URL,
     // use a non-network legacy marker rather than inventing a public URL.
     const resumeUrl = c.resumeUrl || `legacy://dynamodb/orrica_candidates/${encodeURIComponent(c.id)}`;
+    const existingCandidate = await prisma.candidate.findUnique({
+      where: { email: c.email.toLowerCase() },
+      select: { candidateCode: true },
+    });
+    const maxCode = await prisma.candidate.findFirst({
+      orderBy: { candidateCode: 'desc' },
+      select: { candidateCode: true },
+    });
+    const fallbackCodeNumber = maxCode?.candidateCode
+      ? Number(maxCode.candidateCode.replace('OE-CAND-', '')) + 1
+      : importedCandidates + 1;
+    const candidateCode = existingCandidate?.candidateCode
+      || `OE-CAND-${String(fallbackCodeNumber).padStart(4, '0')}`;
 
     await prisma.candidate.upsert({
       where: { email: c.email.toLowerCase() },
       update: {
+        candidateCode,
         fullName: c.fullName,
         phone: c.phone,
         location: c.location,
