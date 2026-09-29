@@ -138,154 +138,15 @@ const generateJobCode = async (): Promise<string> => {
   const currentYear = new Date().getFullYear();
   const prefix = `OE-${currentYear}-`;
 
-  // Generate the next sequence from the highest existing code, not total row count.
-  // This prevents collisions when records have been deleted or imported.
+  // Generate from the highest existing sequence, not total row count.
   const latest = await prisma.job.findFirst({
-    where: {
-      jobCode: { startsWith: prefix },
-    },
+    where: { jobCode: { startsWith: prefix } },
     orderBy: { jobCode: 'desc' },
     select: { jobCode: true },
   });
 
-  const match = latest?.jobCode?.match(new RegExp(`^${prefix}(\\d+)import { Request, Response, NextFunction } from 'express';
-import { z } from 'zod';
-import { prisma } from '../prisma/client';
-import { cache } from '../utils/cache';
-import { sendSuccess, sendError } from '../utils/response';
-
-
-const parseExperienceRange = (value: unknown): { min: number; max: number } | null => {
-  if (typeof value !== 'string') return null;
-
-  const text = value.trim();
-
-  const range = text.match(
-    /(\d+(?:\.\d+)?)\s*(?:-|–|—|to)\s*(\d+(?:\.\d+)?)/i,
-  );
-
-  if (range) {
-    return {
-      min: Number(range[1]),
-      max: Number(range[2]),
-    };
-  }
-
-  const plus = text.match(/(\d+(?:\.\d+)?)\s*\+/i);
-
-  if (plus) {
-    const min = Number(plus[1]);
-    return {
-      min,
-      max: min,
-    };
-  }
-
-  if (/fresher/i.test(text)) {
-    return {
-      min: 0,
-      max: 0,
-    };
-  }
-
-  return null;
-};
-
-const parseSalaryRange = (value: unknown): { min: number; max: number } | null => {
-  if (typeof value !== 'string') return null;
-
-  const text = value.replace(/,/g, '').trim();
-
-  const numbers = text.match(/\d+(?:\.\d+)?/g);
-
-  if (!numbers || numbers.length < 2) return null;
-
-  const parsed = numbers
-    .slice(0, 2)
-    .map((number) => Number(number))
-    .filter((number) => Number.isFinite(number));
-
-  if (parsed.length < 2) return null;
-
-  return {
-    min: parsed[0],
-    max: parsed[1],
-  };
-};
-
-const normalizeJobNumericFields = (body: Record<string, any>) => {
-  const experienceFromText = parseExperienceRange(body.experienceText);
-  const salaryFromText = parseSalaryRange(body.salaryText);
-
-  const experienceMin =
-    body.experienceMin !== undefined &&
-    body.experienceMin !== null &&
-    body.experienceMin !== ''
-      ? Number(body.experienceMin)
-      : undefined;
-
-  const experienceMax =
-    body.experienceMax !== undefined &&
-    body.experienceMax !== null &&
-    body.experienceMax !== ''
-      ? Number(body.experienceMax)
-      : undefined;
-
-  const salaryMin =
-    body.salaryMin !== undefined &&
-    body.salaryMin !== null &&
-    body.salaryMin !== ''
-      ? Number(body.salaryMin)
-      : undefined;
-
-  const salaryMax =
-    body.salaryMax !== undefined &&
-    body.salaryMax !== null &&
-    body.salaryMax !== ''
-      ? Number(body.salaryMax)
-      : undefined;
-
-  return {
-    experienceMin:
-      experienceFromText && (!Number.isFinite(experienceMin) || experienceMin === 0)
-        ? experienceFromText.min
-        : experienceMin,
-    experienceMax:
-      experienceFromText && (!Number.isFinite(experienceMax) || experienceMax === 0)
-        ? experienceFromText.max
-        : experienceMax,
-    salaryMin:
-      salaryFromText && (!Number.isFinite(salaryMin) || salaryMin === 0)
-        ? salaryFromText.min
-        : salaryMin,
-    salaryMax:
-      salaryFromText && (!Number.isFinite(salaryMax) || salaryMax === 0)
-        ? salaryFromText.max
-        : salaryMax,
-  };
-};
-
-const createJobSchema = z.object({
-  title: z.string().min(3),
-  clientId: z.string().uuid(),
-  department: z.string().min(2),
-  category: z.string().min(2),
-  location: z.string().min(2),
-  workMode: z.enum(['WORK_FROM_OFFICE', 'HYBRID', 'REMOTE']).default('WORK_FROM_OFFICE'),
-  employmentType: z.enum(['FULL_TIME', 'PART_TIME', 'CONTRACT', 'INTERNSHIP']).default('FULL_TIME'),
-  experienceMin: z.coerce.number().int().min(0).default(0),
-  experienceMax: z.coerce.number().int().min(0).default(3),
-  salaryMin: z.coerce.number().optional(),
-  salaryMax: z.coerce.number().optional(),
-  salaryText: z.string().optional(),
-  vacancies: z.coerce.number().int().min(1).default(1),
-  skills: z.array(z.string()).default([]),
-  contentHtml: z.string().min(10),
-  status: z.enum(['DRAFT', 'PUBLISHED', 'PAUSED', 'CLOSED', 'ARCHIVED']).default('DRAFT'),
-});
-
-));
-  const latestSeq = match ? Number(match[1]) : 0;
+  const suffix = latest?.jobCode?.slice(prefix.length);
+  const latestSeq = suffix && Number.isInteger(Number(suffix)) ? Number(suffix) : 0;
   const nextSeq = String(latestSeq + 1).padStart(3, '0');
 
   return `${prefix}${nextSeq}`;
@@ -467,8 +328,7 @@ export const createJob = async (req: Request, res: Response, next: NextFunction)
 
     const baseSlug = slugify(data.title);
 
-    // jobCode is UNIQUE in Prisma. Retry only when a concurrent request
-    // happens to claim the same next sequence.
+    // jobCode is UNIQUE in Prisma. Retry only on a jobCode race.
     let newJob: any;
 
     for (let attempt = 0; attempt < 5; attempt += 1) {
@@ -490,10 +350,7 @@ export const createJob = async (req: Request, res: Response, next: NextFunction)
         if (error?.code !== 'P2002' || !String(error?.meta?.target ?? '').includes('jobCode')) {
           throw error;
         }
-
-        if (attempt === 4) {
-          throw error;
-        }
+        if (attempt === 4) throw error;
       }
     }
 
