@@ -230,6 +230,8 @@ model Job {
   vacancies            Int            @default(1)
   skills               String[]
   languages            String[]       @default(["English", "Hindi"])
+  hiringProcess        Json?
+  faqs                 Json?
   contentHtml          String         @db.Text
   eligibilityCriteria  String?        @db.Text
   requirements         String?        @db.Text
