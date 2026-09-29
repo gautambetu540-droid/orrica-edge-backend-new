@@ -1,0 +1,2 @@
+ALTER TABLE "jobs" ADD COLUMN "hiringProcess" JSONB;
+ALTER TABLE "jobs" ADD COLUMN "faqs" JSONB;
