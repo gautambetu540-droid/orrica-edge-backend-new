@@ -10,10 +10,6 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// -------------------------------------------------------------
-// ENUMS
-// -------------------------------------------------------------
-
 enum Role {
   SUPER_ADMIN
   ADMIN
@@ -131,10 +127,6 @@ enum EmailStatus {
   FAILED
 }
 
-// -------------------------------------------------------------
-// AUTH & USERS
-// -------------------------------------------------------------
-
 model User {
   id                   String    @id @default(uuid())
   email                String    @unique
@@ -142,18 +134,17 @@ model User {
   fullName             String
   role                 Role      @default(CANDIDATE)
   phone                String?
-  avatarUrl            String?
-  isActive             Boolean   @default(true)
-  isEmailVerified      Boolean   @default(false)
-  emailVerifyToken     String?
-  resetPasswordToken   String?
-  resetPasswordExpires DateTime?
-  failedLoginAttempts  Int       @default(0)
-  lockUntil            DateTime?
-  createdAt            DateTime  @default(now())
-  updatedAt            DateTime  @updatedAt
+  avatarUrl             String?
+  isActive               Boolean   @default(true)
+  isEmailVerified        Boolean   @default(false)
+  emailVerifyToken       String?
+  resetPasswordToken     String?
+  resetPasswordExpires   DateTime?
+  failedLoginAttempts    Int       @default(0)
+  lockUntil              DateTime?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
 
-  // Relationships
   refreshTokens        RefreshToken[]
   jobsCreated          Job[]             @relation("CreatedJobs")
   candidateProfile     Candidate?
@@ -168,7 +159,7 @@ model User {
 model RefreshToken {
   id               String   @id @default(uuid())
   token            String   @unique
-  userId           String
+  userId            String
   user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   expiresAt        DateTime
   isRevoked        Boolean  @default(false)
@@ -177,10 +168,6 @@ model RefreshToken {
 
   @@map("refresh_tokens")
 }
-
-// -------------------------------------------------------------
-// CLIENTS & CORPORATE PARTNERS
-// -------------------------------------------------------------
 
 model Client {
   id             String       @id @default(uuid())
@@ -198,17 +185,13 @@ model Client {
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 
-  jobs              Job[]
-  invoices          Invoice[]
+  jobs             Job[]
+  invoices         Invoice[]
   payouts           Payout[]
-  replacementCases  ReplacementCase[]
+  replacementCases ReplacementCase[]
 
   @@map("clients")
 }
-
-// -------------------------------------------------------------
-// JOBS
-// -------------------------------------------------------------
 
 model Job {
   id                   String         @id @default(uuid())
@@ -229,7 +212,7 @@ model Job {
   salaryText           String?
   vacancies             Int            @default(1)
   skills               String[]
-  languages            String[]       @default(["English", "Hindi"])
+  languages             String[]       @default(["English", "Hindi"])
   hiringProcess        Json?
   faqs                 Json?
   contentHtml          String         @db.Text
@@ -239,51 +222,47 @@ model Job {
   status               JobStatus      @default(DRAFT)
   views                Int            @default(0)
   publishedAt          DateTime?
-  metaTitle            String?
-  metaDescription      String?        @db.Text
+  metaTitle             String?
+  metaDescription       String?        @db.Text
   createdById           String
   createdBy             User           @relation("CreatedJobs", fields: [createdById], references: [id])
-  createdAt            DateTime       @default(now())
-  updatedAt            DateTime       @updatedAt
+  createdAt              DateTime       @default(now())
+  updatedAt              DateTime       @updatedAt
 
-  applications         Application[]
-  payouts              Payout[]
-  replacementCases     ReplacementCase[]
+  applications      Application[]
+  payouts           Payout[]
+  replacementCases  ReplacementCase[]
 
   @@index([status, department, location])
   @@map("jobs")
 }
-
-// -------------------------------------------------------------
-// CANDIDATES
-// -------------------------------------------------------------
 
 model Candidate {
   id                 String          @id @default(uuid())
   candidateCode      String          @unique
   userId             String?         @unique
   user               User?           @relation(fields: [userId], references: [id], onDelete: SetNull)
-  fullName           String
-  email              String          @unique
-  phone              String
-  location           String
-  education          String?
-  experienceYears    Decimal         @default(0) @db.Decimal(4, 1)
-  currentCompany     String?
-  currentDesignation String?
-  currentCtc         Decimal?        @db.Decimal(10, 2)
-  expectedCtc        Decimal?        @db.Decimal(10, 2)
-  noticePeriodDays   Int?
-  skills             String[]
-  languages          String[]        @default(["English"])
-  resumeUrl          String
-  resumeText         String?         @db.Text
-  source             String           @default("Website Direct")
-  tags               String[]        @default([])
-  notes              String?         @db.Text
-  status             CandidateStatus @default(NEW)
-  createdAt          DateTime        @default(now())
-  updatedAt          DateTime        @updatedAt
+  fullName            String
+  email               String          @unique
+  phone               String
+  location            String
+  education           String?
+  experienceYears     Decimal         @default(0) @db.Decimal(4, 1)
+  currentCompany      String?
+  currentDesignation  String?
+  currentCtc          Decimal?        @db.Decimal(10, 2)
+  expectedCtc         Decimal?        @db.Decimal(10, 2)
+  noticePeriodDays    Int?
+  skills              String[]
+  languages           String[]        @default(["English"])
+  resumeUrl           String
+  resumeText          String?        @db.Text
+  source               String          @default("Website Direct")
+  tags                 String[]        @default([])
+  notes                String?        @db.Text
+  status               CandidateStatus @default(NEW)
+  createdAt             DateTime       @default(now())
+  updatedAt             DateTime       @updatedAt
 
   applications       Application[]
   assessmentAttempts AssessmentAttempt[]
@@ -296,27 +275,23 @@ model Candidate {
   @@map("candidates")
 }
 
-// -------------------------------------------------------------
-// APPLICATIONS & ATS PIPELINE
-// -------------------------------------------------------------
-
 model Application {
   id              String           @id @default(uuid())
   jobId           String
   job             Job              @relation(fields: [jobId], references: [id], onDelete: Cascade)
-  candidateId     String
-  candidate       Candidate        @relation(fields: [candidateId], references: [id], onDelete: Cascade)
-  recruiterId     String?
-  recruiter       User?            @relation("RecruiterApplications", fields: [recruiterId], references: [id], onDelete: SetNull)
-  stage           ApplicationStage @default(APPLIED)
-  atsScore        Int              @default(0)
-  matchReason     String?          @db.Text
-  missingSkills   String[]         @default([])
-  rejectionReason String?          @db.Text
-  internalNotes   Json?
-  timeline        Json?
-  appliedAt       DateTime         @default(now())
-  updatedAt       DateTime         @updatedAt
+  candidateId      String
+  candidate        Candidate       @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  recruiterId      String?
+  recruiter        User?            @relation("RecruiterApplications", fields: [recruiterId], references: [id], onDelete: SetNull)
+  stage            ApplicationStage @default(APPLIED)
+  atsScore         Int              @default(0)
+  matchReason      String?          @db.Text
+  missingSkills    String[]         @default([])
+  rejectionReason  String?          @db.Text
+  internalNotes    Json?
+  timeline         Json?
+  appliedAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
 
   interviews      Interview[]
 
@@ -325,43 +300,35 @@ model Application {
   @@map("applications")
 }
 
-// -------------------------------------------------------------
-// INTERVIEWS
-// -------------------------------------------------------------
-
 model Interview {
   id               String          @id @default(uuid())
   applicationId    String
   application      Application     @relation(fields: [applicationId], references: [id], onDelete: Cascade)
   roundName        String
-  scheduledAt      DateTime        scheduledAt
+  scheduledAt      DateTime
   interviewerName  String
   meetingLink      String?
-  status           InterviewStatus @default(SCHEDULED)
+  status            InterviewStatus @default(SCHEDULED)
   feedbackRating   Int?
-  feedbackNotes    String?         @db.Text
-  createdAt        DateTime        @default(now())
-  updatedAt        DateTime        @updatedAt
+  feedbackNotes    String?          @db.Text
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
 
   @@map("interviews")
 }
 
-// -------------------------------------------------------------
-// ASSESSMENTS
-// -------------------------------------------------------------
-
 model Assessment {
-  id          String   @id @default(uuid())
-  title       String
-  category    String
-  timeLimit   Int      @default(30)
-  passingScore Int     @default(60)
-  questions   Json
-  isActive    Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id           String   @id @default(uuid())
+  title        String
+  category     String
+  timeLimit    Int      @default(30)
+  passingScore Int      @default(60)
+  questions    Json
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
-  attempts    AssessmentAttempt[]
+  attempts AssessmentAttempt[]
 }
 
 model AssessmentAttempt {
@@ -405,8 +372,7 @@ model ReplacementCase {
   id                     String            @id @default(uuid())
   clientId               String
   client                 Client            @relation(fields: [clientId], references: [id])
-  jobId                  String
-  job                    Job               @relation(fields: [jobId], references: [id])
+  jobId                  Job               @relation(fields: [jobId], references: [id])
   primaryCandidateId     String
   primaryCandidate       Candidate         @relation("PrimaryCandidate", fields: [primaryCandidateId], references: [id])
   replacementCandidateId String?
@@ -414,8 +380,8 @@ model ReplacementCase {
   reason                 String            @db.Text
   status                 ReplacementStatus @default(REQUESTED)
   windowDays             Int               @default(90)
-  requestedAt            DateTime          @default(now())
-  resolvedAt             DateTime?
+  requestedAt             DateTime          @default(now())
+  resolvedAt              DateTime?
 
   @@map("replacement_cases")
 }
@@ -433,15 +399,11 @@ model Invoice {
   status        InvoiceStatus @default(DRAFT)
   pdfUrl        String?
   notes         String?      @db.Text
-  createdAt     DateTime     @default(now())
-  updatedAt     DateTime     @updatedAt
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
 
   @@map("invoices")
 }
-
-// -------------------------------------------------------------
-// BLOGS / CAREER RESOURCES (CMS)
-// -------------------------------------------------------------
 
 model BlogPost {
   id              String     @id @default(uuid())
@@ -472,18 +434,18 @@ model BlogPost {
 }
 
 model Inquiry {
-  id           String        @id @default(uuid())
-  type         InquiryType
-  fullName     String
-  email        String
-  phone        String
-  companyName  String?
-  requirements String?       @db.Text
-  status       InquiryStatus @default(NEW)
-  notes        String?       @db.Text
-  assignedToId String?
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
+  id            String        @id @default(uuid())
+  type          InquiryType
+  fullName      String
+  email         String
+  phone         String
+  companyName   String?
+  requirements  String?       @db.Text
+  status        InquiryStatus @default(NEW)
+  notes         String?       @db.Text
+  assignedToId  String?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
 
   @@map("inquiries")
 }
@@ -531,7 +493,7 @@ model EmailLog {
   messageId String?
   error     String?     @db.Text
   payload   Json?
-  createdAt  DateTime    @default(now())
+  createdAt  DateTime   @default(now())
 
   @@index([recipient, template])
   @@map("email_logs")
@@ -589,17 +551,17 @@ model RecruiterApplication {
 
 model UniversalForm {
   id             String                    @id @default(uuid())
-  name           String
-  slug           String                    @unique
+  name            String
+  slug            String                    @unique
   description    String?                   @db.Text
-  fields         Json
-  successMessage String?                   @db.Text
-  isActive       Boolean                   @default(true)
-  createdById    String?
-  createdAt      DateTime                  @default(now())
-  updatedAt      DateTime                  @updatedAt
+  fields          Json
+  successMessage  String?                   @db.Text
+  isActive         Boolean                   @default(true)
+  createdById       String?
+  createdAt         DateTime                  @default(now())
+  updatedAt         DateTime                  @updatedAt
 
-  submissions    UniversalFormSubmission[]
+  submissions UniversalFormSubmission[]
 
   @@index([isActive])
   @@index([createdAt])
@@ -608,14 +570,14 @@ model UniversalForm {
 
 model UniversalFormSubmission {
   id             String        @id @default(uuid())
-  formId         String
-  form           UniversalForm @relation(fields: [formId], references: [id], onDelete: Cascade)
-  candidateId    String?
-  candidate      Candidate?    @relation(fields: [candidateId], references: [id], onDelete: SetNull)
-  payload        Json
-  resumeUrl      String?
-  resumeFileName String?
-  createdAt      DateTime      @default(now())
+  formId          String
+  form            UniversalForm @relation(fields: [formId], references: [id], onDelete: Cascade)
+  candidateId     String?
+  candidate       Candidate?   @relation(fields: [candidateId], references: [id], onDelete: SetNull)
+  payload          Json
+  resumeUrl        String?
+  resumeFileName  String?
+  createdAt        DateTime     @default(now())
 
   @@index([formId, createdAt])
   @@index([candidateId])
