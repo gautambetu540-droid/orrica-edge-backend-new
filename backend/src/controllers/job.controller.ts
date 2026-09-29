@@ -116,11 +116,14 @@ const normalizeJobNumericFields = (body: Record<string, any>) => {
 };
 
 const createJobSchema = z.object({
-  title: z.string().min(3),
+  title: z.string().trim().min(3),
   clientId: z.string().uuid(),
-  department: z.string().min(2),
-  category: z.string().min(2),
-  location: z.string().min(2),
+  // These fields are optional in the Job Editor UI. Keep safe backend defaults
+  // so a valid candidate-facing job is not rejected just because the editor
+  // does not expose department/category as required inputs.
+  department: z.string().trim().min(2).default('Operations'),
+  category: z.string().trim().min(2).default('General'),
+  location: z.string().trim().min(2),
   workMode: z.enum(['WORK_FROM_OFFICE', 'HYBRID', 'REMOTE']).default('WORK_FROM_OFFICE'),
   employmentType: z.enum(['FULL_TIME', 'PART_TIME', 'CONTRACT', 'INTERNSHIP']).default('FULL_TIME'),
   experienceMin: z.coerce.number().int().min(0).default(0),
@@ -130,7 +133,7 @@ const createJobSchema = z.object({
   salaryText: z.string().optional(),
   vacancies: z.coerce.number().int().min(1).default(1),
   skills: z.array(z.string()).default([]),
-  contentHtml: z.string().min(10),
+  contentHtml: z.string().trim().min(10),
   status: z.enum(['DRAFT', 'PUBLISHED', 'PAUSED', 'CLOSED', 'ARCHIVED']).default('DRAFT'),
 });
 
@@ -306,10 +309,30 @@ export const getJobBySlug = async (req: Request, res: Response, next: NextFuncti
 // 3. Create Job (Admin / Recruiter) - Invalidates Cache
 export const createJob = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const normalized = normalizeJobNumericFields(req.body || {});
+    const body = req.body || {};
+    const normalized = normalizeJobNumericFields(body);
+
+    // The editor can store the rich-text content under description/descriptionHtml
+    // while contentHtml is empty. Normalize those equivalent fields before Zod
+    // validation so the API accepts the editor's actual payload shape.
+    const contentHtml = String(
+      body.contentHtml ||
+      body.descriptionHtml ||
+      body.description ||
+      ''
+    ).trim();
+
+    const department =
+      String(body.department || '').trim() || 'Operations';
+
+    const category =
+      String(body.category || '').trim() || 'General';
 
     const data = createJobSchema.parse({
-      ...req.body,
+      ...body,
+      department,
+      category,
+      contentHtml,
       ...(normalized.experienceMin !== undefined
         ? { experienceMin: normalized.experienceMin }
         : {}),
