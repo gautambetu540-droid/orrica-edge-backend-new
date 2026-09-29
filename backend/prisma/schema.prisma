@@ -227,7 +227,7 @@ model Job {
   salaryMin            Decimal?       @db.Decimal(10, 2)
   salaryMax            Decimal?       @db.Decimal(10, 2)
   salaryText           String?
-  vacancies            Int            @default(1)
+  vacancies             Int            @default(1)
   skills               String[]
   languages            String[]       @default(["English", "Hindi"])
   hiringProcess        Json?
@@ -241,8 +241,8 @@ model Job {
   publishedAt          DateTime?
   metaTitle            String?
   metaDescription      String?        @db.Text
-  createdById          String
-  createdBy            User           @relation("CreatedJobs", fields: [createdById], references: [id])
+  createdById           String
+  createdBy             User           @relation("CreatedJobs", fields: [createdById], references: [id])
   createdAt            DateTime       @default(now())
   updatedAt            DateTime       @updatedAt
 
@@ -278,7 +278,7 @@ model Candidate {
   languages          String[]        @default(["English"])
   resumeUrl          String
   resumeText         String?         @db.Text
-  source             String          @default("Website Direct")
+  source             String           @default("Website Direct")
   tags               String[]        @default([])
   notes              String?         @db.Text
   status             CandidateStatus @default(NEW)
@@ -334,7 +334,7 @@ model Interview {
   applicationId    String
   application      Application     @relation(fields: [applicationId], references: [id], onDelete: Cascade)
   roundName        String
-  scheduledAt      DateTime
+  scheduledAt      DateTime        scheduledAt
   interviewerName  String
   meetingLink      String?
   status           InterviewStatus @default(SCHEDULED)
@@ -354,16 +354,14 @@ model Assessment {
   id          String   @id @default(uuid())
   title       String
   category    String
-  timeLimit   Int      @default(30) // in minutes
-  passingScore Int     @default(60) // percentage
-  questions   Json     // Array of MCQs { id, question, options, correctIndex, marks }
+  timeLimit   Int      @default(30)
+  passingScore Int     @default(60)
+  questions   Json
   isActive    Boolean  @default(true)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
   attempts    AssessmentAttempt[]
-
-  @@map("assessments")
 }
 
 model AssessmentAttempt {
@@ -381,10 +379,6 @@ model AssessmentAttempt {
 
   @@map("assessment_attempts")
 }
-
-// -------------------------------------------------------------
-// PAYOUTS & REPLACEMENTS
-// -------------------------------------------------------------
 
 model Payout {
   id            String       @id @default(uuid())
@@ -426,10 +420,6 @@ model ReplacementCase {
   @@map("replacement_cases")
 }
 
-// -------------------------------------------------------------
-// INVOICES
-// -------------------------------------------------------------
-
 model Invoice {
   id            String        @id @default(uuid())
   invoiceNumber String        @unique
@@ -442,9 +432,9 @@ model Invoice {
   dueDate       DateTime
   status        InvoiceStatus @default(DRAFT)
   pdfUrl        String?
-  notes         String?       @db.Text
-  createdAt     DateTime      @default(now())
-  updatedAt     DateTime      @updatedAt
+  notes         String?      @db.Text
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
 
   @@map("invoices")
 }
@@ -475,12 +465,11 @@ model BlogPost {
   updatedAt       DateTime   @updatedAt
 
   @@index([status, category])
+  @@index([status, publishedAt])
+  @@index([isFeatured, publishedAt])
+  @@index([category, publishedAt])
   @@map("blog_posts")
 }
-
-// -------------------------------------------------------------
-// INQUIRIES & LEAD CAPTURE
-// -------------------------------------------------------------
 
 model Inquiry {
   id           String        @id @default(uuid())
@@ -499,10 +488,6 @@ model Inquiry {
   @@map("inquiries")
 }
 
-// -------------------------------------------------------------
-// IN-APP NOTIFICATIONS
-// -------------------------------------------------------------
-
 model Notification {
   id        String   @id @default(uuid())
   userId    String
@@ -517,10 +502,6 @@ model Notification {
   @@index([userId, isRead])
   @@map("notifications")
 }
-
-// -------------------------------------------------------------
-// DYNAMIC EMAIL TEMPLATES (ADMIN CONTROLLED)
-// -------------------------------------------------------------
 
 model EmailTemplate {
   id          String   @id @default(uuid())
@@ -541,10 +522,6 @@ model EmailTemplate {
   @@map("email_templates")
 }
 
-// -------------------------------------------------------------
-// EMAIL LOGGING (RESEND AUDIT TRAIL)
-// -------------------------------------------------------------
-
 model EmailLog {
   id        String      @id @default(uuid())
   recipient String
@@ -554,15 +531,11 @@ model EmailLog {
   messageId String?
   error     String?     @db.Text
   payload   Json?
-  createdAt DateTime    @default(now())
+  createdAt  DateTime    @default(now())
 
   @@index([recipient, template])
   @@map("email_logs")
 }
-
-// -------------------------------------------------------------
-// AUDIT LOGS
-// -------------------------------------------------------------
 
 model AuditLog {
   id         String   @id @default(uuid())
@@ -581,9 +554,6 @@ model AuditLog {
   @@index([entity, entityId])
   @@map("audit_logs")
 }
-// -------------------------------------------------------------
-// RECRUITER APPLICATIONS
-// -------------------------------------------------------------
 
 enum RecruiterApplicationStatus {
   NEW
@@ -616,10 +586,6 @@ model RecruiterApplication {
   @@index([createdAt])
   @@map("recruiter_applications")
 }
-
-// -------------------------------------------------------------
-// UNIVERSAL CANDIDATE FORMS
-// -------------------------------------------------------------
 
 model UniversalForm {
   id             String                    @id @default(uuid())
