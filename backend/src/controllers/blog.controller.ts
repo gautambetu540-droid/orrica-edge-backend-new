@@ -5,31 +5,45 @@ import { cache } from '../utils/cache';
 import { sendSuccess, sendError } from '../utils/response';
 
 const blogPostSchema = z.object({
-  title: z.string().min(5),
-  slug: z.string().min(3),
-  category: z.string().min(2),
-  excerpt: z.string().min(10),
+  title: z.string().min(5).max(200),
+  slug: z.string().min(3).max(220).regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, 'Slug must contain lowercase letters, numbers and hyphens only'),
+  category: z.string().min(2).max(100),
+  excerpt: z.string().min(10).max(500),
   contentMarkdown: z.string().min(20),
   featuredImage: z.string().url().or(z.string().min(3)),
-  authorName: z.string().default('Orrica Edge Career Editorial Team'),
-  authorRole: z.string().default('Career Insights & Recruitment'),
-  readingTime: z.string().default('8 min read'),
+  authorName: z.string().min(1).max(150).default('Orrica Edge Career Editorial Team'),
+  authorRole: z.string().min(1).max(150).default('Career Insights & Recruitment'),
+  readingTime: z.string().min(1).max(50).default('8 min read'),
   isFeatured: z.boolean().default(false),
-  status: z.enum(['DRAFT', 'PUBLISHED']).default('PUBLISHED'),
-  metaTitle: z.string().optional(),
-  metaDescription: z.string().optional(),
+  status: z.enum(['DRAFT', 'PUBLISHED']).default('DRAFT'),
+  metaTitle: z.string().max(200).optional(),
+  metaDescription: z.string().max(500).optional(),
+  ogImage: z.string().url().or(z.string().min(3)).optional(),
 });
 
-// 1. Get Blog Posts (Cached & Lean Field Projection)
+const blogPostUpdateSchema = blogPostSchema.partial().extend({
+  publishedAt: z.union([z.string().datetime(), z.null()]).optional(),
+});
+
+// In-memory cache keys are prefixed; invalidate every cached list entry safely.
+const invalidateBlogCaches = (slug?: string) => {
+  cache.del('blogs:');
+  if (slug) cache.del(`blog:slug:${slug}`);
+};
+
+// 1. Get Blog Posts (public, published only)
 export const getBlogPosts = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const { category, search, page = '1', limit = '12' } = req.query;
 
-    const pageNum = Math.max(1, parseInt(page as string, 10));
-    const limitNum = Math.min(50, Math.max(1, parseInt(limit as string, 10)));
+    const pageNum = Math.max(1, parseInt(page as string, 10) || 1);
+    const limitNum = Math.min(50, Math.max(1, parseInt(limit as string, 10) || 12));
     const skip = (pageNum - 1) * limitNum;
 
-    const cacheKey = `blogs:${category || 'all'}:${search || ''}:${pageNum}:${limitNum}`;
+    const categoryValue = typeof category === 'string' ? category.trim() : '';
+    const searchValue = typeof search === 'string' ? search.trim() : '';
+
+    const cacheKey = `blogs:${categoryValue || 'all'}:${searchValue}:${pageNum}:${limitNum}`;
     const cached = cache.get(cacheKey);
     if (cached) {
       sendSuccess(res, cached);
@@ -40,14 +54,15 @@ export const getBlogPosts = async (req: Request, res: Response, next: NextFuncti
       status: 'PUBLISHED',
     };
 
-    if (category && category !== 'All Resources') {
-      where.category = category as string;
+    if (categoryValue && categoryValue !== 'All Resources') {
+      where.category = categoryValue;
     }
 
-    if (search) {
+    if (searchValue) {
       where.OR = [
-        { title: { contains: search as string, mode: 'insensitive' } },
-        { excerpt: { contains: search as string, mode: 'insensitive' } },
+        { title: { contains: searchValue, mode: 'insensitive' } },
+        { excerpt: { contains: searchValue, mode: 'insensitive' } },
+        { category: { contains: searchValue, mode: 'insensitive' } },
       ];
     }
 
@@ -57,8 +72,7 @@ export const getBlogPosts = async (req: Request, res: Response, next: NextFuncti
         where,
         skip,
         take: limitNum,
-        orderBy: [{ isFeatured: 'desc' }, { publishedAt: 'desc' }],
-        // LEAN SELECT: Exclude huge contentMarkdown on grid listing!
+        orderBy: [{ isFeatured: 'desc' }, { publishedAt: 'desc' }, { createdAt: 'desc' }],
         select: {
           id: true,
           title: true,
@@ -71,7 +85,11 @@ export const getBlogPosts = async (req: Request, res: Response, next: NextFuncti
           readingTime: true,
           isFeatured: true,
           publishedAt: true,
+          updatedAt: true,
           views: true,
+          metaTitle: true,
+          metaDescription: true,
+          ogImage: true,
         },
       }),
     ]);
@@ -87,14 +105,13 @@ export const getBlogPosts = async (req: Request, res: Response, next: NextFuncti
     };
 
     cache.set(cacheKey, result, 120);
-
     sendSuccess(res, result);
   } catch (err) {
     next(err);
   }
 };
 
-// 2. Get Single Article by Slug (Full Markdown Content)
+// 2. Get Single Published Article by Slug (public)
 export const getBlogPostBySlug = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const { slug } = req.params;
@@ -102,13 +119,16 @@ export const getBlogPostBySlug = async (req: Request, res: Response, next: NextF
     const cacheKey = `blog:slug:${slug}`;
     const cached = cache.get(cacheKey);
     if (cached) {
-      prisma.blogPost.update({ where: { slug }, data: { views: { increment: 1 } } }).catch(() => {});
+      prisma.blogPost.update({ where: { id: cached.post?.id }, data: { views: { increment: 1 } } }).catch(() => {});
       sendSuccess(res, cached);
       return;
     }
 
     const post = await prisma.blogPost.findFirst({
-      where: { OR: [{ slug }, { id: slug }] },
+      where: {
+        slug,
+        status: 'PUBLISHED',
+      },
     });
 
     if (!post) {
@@ -116,7 +136,6 @@ export const getBlogPostBySlug = async (req: Request, res: Response, next: NextF
       return;
     }
 
-    // Get 3 related articles from same category
     const relatedPosts = await prisma.blogPost.findMany({
       where: {
         id: { not: post.id },
@@ -124,6 +143,7 @@ export const getBlogPostBySlug = async (req: Request, res: Response, next: NextF
         category: post.category,
       },
       take: 3,
+      orderBy: [{ publishedAt: 'desc' }, { createdAt: 'desc' }],
       select: {
         id: true,
         title: true,
@@ -139,7 +159,10 @@ export const getBlogPostBySlug = async (req: Request, res: Response, next: NextF
     const result = { post, relatedPosts };
     cache.set(cacheKey, result, 180);
 
-    prisma.blogPost.update({ where: { id: post.id }, data: { views: { increment: 1 } } }).catch(() => {});
+    prisma.blogPost.update({
+      where: { id: post.id },
+      data: { views: { increment: 1 } },
+    }).catch(() => {});
 
     sendSuccess(res, result);
   } catch (err) {
@@ -147,10 +170,16 @@ export const getBlogPostBySlug = async (req: Request, res: Response, next: NextF
   }
 };
 
-// 3. Create Article (Admin) - Invalidates Cache
+// 3. Create Article (Admin)
 export const createBlogPost = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const data = blogPostSchema.parse(req.body);
+
+    const existingSlug = await prisma.blogPost.findUnique({ where: { slug: data.slug }, select: { id: true } });
+    if (existingSlug) {
+      sendError(res, 'An article with this slug already exists.', 409);
+      return;
+    }
 
     const newPost = await prisma.blogPost.create({
       data: {
@@ -159,45 +188,82 @@ export const createBlogPost = async (req: Request, res: Response, next: NextFunc
       },
     });
 
-    cache.del('blogs:');
-
-    sendSuccess(res, { post: newPost }, 'Article published successfully', 201);
+    invalidateBlogCaches();
+    sendSuccess(res, { post: newPost }, data.status === 'PUBLISHED' ? 'Article published successfully' : 'Article saved as draft', 201);
   } catch (err) {
+    if (err instanceof z.ZodError) {
+      sendError(res, 'Invalid article data.', 400, err.flatten());
+      return;
+    }
     next(err);
   }
 };
 
-// 4. Update Article - Invalidates Cache
+// 4. Update Article (Admin)
 export const updateBlogPost = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const { id } = req.params;
-    const updateData = req.body;
+    const updateData = blogPostUpdateSchema.parse(req.body);
+
+    const existing = await prisma.blogPost.findUnique({ where: { id } });
+    if (!existing) {
+      sendError(res, 'Article not found', 404);
+      return;
+    }
+
+    if (updateData.slug && updateData.slug !== existing.slug) {
+      const slugOwner = await prisma.blogPost.findUnique({
+        where: { slug: updateData.slug },
+        select: { id: true },
+      });
+      if (slugOwner && slugOwner.id !== id) {
+        sendError(res, 'An article with this slug already exists.', 409);
+        return;
+      }
+    }
+
+    const data: any = { ...updateData };
+
+    if (updateData.status === 'PUBLISHED' && existing.status !== 'PUBLISHED') {
+      data.publishedAt = new Date();
+    } else if (updateData.status === 'DRAFT') {
+      data.publishedAt = null;
+    }
 
     const post = await prisma.blogPost.update({
       where: { id },
-      data: updateData,
+      data,
     });
 
-    cache.del('blogs:');
-    cache.del(`blog:slug:${post.slug}`);
+    invalidateBlogCaches(existing.slug);
+    if (post.slug !== existing.slug) {
+      invalidateBlogCaches(post.slug);
+    }
 
-    sendSuccess(res, { post }, 'Article updated successfully');
+    sendSuccess(res, { post }, post.status === 'PUBLISHED' ? 'Article published successfully' : 'Article updated successfully');
   } catch (err) {
+    if (err instanceof z.ZodError) {
+      sendError(res, 'Invalid article data.', 400, err.flatten());
+      return;
+    }
     next(err);
   }
 };
 
-// 5. Delete Article - Invalidates Cache
+// 5. Delete Article (Admin)
 export const deleteBlogPost = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const { id } = req.params;
-    const existing = await prisma.blogPost.findUnique({ where: { id } });
+    const existing = await prisma.blogPost.findUnique({ where: { id }, select: { id: true, slug: true } });
+
+    if (!existing) {
+      sendError(res, 'Article not found', 404);
+      return;
+    }
 
     await prisma.blogPost.delete({ where: { id } });
 
-    cache.del('blogs:');
-    if (existing?.slug) cache.del(`blog:slug:${existing.slug}`);
-
+    invalidateBlogCaches(existing.slug);
     sendSuccess(res, null, 'Article deleted successfully');
   } catch (err) {
     next(err);
