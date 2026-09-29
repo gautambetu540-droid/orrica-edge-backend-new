@@ -138,23 +138,17 @@ const generateJobCode = async (): Promise<string> => {
   const currentYear = new Date().getFullYear();
   const prefix = `OE-${currentYear}-`;
 
-  // Never use total row count for job codes. Deleted/legacy records can
-  // make count-based generation collide with an existing unique jobCode.
+  // Generate the next sequence from the highest existing code, not total row count.
+  // This prevents collisions when records have been deleted or imported.
   const latest = await prisma.job.findFirst({
     where: {
-      jobCode: {
-        startsWith: prefix,
-      },
+      jobCode: { startsWith: prefix },
     },
-    orderBy: {
-      jobCode: 'desc',
-    },
-    select: {
-      jobCode: true,
-    },
+    orderBy: { jobCode: 'desc' },
+    select: { jobCode: true },
   });
 
-  const match = latest?.jobCode?.match(new RegExp(`^${prefix}(\\\\d+)import { Request, Response, NextFunction } from 'express';
+  const match = latest?.jobCode?.match(new RegExp(`^${prefix}(\\d+)import { Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import { prisma } from '../prisma/client';
 import { cache } from '../utils/cache';
@@ -473,9 +467,8 @@ export const createJob = async (req: Request, res: Response, next: NextFunction)
 
     const baseSlug = slugify(data.title);
 
-    // jobCode is UNIQUE in Prisma. Generate from the highest existing
-    // sequence for the current year and retry if another request wins a
-    // concurrent race for the same next code.
+    // jobCode is UNIQUE in Prisma. Retry only when a concurrent request
+    // happens to claim the same next sequence.
     let newJob: any;
 
     for (let attempt = 0; attempt < 5; attempt += 1) {
@@ -494,8 +487,6 @@ export const createJob = async (req: Request, res: Response, next: NextFunction)
         });
         break;
       } catch (error: any) {
-        // Prisma P2002 = unique constraint violation. Retry only for
-        // jobCode races; all other errors must go through normal handling.
         if (error?.code !== 'P2002' || !String(error?.meta?.target ?? '').includes('jobCode')) {
           throw error;
         }
