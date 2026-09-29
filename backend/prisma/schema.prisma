@@ -158,13 +158,13 @@ model User {
 
 model RefreshToken {
   id               String   @id @default(uuid())
-  token            String   @unique
+  token             String   @unique
   userId            String
   user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  expiresAt        DateTime
-  isRevoked        Boolean  @default(false)
-  replacedByToken  String?
-  createdAt        DateTime @default(now())
+  expiresAt         DateTime
+  isRevoked         Boolean  @default(false)
+  replacedByToken   String?
+  createdAt         DateTime @default(now())
 
   @@map("refresh_tokens")
 }
@@ -187,7 +187,7 @@ model Client {
 
   jobs             Job[]
   invoices         Invoice[]
-  payouts           Payout[]
+  payouts          Payout[]
   replacementCases ReplacementCase[]
 
   @@map("clients")
@@ -245,7 +245,7 @@ model Candidate {
   fullName            String
   email               String          @unique
   phone               String
-  location            String
+  location             String
   education           String?
   experienceYears     Decimal         @default(0) @db.Decimal(4, 1)
   currentCompany      String?
@@ -282,7 +282,7 @@ model Application {
   candidateId      String
   candidate        Candidate       @relation(fields: [candidateId], references: [id], onDelete: Cascade)
   recruiterId      String?
-  recruiter        User?            @relation("RecruiterApplications", fields: [recruiterId], references: [id], onDelete: SetNull)
+  recruiter        User            @relation("RecruiterApplications", fields: [recruiterId], references: [id], onDelete: SetNull)
   stage            ApplicationStage @default(APPLIED)
   atsScore         Int              @default(0)
   matchReason      String?          @db.Text
@@ -329,6 +329,8 @@ model Assessment {
   updatedAt    DateTime @updatedAt
 
   attempts AssessmentAttempt[]
+
+  @@map("assessments")
 }
 
 model AssessmentAttempt {
@@ -372,7 +374,8 @@ model ReplacementCase {
   id                     String            @id @default(uuid())
   clientId               String
   client                 Client            @relation(fields: [clientId], references: [id])
-  jobId                  Job               @relation(fields: [jobId], references: [id])
+  jobId                  String
+  job                   Job               @relation(fields: [jobId], references: [id])
   primaryCandidateId     String
   primaryCandidate       Candidate         @relation("PrimaryCandidate", fields: [primaryCandidateId], references: [id])
   replacementCandidateId String?
@@ -380,8 +383,8 @@ model ReplacementCase {
   reason                 String            @db.Text
   status                 ReplacementStatus @default(REQUESTED)
   windowDays             Int               @default(90)
-  requestedAt             DateTime          @default(now())
-  resolvedAt              DateTime?
+  requestedAt            DateTime          @default(now())
+  resolvedAt             DateTime?
 
   @@map("replacement_cases")
 }
@@ -457,9 +460,9 @@ model Notification {
   title     String
   message   String
   type      String   @default("INFO")
-  link      String?
-  isRead    Boolean  @default(false)
-  createdAt DateTime @default(now())
+  link       String?
+  isRead     Boolean  @default(false)
+  createdAt   DateTime @default(now())
 
   @@index([userId, isRead])
   @@map("notifications")
@@ -551,15 +554,15 @@ model RecruiterApplication {
 
 model UniversalForm {
   id             String                    @id @default(uuid())
-  name            String
-  slug            String                    @unique
+  name           String
+  slug           String                    @unique
   description    String?                   @db.Text
   fields          Json
-  successMessage  String?                   @db.Text
-  isActive         Boolean                   @default(true)
-  createdById       String?
-  createdAt         DateTime                  @default(now())
-  updatedAt         DateTime                  @updatedAt
+  successMessage  String?                  @db.Text
+  isActive        Boolean                 @default(true)
+  createdById     String?
+  createdAt       DateTime                @default(now())
+  updatedAt       DateTime                @updatedAt
 
   submissions UniversalFormSubmission[]
 
@@ -570,14 +573,14 @@ model UniversalForm {
 
 model UniversalFormSubmission {
   id             String        @id @default(uuid())
-  formId          String
+  formId         String
   form            UniversalForm @relation(fields: [formId], references: [id], onDelete: Cascade)
   candidateId     String?
   candidate       Candidate?   @relation(fields: [candidateId], references: [id], onDelete: SetNull)
-  payload          Json
-  resumeUrl        String?
+  payload         Json
+  resumeUrl       String?
   resumeFileName  String?
-  createdAt        DateTime     @default(now())
+  createdAt        DateTime    @default(now())
 
   @@index([formId, createdAt])
   @@index([candidateId])
