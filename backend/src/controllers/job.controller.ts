@@ -133,6 +133,14 @@ const createJobSchema = z.object({
   salaryText: z.string().optional(),
   vacancies: z.coerce.number().int().min(1).default(1),
   skills: z.array(z.string()).default([]),
+  hiringProcess: z.array(z.object({
+    title: z.string().trim().min(1),
+    description: z.string().optional().default(''),
+  })).default([]),
+  faqs: z.array(z.object({
+    question: z.string().trim().min(1),
+    answer: z.string().optional().default(''),
+  })).default([]),
   contentHtml: z.string().trim().min(10),
   status: z.enum(['DRAFT', 'PUBLISHED', 'PAUSED', 'CLOSED', 'ARCHIVED']).default('DRAFT'),
 });
@@ -423,6 +431,8 @@ export const updateJob = async (req: Request, res: Response, next: NextFunction)
       'vacancies',
       'skills',
       'languages',
+      'hiringProcess',
+      'faqs',
       'contentHtml',
       'eligibilityCriteria',
       'requirements',
