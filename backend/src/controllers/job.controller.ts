@@ -329,7 +329,7 @@ export const createJob = async (req: Request, res: Response, next: NextFunction)
       },
     });
 
-    // Invalidate jobs cache
+    // Invalidate every cached jobs-list variant after creation.
     cache.del('jobs:');
 
     sendSuccess(res, { job: newJob }, 'Job created successfully', 201);
@@ -447,6 +447,7 @@ export const updateJob = async (req: Request, res: Response, next: NextFunction)
       data: updateData,
     });
 
+    // Invalidate every cached jobs-list variant after any update.
     cache.del('jobs:');
     cache.del('job:slug:' + existing.slug);
 
@@ -468,6 +469,7 @@ export const deleteJob = async (req: Request, res: Response, next: NextFunction)
 
     await prisma.job.delete({ where: { id } });
 
+    // Invalidate every cached jobs-list variant after deletion.
     cache.del('jobs:');
     if (existing?.slug) cache.del(`job:slug:${existing.slug}`);
 
