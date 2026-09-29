@@ -134,16 +134,16 @@ model User {
   fullName             String
   role                 Role      @default(CANDIDATE)
   phone                String?
-  avatarUrl             String?
-  isActive               Boolean   @default(true)
-  isEmailVerified        Boolean   @default(false)
-  emailVerifyToken       String?
-  resetPasswordToken     String?
-  resetPasswordExpires   DateTime?
-  failedLoginAttempts    Int       @default(0)
-  lockUntil              DateTime?
-  createdAt              DateTime  @default(now())
-  updatedAt              DateTime  @updatedAt
+  avatarUrl            String?
+  isActive              Boolean   @default(true)
+  isEmailVerified       Boolean   @default(false)
+  emailVerifyToken      String?
+  resetPasswordToken    String?
+  resetPasswordExpires  DateTime?
+  failedLoginAttempts   Int       @default(0)
+  lockUntil             DateTime?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
 
   refreshTokens        RefreshToken[]
   jobsCreated          Job[]             @relation("CreatedJobs")
@@ -158,13 +158,13 @@ model User {
 
 model RefreshToken {
   id               String   @id @default(uuid())
-  token             String   @unique
-  userId            String
+  token            String   @unique
+  userId           String
   user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  expiresAt         DateTime
-  isRevoked         Boolean  @default(false)
+  expiresAt        DateTime
+  isRevoked        Boolean  @default(false)
   replacedByToken   String?
-  createdAt         DateTime @default(now())
+  createdAt        DateTime @default(now())
 
   @@map("refresh_tokens")
 }
@@ -187,7 +187,7 @@ model Client {
 
   jobs             Job[]
   invoices         Invoice[]
-  payouts          Payout[]
+  payouts           Payout[]
   replacementCases ReplacementCase[]
 
   @@map("clients")
@@ -210,9 +210,9 @@ model Job {
   salaryMin            Decimal?       @db.Decimal(10, 2)
   salaryMax            Decimal?       @db.Decimal(10, 2)
   salaryText           String?
-  vacancies             Int            @default(1)
+  vacancies            Int            @default(1)
   skills               String[]
-  languages             String[]       @default(["English", "Hindi"])
+  languages            String[]       @default(["English", "Hindi"])
   hiringProcess        Json?
   faqs                 Json?
   contentHtml          String         @db.Text
@@ -222,47 +222,47 @@ model Job {
   status               JobStatus      @default(DRAFT)
   views                Int            @default(0)
   publishedAt          DateTime?
-  metaTitle             String?
-  metaDescription       String?        @db.Text
+  metaTitle            String?
+  metaDescription      String?        @db.Text
   createdById           String
   createdBy             User           @relation("CreatedJobs", fields: [createdById], references: [id])
-  createdAt              DateTime       @default(now())
-  updatedAt              DateTime       @updatedAt
+  createdAt             DateTime       @default(now())
+  updatedAt             DateTime       @updatedAt
 
-  applications      Application[]
-  payouts           Payout[]
-  replacementCases  ReplacementCase[]
+  applications         Application[]
+  payouts              Payout[]
+  replacementCases     ReplacementCase[]
 
   @@index([status, department, location])
   @@map("jobs")
 }
 
 model Candidate {
-  id                 String          @id @default(uuid())
-  candidateCode      String          @unique
-  userId             String?         @unique
-  user               User?           @relation(fields: [userId], references: [id], onDelete: SetNull)
+  id                 String           @id @default(uuid())
+  candidateCode      String           @unique
+  userId             String?          @unique
+  user               User?            @relation(fields: [userId], references: [id], onDelete: SetNull)
   fullName            String
-  email               String          @unique
+  email               String           @unique
   phone               String
-  location             String
+  location            String
   education           String?
-  experienceYears     Decimal         @default(0) @db.Decimal(4, 1)
+  experienceYears     Decimal          @default(0) @db.Decimal(4, 1)
   currentCompany      String?
   currentDesignation  String?
-  currentCtc          Decimal?        @db.Decimal(10, 2)
-  expectedCtc         Decimal?        @db.Decimal(10, 2)
+  currentCtc          Decimal?         @db.Decimal(10, 2)
+  expectedCtc         Decimal?         @db.Decimal(10, 2)
   noticePeriodDays    Int?
   skills              String[]
-  languages           String[]        @default(["English"])
+  languages           String[]         @default(["English"])
   resumeUrl           String
-  resumeText          String?        @db.Text
-  source               String          @default("Website Direct")
-  tags                 String[]        @default([])
-  notes                String?        @db.Text
+  resumeText          String?          @db.Text
+  source               String           @default("Website Direct")
+  tags                 String[]         @default([])
+  notes                String?         @db.Text
   status               CandidateStatus @default(NEW)
-  createdAt             DateTime       @default(now())
-  updatedAt             DateTime       @updatedAt
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
 
   applications       Application[]
   assessmentAttempts AssessmentAttempt[]
@@ -276,22 +276,22 @@ model Candidate {
 }
 
 model Application {
-  id              String           @id @default(uuid())
+  id              String            @id @default(uuid())
   jobId           String
-  job             Job              @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  job             Job               @relation(fields: [jobId], references: [id], onDelete: Cascade)
   candidateId      String
-  candidate        Candidate       @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  candidate        Candidate        @relation(fields: [candidateId], references: [id], onDelete: Cascade)
   recruiterId      String?
-  recruiter        User            @relation("RecruiterApplications", fields: [recruiterId], references: [id], onDelete: SetNull)
+  recruiter        User?            @relation("RecruiterApplications", fields: [recruiterId], references: [id], onDelete: SetNull)
   stage            ApplicationStage @default(APPLIED)
   atsScore         Int              @default(0)
-  matchReason      String?          @db.Text
-  missingSkills    String[]         @default([])
-  rejectionReason  String?          @db.Text
+  matchReason      String?           @db.Text
+  missingSkills    String[]          @default([])
+  rejectionReason  String?           @db.Text
   internalNotes    Json?
   timeline         Json?
-  appliedAt        DateTime         @default(now())
-  updatedAt        DateTime         @updatedAt
+  appliedAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
 
   interviews      Interview[]
 
@@ -354,11 +354,11 @@ model Payout {
   recruiterId   String
   recruiter     User         @relation(fields: [recruiterId], references: [id])
   candidateId   String
-  candidate     Candidate    @relation(fields: [candidateId], references: [id])
+  candidate     Candidate   @relation(fields: [candidateId], references: [id])
   clientId      String
-  client        Client       @relation(fields: [clientId], references: [id])
+  client        Client      @relation(fields: [clientId], references: [id])
   jobId         String
-  job           Job          @relation(fields: [jobId], references: [id])
+  job           Job         @relation(fields: [jobId], references: [id])
   amount        Decimal      @db.Decimal(10, 2)
   status        PayoutStatus @default(PENDING)
   invoiceNumber String?
@@ -441,14 +441,14 @@ model Inquiry {
   type          InquiryType
   fullName      String
   email         String
-  phone         String
+  phone          String
   companyName   String?
   requirements  String?       @db.Text
-  status        InquiryStatus @default(NEW)
-  notes         String?       @db.Text
-  assignedToId  String?
-  createdAt     DateTime      @default(now())
-  updatedAt     DateTime      @updatedAt
+  status         InquiryStatus @default(NEW)
+  notes          String?       @db.Text
+  assignedToId   String?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
 
   @@map("inquiries")
 }
@@ -460,9 +460,9 @@ model Notification {
   title     String
   message   String
   type      String   @default("INFO")
-  link       String?
-  isRead     Boolean  @default(false)
-  createdAt   DateTime @default(now())
+  link      String?
+  isRead    Boolean  @default(false)
+  createdAt  DateTime @default(now())
 
   @@index([userId, isRead])
   @@map("notifications")
@@ -556,13 +556,13 @@ model UniversalForm {
   id             String                    @id @default(uuid())
   name           String
   slug           String                    @unique
-  description    String?                   @db.Text
+  description    String?                  @db.Text
   fields          Json
-  successMessage  String?                  @db.Text
-  isActive        Boolean                 @default(true)
-  createdById     String?
-  createdAt       DateTime                @default(now())
-  updatedAt       DateTime                @updatedAt
+  successMessage String?                  @db.Text
+  isActive       Boolean                  @default(true)
+  createdById    String?
+  createdAt      DateTime                 @default(now())
+  updatedAt      DateTime                 @updatedAt
 
   submissions UniversalFormSubmission[]
 
@@ -572,15 +572,15 @@ model UniversalForm {
 }
 
 model UniversalFormSubmission {
-  id             String        @id @default(uuid())
+  id             String         @id @default(uuid())
   formId         String
-  form            UniversalForm @relation(fields: [formId], references: [id], onDelete: Cascade)
-  candidateId     String?
-  candidate       Candidate?   @relation(fields: [candidateId], references: [id], onDelete: SetNull)
-  payload         Json
-  resumeUrl       String?
-  resumeFileName  String?
-  createdAt        DateTime    @default(now())
+  form           UniversalForm  @relation(fields: [formId], references: [id], onDelete: Cascade)
+  candidateId    String?
+  candidate      Candidate?     @relation(fields: [candidateId], references: [id], onDelete: SetNull)
+  payload        Json
+  resumeUrl      String?
+  resumeFileName String?
+  createdAt      DateTime       @default(now())
 
   @@index([formId, createdAt])
   @@index([candidateId])
