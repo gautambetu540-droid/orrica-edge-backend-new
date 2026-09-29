@@ -140,6 +140,47 @@ export const getBlogPosts = async (req: Request, res: Response, next: NextFuncti
   }
 };
 
+export const getAdminBlogPosts = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const posts = await prisma.blogPost.findMany({
+      orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }],
+      select: {
+        id: true,
+        title: true,
+        slug: true,
+        category: true,
+        excerpt: true,
+        contentMarkdown: true,
+        featuredImage: true,
+        authorName: true,
+        authorRole: true,
+        readingTime: true,
+        isFeatured: true,
+        status: true,
+        publishedAt: true,
+        views: true,
+        metaTitle: true,
+        metaDescription: true,
+        ogImage: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+
+    sendSuccess(res, {
+      posts,
+      pagination: {
+        total: posts.length,
+        page: 1,
+        limit: posts.length || 1,
+        totalPages: 1,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
 export const getBlogPostBySlug = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const { slug } = req.params;
