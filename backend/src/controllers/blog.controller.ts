@@ -23,6 +23,40 @@ const blogPostSchema = z.object({
 
 const blogPostUpdateSchema = blogPostSchema.partial();
 
+const normalizeBlogPayload = (body: any) => {
+  const input = { ...body };
+
+  if (input.contentMarkdown == null && input.content != null) input.contentMarkdown = input.content;
+  if (input.featuredImage == null && input.imageUrl != null) input.featuredImage = input.imageUrl;
+  if (input.readingTime == null && input.readTime != null) input.readingTime = input.readTime;
+
+  if (input.authorName == null && input.author != null) {
+    input.authorName =
+      typeof input.author === 'string'
+        ? input.author
+        : input.author?.name || 'Orrica Edge Career Editorial Team';
+  }
+
+  if (typeof input.status === 'string') {
+    const status = input.status.toUpperCase();
+    input.status = status === 'PUBLISHED' || status === 'PUBLISH' ? 'PUBLISHED' : 'DRAFT';
+  }
+
+  if (input.isFeatured == null && input.featured != null) {
+    input.isFeatured = Boolean(input.featured);
+  }
+
+  delete input.id;
+  delete input.views;
+  delete input.publishedDate;
+  delete input.updatedDate;
+  delete input.createdAt;
+  delete input.updatedAt;
+  delete input.author;
+
+  return input;
+};
+
 const invalidateBlogCaches = (slug?: string) => {
   cache.del('blogs:');
   if (slug) cache.del(`blog:slug:${slug}`);
@@ -168,7 +202,7 @@ export const getBlogPostBySlug = async (req: Request, res: Response, next: NextF
 
 export const createBlogPost = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const data = blogPostSchema.parse(req.body);
+    const data = blogPostSchema.parse(normalizeBlogPayload(req.body));
 
     const existingSlug = await prisma.blogPost.findUnique({
       where: { slug: data.slug },
@@ -206,7 +240,7 @@ export const createBlogPost = async (req: Request, res: Response, next: NextFunc
 export const updateBlogPost = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const { id } = req.params;
-    const updateData = blogPostUpdateSchema.parse(req.body);
+    const updateData = blogPostUpdateSchema.parse(normalizeBlogPayload(req.body));
 
     const existing = await prisma.blogPost.findUnique({ where: { id } });
     if (!existing) {
