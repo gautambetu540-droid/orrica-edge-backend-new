@@ -48,9 +48,10 @@ export const applyForJob = async (req: Request, res: Response, next: NextFunctio
 
     // Verify target job exists
     const job = await prisma.job.findUnique({
-      where: { id: data.jobId },
+      where: { id: data.jobId, status: 'PUBLISHED' },
       select: {
         id: true,
+        status: true,
         title: true,
         jobCode: true,
         skills: true,
@@ -63,7 +64,7 @@ export const applyForJob = async (req: Request, res: Response, next: NextFunctio
     });
 
     if (!job) {
-      sendError(res, 'Target job opening not found', 404);
+      sendError(res, 'Target job opening is unavailable', 404);
       return;
     }
 
