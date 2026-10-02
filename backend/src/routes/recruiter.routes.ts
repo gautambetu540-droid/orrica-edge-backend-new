@@ -4,6 +4,7 @@ import {
   getRecruiters,
   getMyRecruiterProfile,
   updateMyRecruiterProfile,
+  updateRecruiterStatus,
 } from '../controllers/recruiter.controller';
 import {
   getMyRecruiterPermissions,
@@ -30,6 +31,13 @@ router.get(
   authenticateJwt,
   requireRoles('SUPER_ADMIN', 'ADMIN'),
   getRecruiters
+);
+
+router.patch(
+  '/:id/status',
+  authenticateJwt,
+  requireRoles('SUPER_ADMIN', 'ADMIN'),
+  updateRecruiterStatus
 );
 
 router.get(
