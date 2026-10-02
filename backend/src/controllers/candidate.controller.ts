@@ -103,47 +103,48 @@ export const getCandidates = async (req: Request, res: Response, next: NextFunct
       limit = '20',
     } = req.query;
 
-    const pageNum = Math.max(1, parseInt(page as string, 10) || 1);
-    const limitNum = Math.min(100, Math.max(1, parseInt(limit as string, 10) || 20));
+    const pageNum = Math.max(1, parseInt(String(page), 10) || 1);
+    const limitNum = Math.min(100, Math.max(1, parseInt(String(limit), 10) || 20));
     const skip = (pageNum - 1) * limitNum;
 
     const from = parseDate(dateFrom);
     const to = parseDate(dateTo);
     if (to) to.setHours(23, 59, 59, 999);
 
-    const where: any = {};
-    if (status) where.status = status as any;
-    if (location) where.location = { contains: location as string, mode: 'insensitive' };
-    if (skill) where.skills = { has: skill as string };
-    if (language) where.languages = { has: language as string };
-    if (source) where.source = { contains: source as string, mode: 'insensitive' };
-    if (ownerRecruiterId) where.ownerRecruiterId = ownerRecruiterId as string;
-    if (createdById) where.createdById = createdById as string;
+    const andFilters: any[] = [];
+
+    if (status) andFilters.push({ status });
+    if (location) andFilters.push({ location: { contains: String(location), mode: 'insensitive' } });
+    if (skill) andFilters.push({ skills: { has: String(skill) } });
+    if (language) andFilters.push({ languages: { has: String(language) } });
+    if (source) andFilters.push({ source: { contains: String(source), mode: 'insensitive' } });
+    if (ownerRecruiterId) andFilters.push({ ownerRecruiterId: String(ownerRecruiterId) });
+    if (createdById) andFilters.push({ createdById: String(createdById) });
 
     const isAdmin = req.user?.role === 'ADMIN' || req.user?.role === 'SUPER_ADMIN';
     const currentUserId = req.user?.userId;
 
     if (!isAdmin && req.user?.role === 'RECRUITER') {
-      where.OR = [
-        { ownerRecruiterId: currentUserId },
-        { createdById: currentUserId },
-        { applications: { some: { recruiterId: currentUserId } } },
-      ];
+      andFilters.push({
+        OR: [
+          { ownerRecruiterId: currentUserId },
+          { createdById: currentUserId },
+          { applications: { some: { recruiterId: currentUserId } } },
+        ],
+      });
     }
 
-    if (recruiterId) {
-      where.applications = { some: { recruiterId: recruiterId as string } };
-    }
+    const applicationSome: any = {};
+    if (recruiterId) applicationSome.recruiterId = String(recruiterId);
+    if (jobId) applicationSome.jobId = String(jobId);
 
-    if (jobId || workMode || employmentType) {
-      where.applications = {
-        some: {
-          ...(recruiterId ? { recruiterId: recruiterId as string } : {}),
-          ...(jobId ? { jobId: jobId as string } : {}),
-          ...(workMode ? { job: { workMode: workMode as any } } : {}),
-          ...(employmentType ? { job: { employmentType: employmentType as any } } : {}),
-        },
-      };
+    const jobFilter: any = {};
+    if (workMode) jobFilter.workMode = workMode;
+    if (employmentType) jobFilter.employmentType = employmentType;
+    if (Object.keys(jobFilter).length) applicationSome.job = jobFilter;
+
+    if (Object.keys(applicationSome).length) {
+      andFilters.push({ applications: { some: applicationSome } });
     }
 
     if (walkInStatus) {
@@ -153,31 +154,27 @@ export const getCandidates = async (req: Request, res: Response, next: NextFunct
         NO_SHOW: 'WALK_IN_NO_SHOW',
       };
       const action = actionMap[String(walkInStatus).toUpperCase()];
-      if (action) {
-        where.activities = { some: { action } };
-      }
+      if (action) andFilters.push({ activities: { some: { action } } });
     }
 
     const createdAt = buildDateFilter(from, to);
-    if (createdAt) where.createdAt = createdAt;
+    if (createdAt) andFilters.push({ createdAt });
 
     if (search) {
-      const searchOr = [
-        { fullName: { contains: search as string, mode: 'insensitive' } },
-        { email: { contains: search as string, mode: 'insensitive' } },
-        { phone: { contains: search as string, mode: 'insensitive' } },
-        { currentCompany: { contains: search as string, mode: 'insensitive' } },
-        { currentDesignation: { contains: search as string, mode: 'insensitive' } },
-        { candidateCode: { contains: search as string, mode: 'insensitive' } },
-      ];
-      // Preserve recruiter visibility while adding search.
-      if (where.OR) {
-        where.AND = [{ OR: where.OR }, { OR: searchOr }];
-        delete where.OR;
-      } else {
-        where.OR = searchOr;
-      }
+      const q = String(search);
+      andFilters.push({
+        OR: [
+          { candidateCode: { contains: q, mode: 'insensitive' } },
+          { fullName: { contains: q, mode: 'insensitive' } },
+          { email: { contains: q, mode: 'insensitive' } },
+          { phone: { contains: q, mode: 'insensitive' } },
+          { currentCompany: { contains: q, mode: 'insensitive' } },
+          { currentDesignation: { contains: q, mode: 'insensitive' } },
+        ],
+      });
     }
+
+    const where = andFilters.length ? { AND: andFilters } : {};
 
     const [total, candidates] = await Promise.all([
       prisma.candidate.count({ where }),
@@ -188,10 +185,21 @@ export const getCandidates = async (req: Request, res: Response, next: NextFunct
         orderBy: { createdAt: 'desc' },
         include: {
           ownerRecruiter: {
-            select: { id: true, recruiterId: true, fullName: true, email: true, recruiterType: true },
+            select: {
+              id: true,
+              recruiterId: true,
+              fullName: true,
+              email: true,
+              recruiterType: true,
+            },
           },
           createdBy: {
-            select: { id: true, fullName: true, role: true, recruiterId: true },
+            select: {
+              id: true,
+              fullName: true,
+              role: true,
+              recruiterId: true,
+            },
           },
           applications: {
             orderBy: { appliedAt: 'desc' },
@@ -208,7 +216,13 @@ export const getCandidates = async (req: Request, res: Response, next: NextFunct
                 },
               },
               recruiter: {
-                select: { id: true, recruiterId: true, fullName: true, email: true, recruiterType: true },
+                select: {
+                  id: true,
+                  recruiterId: true,
+                  fullName: true,
+                  email: true,
+                  recruiterType: true,
+                },
               },
               interviews: true,
             },
@@ -223,12 +237,28 @@ export const getCandidates = async (req: Request, res: Response, next: NextFunct
               metadata: true,
               createdAt: true,
               recruiter: {
-                select: { id: true, recruiterId: true, fullName: true, recruiterType: true },
+                select: {
+                  id: true,
+                  recruiterId: true,
+                  fullName: true,
+                  recruiterType: true,
+                },
+              },
+              user: {
+                select: {
+                  id: true,
+                  fullName: true,
+                  role: true,
+                },
               },
             },
           },
           _count: {
-            select: { applications: true, assessmentAttempts: true, activities: true },
+            select: {
+              applications: true,
+              assessmentAttempts: true,
+              activities: true,
+            },
           },
         },
       }),
@@ -236,23 +266,6 @@ export const getCandidates = async (req: Request, res: Response, next: NextFunct
 
     sendSuccess(res, {
       candidates,
-      filters: {
-        search,
-        status,
-        location,
-        skill,
-        language,
-        source,
-        recruiterId,
-        ownerRecruiterId,
-        createdById,
-        jobId,
-        workMode,
-        employmentType,
-        walkInStatus,
-        dateFrom,
-        dateTo,
-      },
       pagination: {
         total,
         page: pageNum,
@@ -264,7 +277,6 @@ export const getCandidates = async (req: Request, res: Response, next: NextFunct
     next(err);
   }
 };
-
 export const createCandidate = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const data = createCandidateSchema.parse(req.body);
