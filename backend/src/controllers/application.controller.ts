@@ -41,11 +41,6 @@ export const applyForJob = async (req: Request, res: Response, next: NextFunctio
   try {
     const data = applySchema.parse(req.body);
 
-    if (!req.file) {
-      sendError(res, 'Resume file is required (PDF or DOC/DOCX up to 5MB)', 400);
-      return;
-    }
-
     // Verify target job exists
     const job = await prisma.job.findUnique({
       where: { id: data.jobId, status: 'PUBLISHED' },
@@ -69,7 +64,7 @@ export const applyForJob = async (req: Request, res: Response, next: NextFunctio
     }
 
     // Upload to S3 / Local storage
-    const uploadResult = await uploadResumeFile(req.file, data.fullName);
+    const uploadResult = req.file ? await uploadResumeFile(req.file, data.fullName) : null;
 
     // Compute ATS match in memory
     const atsMatch = analyzeAtsMatch(
@@ -123,7 +118,7 @@ export const applyForJob = async (req: Request, res: Response, next: NextFunctio
           location: data.location,
           skills: data.skills,
           languages: data.languages,
-          resumeUrl: uploadResult.fileUrl,
+          resumeUrl: uploadResult?.fileUrl || '',
           experienceYears: data.experienceYears,
           currentCompany: data.currentCompany,
           currentDesignation: data.currentDesignation,
