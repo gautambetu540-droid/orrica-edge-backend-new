@@ -86,7 +86,7 @@ export const setupMfa = async (
       data: {
         mfaSecret: secret,
         mfaEnabled: false,
-        mfaBackupCodes: { set: null },
+        mfaBackupCodes: { set: [] },
       },
     });
 
@@ -253,9 +253,9 @@ export const verifyMfaChallenge = async (
           email: user.email,
           fullName: user.fullName,
           role: user.role,
-          phone: undefined,
-          avatarUrl: undefined,
-          recruiterId: undefined,
+          phone: null,
+          avatarUrl: null,
+          recruiterId: null,
           mfaEnabled: true,
         },
         remainingBackupCodes: remainingBackupCodes.length,
