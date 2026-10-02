@@ -561,8 +561,15 @@ const getRecruiterMetricSnapshot = async (recruiterId: string, range: Productivi
       }
     : undefined;
 
+  const recruiterCandidateScope = {
+    OR: [
+      { ownerRecruiterId: recruiterId },
+      { createdById: recruiterId },
+      { applications: { some: { recruiterId } } },
+    ],
+  };
   const candidateWhere: any = {
-    ownerRecruiterId: recruiterId,
+    ...recruiterCandidateScope,
     ...(dateFilter ? { createdAt: dateFilter } : {}),
   };
 
@@ -577,7 +584,7 @@ const getRecruiterMetricSnapshot = async (recruiterId: string, range: Productivi
       where: {
         recruiterId,
         ...(dateFilter ? { createdAt: dateFilter } : {}),
-        candidate: { is: { ownerRecruiterId: recruiterId } },
+        candidate: { is: recruiterCandidateScope },
       },
       _count: { _all: true },
     }),
