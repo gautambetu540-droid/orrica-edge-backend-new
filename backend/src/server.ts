@@ -40,10 +40,14 @@ app.use(cookieParser());
 app.use(
   cors({
     origin: (origin, callback) => {
-      if (!origin || config.corsOrigin.includes(origin) || config.corsOrigin.includes('*')) {
+      const isAllowedOrigin =
+        config.corsOrigin.includes(origin || '') ||
+        (config.nodeEnv !== 'production' && config.corsOrigin.includes('*'));
+
+      if (!origin || isAllowedOrigin) {
         callback(null, true);
       } else {
-        callback(null, true); // Permissive for local development
+        callback(new Error('Origin is not allowed by CORS'));
       }
     },
     credentials: true,
