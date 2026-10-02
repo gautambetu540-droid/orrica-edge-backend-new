@@ -13,6 +13,7 @@ const createRecruiterSchema = z.object({
   email: z.string().trim().email().max(180),
   phone: z.string().trim().max(30).optional(),
   avatarUrl: z.string().url().max(1000).optional(),
+  recruiterType: z.enum(['INTERNAL', 'FREELANCER']).default('INTERNAL'),
 });
 
 const generateRecruiterId = async (): Promise<string> => {
@@ -75,6 +76,7 @@ export const createRecruiter = async (
           phone: data.phone?.trim() || undefined,
           avatarUrl: data.avatarUrl,
           recruiterId,
+          recruiterType: data.recruiterType,
           mustSetPassword: true,
         },
         select: {
@@ -87,6 +89,7 @@ export const createRecruiter = async (
           avatarUrl: true,
           isActive: true,
           mustSetPassword: true,
+          recruiterType: true,
           createdAt: true,
         },
       });
@@ -143,6 +146,7 @@ export const createRecruiter = async (
           avatarUrl: recruiter.avatarUrl,
           isActive: recruiter.isActive,
           mustSetPassword: recruiter.mustSetPassword,
+          recruiterType: recruiter.recruiterType,
           createdAt: recruiter.createdAt,
         },
       },
@@ -546,6 +550,173 @@ export const updateMyRecruiterProfile = async (
   }
 };
 
+
+type ProductivityRange = { from?: Date; to?: Date };
+
+const getRecruiterMetricSnapshot = async (recruiterId: string, range: ProductivityRange = {}) => {
+  const candidateWhere: any = {
+    OR: [
+      { ownerRecruiterId: recruiterId },
+      { createdById: recruiterId },
+      { applications: { some: { recruiterId } } },
+    ],
+  };
+  if (range.from || range.to) {
+    candidateWhere.createdAt = {
+      ...(range.from ? { gte: range.from } : {}),
+      ...(range.to ? { lte: range.to } : {}),
+    };
+  }
+
+  const [candidateRows, submittedCount, shortlistedCount, interviewedCount, selectedCount, joinedCount, walkInAttended, walkInScheduled, walkInNoShow] = await Promise.all([
+    prisma.candidate.findMany({ where: candidateWhere, select: { id: true } }),
+    prisma.application.count({ where: { recruiterId, ...(range.from || range.to ? { appliedAt: { ...(range.from ? { gte: range.from } : {}), ...(range.to ? { lte: range.to } : {}) } } : {}) } }),
+    prisma.application.count({ where: { recruiterId, stage: 'SHORTLISTED', ...(range.from || range.to ? { updatedAt: { ...(range.from ? { gte: range.from } : {}), ...(range.to ? { lte: range.to } : {}) } } : {}) } }),
+    prisma.application.count({ where: { recruiterId, stage: 'INTERVIEW', ...(range.from || range.to ? { updatedAt: { ...(range.from ? { gte: range.from } : {}), ...(range.to ? { lte: range.to } : {}) } } : {}) } }),
+    prisma.application.count({ where: { recruiterId, stage: 'SELECTED', ...(range.from || range.to ? { updatedAt: { ...(range.from ? { gte: range.from } : {}), ...(range.to ? { lte: range.to } : {}) } } : {}) } }),
+    prisma.application.count({ where: { recruiterId, stage: 'JOINED', ...(range.from || range.to ? { updatedAt: { ...(range.from ? { gte: range.from } : {}), ...(range.to ? { lte: range.to } : {}) } } : {}) } }),
+    prisma.candidateActivity.count({ where: { recruiterId, action: 'WALK_IN_ATTENDED', ...(range.from || range.to ? { createdAt: { ...(range.from ? { gte: range.from } : {}), ...(range.to ? { lte: range.to } : {}) } } : {}) } }),
+    prisma.candidateActivity.count({ where: { recruiterId, action: 'WALK_IN_SCHEDULED', ...(range.from || range.to ? { createdAt: { ...(range.from ? { gte: range.from } : {}), ...(range.to ? { lte: range.to } : {}) } } : {}) } }),
+    prisma.candidateActivity.count({ where: { recruiterId, action: 'WALK_IN_NO_SHOW', ...(range.from || range.to ? { createdAt: { ...(range.from ? { gte: range.from } : {}), ...(range.to ? { lte: range.to } : {}) } } : {}) } }),
+  ]);
+
+  return {
+    candidates: candidateRows.length,
+    submittedCount,
+    shortlistedCount,
+    interviewedCount,
+    selectedCount,
+    joinedCount,
+    walkInAttended,
+    walkInScheduled,
+    walkInNoShow,
+    pendingCount: Math.max(0, submittedCount - selectedCount - joinedCount),
+  };
+};
+
+const parseAnalyticsRange = (req: Request): ProductivityRange => {
+  const from = typeof req.query.dateFrom === 'string' ? new Date(req.query.dateFrom) : undefined;
+  const to = typeof req.query.dateTo === 'string' ? new Date(req.query.dateTo) : undefined;
+  if (to) to.setHours(23, 59, 59, 999);
+  return {
+    from: from && !Number.isNaN(from.getTime()) ? from : undefined,
+    to: to && !Number.isNaN(to.getTime()) ? to : undefined,
+  };
+};
+
+export const getRecruiterAnalytics = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const recruiterId = req.params.id;
+    const recruiter = await prisma.user.findFirst({
+      where: { id: recruiterId, role: 'RECRUITER' },
+      select: {
+        id: true,
+        recruiterId: true,
+        fullName: true,
+        email: true,
+        recruiterType: true,
+        isActive: true,
+        lastLoginAt: true,
+        createdAt: true,
+        preferences: true,
+      },
+    });
+
+    if (!recruiter) {
+      sendError(res, 'Recruiter not found', 404);
+      return;
+    }
+
+    const metrics = await getRecruiterMetricSnapshot(recruiterId, parseAnalyticsRange(req));
+    sendSuccess(res, { recruiter, metrics });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const getRecruiterProductivity = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const recruiterId = req.params.id;
+    const recruiter = await prisma.user.findFirst({
+      where: { id: recruiterId, role: 'RECRUITER' },
+      select: { id: true, recruiterId: true, fullName: true, recruiterType: true },
+    });
+
+    if (!recruiter) {
+      sendError(res, 'Recruiter not found', 404);
+      return;
+    }
+
+    const range = parseAnalyticsRange(req);
+    const from = range.from || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const to = range.to || new Date();
+    to.setHours(23, 59, 59, 999);
+
+    const activities = await prisma.candidateActivity.findMany({
+      where: {
+        recruiterId,
+        createdAt: { gte: from, lte: to },
+      },
+      select: { action: true, createdAt: true },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    const buckets = new Map<string, {
+      date: string;
+      candidatesAdded: number;
+      walkInsScheduled: number;
+      walkInsAttended: number;
+      walkInsNoShow: number;
+      selected: number;
+      joined: number;
+    }>();
+
+    for (const activity of activities) {
+      const date = activity.createdAt.toISOString().slice(0, 10);
+      const row = buckets.get(date) || {
+        date,
+        candidatesAdded: 0,
+        walkInsScheduled: 0,
+        walkInsAttended: 0,
+        walkInsNoShow: 0,
+        selected: 0,
+        joined: 0,
+      };
+      if (activity.action === 'CANDIDATE_CREATED') row.candidatesAdded += 1;
+      if (activity.action === 'WALK_IN_SCHEDULED') row.walkInsScheduled += 1;
+      if (activity.action === 'WALK_IN_ATTENDED') row.walkInsAttended += 1;
+      if (activity.action === 'WALK_IN_NO_SHOW') row.walkInsNoShow += 1;
+      if (activity.action === 'SELECTED') row.selected += 1;
+      if (activity.action === 'JOINED') row.joined += 1;
+      buckets.set(date, row);
+    }
+
+    sendSuccess(res, {
+      recruiter,
+      range: { from, to },
+      daily: Array.from(buckets.values()),
+      totals: {
+        candidatesAdded: Array.from(buckets.values()).reduce((n, x) => n + x.candidatesAdded, 0),
+        walkInsScheduled: Array.from(buckets.values()).reduce((n, x) => n + x.walkInsScheduled, 0),
+        walkInsAttended: Array.from(buckets.values()).reduce((n, x) => n + x.walkInsAttended, 0),
+        walkInsNoShow: Array.from(buckets.values()).reduce((n, x) => n + x.walkInsNoShow, 0),
+        selected: Array.from(buckets.values()).reduce((n, x) => n + x.selected, 0),
+        joined: Array.from(buckets.values()).reduce((n, x) => n + x.joined, 0),
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
 export const getRecruiters = async (
   req: Request,
   res: Response,
@@ -562,6 +733,7 @@ export const getRecruiters = async (
         fullName: true,
         phone: true,
         avatarUrl: true,
+        recruiterType: true,
         isActive: true,
         mustSetPassword: true,
         lastLoginAt: true,
@@ -573,7 +745,7 @@ export const getRecruiters = async (
     });
 
     sendSuccess(res, {
-      recruiters: recruiters.map((r) => ({
+      recruiters: await Promise.all(recruiters.map(async (r) => ({
         id: r.id,
         userId: r.id,
         recruiterId: r.recruiterId,
@@ -598,7 +770,9 @@ export const getRecruiters = async (
         lastLoginAt: r.lastLoginAt,
         avatar: r.avatarUrl || undefined,
         createdAt: r.createdAt,
-      })),
+        recruiterType: r.recruiterType,
+        metrics: await getRecruiterMetricSnapshot(r.id),
+      }))),
       pagination: {
         total: recruiters.length,
         page: 1,
