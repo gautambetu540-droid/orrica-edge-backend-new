@@ -490,7 +490,12 @@ export const submitPublicUniversalForm = async (req: Request, res: Response, nex
       const key = String(field.key || '').trim();
       if (key === 'resume' || !field.required) continue;
 
-      const value = body[key];
+      // "location" is a legacy field. The current public form collects
+      // fullAddress/city/state, so validate the derived location value.
+      const value = key === 'location'
+        ? location
+        : body[key];
+
       if (value === undefined || value === null || String(value).trim() === '') {
         sendError(res, `${String(field.label || key)} is required.`, 400);
         return;
