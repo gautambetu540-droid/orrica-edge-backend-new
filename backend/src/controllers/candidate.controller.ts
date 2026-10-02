@@ -702,6 +702,10 @@ export const updateCandidate = async (req: Request, res: Response, next: NextFun
       data.walkInDate !== null &&
       existing.walkInDate !== null &&
       data.walkInDate.getTime() !== existing.walkInDate.getTime();
+    if (walkInWasRescheduled && !rescheduleReason?.trim()) {
+      sendError(res, 'A reason is required when rescheduling a walk-in.', 400);
+      return;
+    }
     const updated = await prisma.$transaction(async (tx) => {
       const candidate = await tx.candidate.update({
         where: { id: req.params.id },
@@ -725,6 +729,40 @@ export const updateCandidate = async (req: Request, res: Response, next: NextFun
               newDate: data.walkInDate?.toISOString(),
               newTime: data.walkInTime ?? existing.walkInTime,
             },
+          },
+        });
+      }
+
+      const walkInChanged =
+        (data.walkInStatus !== undefined && data.walkInStatus !== existing.walkInStatus) ||
+        (data.walkInResponse !== undefined && data.walkInResponse !== existing.walkInResponse) ||
+        (data.walkInDate !== undefined && data.walkInDate?.getTime() !== existing.walkInDate?.getTime()) ||
+        (data.walkInTime !== undefined && data.walkInTime !== existing.walkInTime);
+      if (walkInChanged && !walkInWasRescheduled) {
+        await tx.candidateActivity.create({
+          data: {
+            candidateId: req.params.id,
+            userId: req.user?.userId || null,
+            recruiterId: existing.ownerRecruiterId || (req.user?.role === 'RECRUITER' ? req.user.userId : null),
+            action: 'WALK_IN_UPDATED',
+            metadata: {
+              walkInStatus: data.walkInStatus ?? existing.walkInStatus,
+              walkInResponse: data.walkInResponse ?? existing.walkInResponse,
+              walkInDate: data.walkInDate?.toISOString() ?? existing.walkInDate?.toISOString() ?? null,
+              walkInTime: data.walkInTime ?? existing.walkInTime,
+            },
+          },
+        });
+      }
+
+      if (data.followUpAt !== undefined && data.followUpAt?.getTime() !== existing.followUpAt?.getTime()) {
+        await tx.candidateActivity.create({
+          data: {
+            candidateId: req.params.id,
+            userId: req.user?.userId || null,
+            recruiterId: existing.ownerRecruiterId || (req.user?.role === 'RECRUITER' ? req.user.userId : null),
+            action: 'FOLLOW_UP_SCHEDULED',
+            metadata: { followUpAt: data.followUpAt?.toISOString() ?? null },
           },
         });
       }
