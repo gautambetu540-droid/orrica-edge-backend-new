@@ -134,6 +134,9 @@ model User {
   fullName             String
   role                 Role      @default(CANDIDATE)
   phone                String?
+  recruiterId          String?   @unique
+  mustSetPassword      Boolean   @default(false)
+  lastLoginAt           DateTime?
   avatarUrl            String?
   isActive              Boolean   @default(true)
   isEmailVerified       Boolean   @default(false)
