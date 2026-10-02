@@ -3,6 +3,9 @@ import { z } from 'zod';
 import { prisma } from '../prisma/client';
 import { sendSuccess, sendError } from '../utils/response';
 import { logAudit } from '../services/audit.service';
+import { uploadResumeFile } from '../services/storage.service';
+
+
 
 const candidateStatus = z.enum([
   'NEW',
@@ -606,3 +609,243 @@ export const updateCandidate = async (req: Request, res: Response, next: NextFun
     next(err);
   }
 };
+
+
+export const recruiterSubmitCandidate = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const userId = req.user?.userId;
+    if (!userId || req.user?.role !== 'RECRUITER') {
+      sendError(res, 'Recruiter authentication is required.', 403);
+      return;
+    }
+
+    const recruiter = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, fullName: true, recruiterId: true, recruiterType: true, isActive: true },
+    });
+
+    if (!recruiter || !recruiter.isActive) {
+      sendError(res, 'Recruiter account is inactive or unavailable.', 403);
+      return;
+    }
+
+    if (!req.file) {
+      sendError(res, 'Candidate resume is required.', 400);
+      return;
+    }
+
+    const body = req.body || {};
+    const fullName = String(body.fullName || '').trim();
+    const email = String(body.email || '').trim().toLowerCase();
+    const phone = String(body.phone || '').trim();
+    const location = String(body.location || '').trim();
+    const jobId = String(body.jobId || '').trim();
+
+    if (fullName.length < 2 || !email || !phone || !location || !jobId) {
+      sendError(res, 'Name, email, phone, location and target job are required.', 400);
+      return;
+    }
+
+    const emailCheck = z.string().email().safeParse(email);
+    if (!emailCheck.success) {
+      sendError(res, 'Please provide a valid candidate email address.', 400);
+      return;
+    }
+
+    const job = await prisma.job.findUnique({
+      where: { id: jobId },
+      select: {
+        id: true,
+        title: true,
+        status: true,
+      },
+    });
+
+    if (!job) {
+      sendError(res, 'Target job not found.', 404);
+      return;
+    }
+
+    if (String(job.status).toUpperCase() !== 'PUBLISHED') {
+      sendError(res, 'This job is not currently open for candidate submissions.', 400);
+      return;
+    }
+
+    const experienceYears = Number(body.experienceYears || 0);
+    const relevantExperience = Number(body.relevantExperience || 0);
+    const currentCtc = Number(body.currentCtc || 0);
+    const expectedCtc = Number(body.expectedCtc || 0);
+    const noticePeriodDays = Number(body.noticePeriodDays || 0);
+
+    const parseList = (value: unknown): string[] => {
+      if (Array.isArray(value)) return value.map(String).map(v => v.trim()).filter(Boolean);
+      return String(value || '').split(',').map(v => v.trim()).filter(Boolean);
+    };
+
+    const skills = parseList(body.skills);
+    const languages = parseList(body.languages);
+    const dateOfJoin = parseDate(body.dateOfJoin);
+    const feedback = String(body.feedback || '').trim() || undefined;
+    const recruiterRemarks = String(body.recruiterRemarks || '').trim();
+
+    const existingCandidate = await prisma.candidate.findFirst({
+      where: {
+        OR: [
+          { email },
+          { phone },
+        ],
+      },
+      select: {
+        id: true,
+        candidateCode: true,
+        fullName: true,
+        email: true,
+        phone: true,
+        ownerRecruiterId: true,
+      },
+    });
+
+    if (existingCandidate) {
+      const existingApplication = await prisma.application.findUnique({
+        where: {
+          jobId_candidateId: {
+            jobId,
+            candidateId: existingCandidate.id,
+          },
+        },
+        select: { id: true, stage: true },
+      });
+
+      if (existingApplication) {
+        sendError(res, 'This candidate has already been submitted for the selected job.', 409);
+        return;
+      }
+    }
+
+    const uploaded = await uploadResumeFile(req.file, fullName);
+
+    const result = await prisma.$transaction(async (tx) => {
+      let candidate;
+
+      if (existingCandidate) {
+        candidate = await tx.candidate.update({
+          where: { id: existingCandidate.id },
+          data: {
+            location,
+            education: body.education ? String(body.education) : undefined,
+            experienceYears: Number.isFinite(experienceYears) ? experienceYears : 0,
+            currentCompany: body.currentCompany ? String(body.currentCompany) : undefined,
+            currentDesignation: body.currentDesignation ? String(body.currentDesignation) : undefined,
+            currentCtc: Number.isFinite(currentCtc) ? currentCtc : undefined,
+            expectedCtc: Number.isFinite(expectedCtc) ? expectedCtc : undefined,
+            noticePeriodDays: Number.isFinite(noticePeriodDays) ? noticePeriodDays : undefined,
+            skills,
+            languages: languages.length ? languages : ['English'],
+            resumeUrl: uploaded.fileUrl,
+            source: 'Recruiter Submission',
+            tags: { push: 'Recruiter Submission' },
+            notes: recruiterRemarks || undefined,
+            feedback,
+            dateOfJoin,
+            ownerRecruiterId: recruiter.id,
+            createdById: existingCandidate.ownerRecruiterId || recruiter.id,
+          },
+        });
+      } else {
+        const count = await tx.candidate.count();
+        const candidateCode = `OE-CAND-${String(count + 1).padStart(4, '0')}`;
+
+        candidate = await tx.candidate.create({
+          data: {
+            candidateCode,
+            fullName,
+            email,
+            phone,
+            location,
+            education: body.education ? String(body.education) : undefined,
+            experienceYears: Number.isFinite(experienceYears) ? experienceYears : 0,
+            currentCompany: body.currentCompany ? String(body.currentCompany) : undefined,
+            currentDesignation: body.currentDesignation ? String(body.currentDesignation) : undefined,
+            currentCtc: Number.isFinite(currentCtc) ? currentCtc : undefined,
+            expectedCtc: Number.isFinite(expectedCtc) ? expectedCtc : undefined,
+            noticePeriodDays: Number.isFinite(noticePeriodDays) ? noticePeriodDays : undefined,
+            skills,
+            languages: languages.length ? languages : ['English'],
+            resumeUrl: uploaded.fileUrl,
+            source: 'Recruiter Submission',
+            tags: ['Recruiter Submission'],
+            notes: recruiterRemarks || undefined,
+            feedback,
+            dateOfJoin,
+            ownerRecruiterId: recruiter.id,
+            createdById: recruiter.id,
+            status: 'SCREENING',
+          },
+        });
+      }
+
+      const application = await tx.application.create({
+        data: {
+          candidateId: candidate.id,
+          jobId,
+          recruiterId: recruiter.id,
+          stage: 'APPLIED',
+          internalNotes: recruiterRemarks ? { recruiterRemarks } : undefined,
+          timeline: [{ stage: 'APPLIED', at: new Date().toISOString(), by: recruiter.id }],
+        },
+      });
+
+      await tx.candidateActivity.create({
+        data: {
+          candidateId: candidate.id,
+          userId: recruiter.id,
+          recruiterId: recruiter.id,
+          applicationId: application.id,
+          jobId,
+          action: existingCandidate ? 'SUBMITTED_TO_JOB' : 'CANDIDATE_CREATED',
+          notes: recruiterRemarks || feedback || null,
+          metadata: {
+            source: 'RECRUITER_SUBMISSION',
+            candidateCode: candidate.candidateCode,
+            fileUrl: uploaded.fileUrl,
+          },
+        },
+      });
+
+      return { candidate, application };
+    });
+
+    await logAudit({
+      req,
+      action: existingCandidate ? 'SUBMIT_EXISTING_CANDIDATE' : 'CREATE_CANDIDATE',
+      module: 'CANDIDATES',
+      entity: 'Candidate',
+      entityId: result.candidate.id,
+      newValue: {
+        candidateCode: result.candidate.candidateCode,
+        recruiterId: recruiter.recruiterId,
+        jobId,
+        applicationId: result.application.id,
+      },
+    });
+
+    sendSuccess(
+      res,
+      {
+        candidate: result.candidate,
+        application: result.application,
+        recruiter: {
+          id: recruiter.id,
+          recruiterId: recruiter.recruiterId,
+          name: recruiter.fullName,
+        },
+      },
+      existingCandidate
+        ? 'Existing candidate submitted to the selected job successfully.'
+        : 'Candidate submitted successfully.'
+    );
+  } catch (err) {
+    next(err);
+  }
+};
+
