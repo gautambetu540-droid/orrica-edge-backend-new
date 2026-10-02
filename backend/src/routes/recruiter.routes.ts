@@ -1,11 +1,20 @@
 import { Router } from 'express';
-import { createRecruiter, getRecruiters } from '../controllers/recruiter.controller';
+import {
+  createRecruiter,
+  getRecruiters,
+  getMyRecruiterProfile,
+  updateMyRecruiterProfile,
+} from '../controllers/recruiter.controller';
 import {
   getMyRecruiterPermissions,
   getRecruiterPermissions,
   updateRecruiterPermissions,
 } from '../controllers/recruiterPermission.controller';
-import { authenticateJwt, requireRoles } from '../middlewares/auth.middleware';
+import {
+  authenticateJwt,
+  requireRoles,
+  requireRecruiterPermission,
+} from '../middlewares/auth.middleware';
 
 const router = Router();
 
@@ -21,6 +30,22 @@ router.get(
   authenticateJwt,
   requireRoles('SUPER_ADMIN', 'ADMIN'),
   getRecruiters
+);
+
+router.get(
+  '/me/profile',
+  authenticateJwt,
+  requireRoles('RECRUITER'),
+  requireRecruiterPermission('settings'),
+  getMyRecruiterProfile
+);
+
+router.put(
+  '/me/profile',
+  authenticateJwt,
+  requireRoles('RECRUITER'),
+  requireRecruiterPermission('settings'),
+  updateMyRecruiterProfile
 );
 
 router.get(
