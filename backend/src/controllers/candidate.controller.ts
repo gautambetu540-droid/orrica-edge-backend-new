@@ -752,8 +752,16 @@ export const recruiterSubmitCandidate = async (req: Request, res: Response, next
           },
         });
       } else {
-        const count = await tx.candidate.count();
-        const candidateCode = `OE-CAND-${String(count + 1).padStart(4, '0')}`;
+        const last = await tx.candidate.findFirst({
+          select: { candidateCode: true },
+          orderBy: { candidateCode: 'desc' },
+        });
+        const currentCode = last?.candidateCode
+          ? Number(last.candidateCode.replace('OE-CAND-', ''))
+          : 0;
+        const candidateCode = `OE-CAND-${String(
+          (Number.isFinite(currentCode) ? currentCode : 0) + 1
+        ).padStart(4, '0')}`;
 
         candidate = await tx.candidate.create({
           data: {
