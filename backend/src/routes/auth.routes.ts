@@ -19,6 +19,8 @@ router.post('/login', login);
 // one-time token sent in the recruiter welcome email.
 router.post('/set-password', setPassword);
 
+router.put('/me/password', authenticateJwt, changeMyPassword);
+
 // Authenticated user endpoints
 router.get('/me', authenticateJwt, getMe);
 router.post('/keepalive', authenticateJwt, keepAlive);
