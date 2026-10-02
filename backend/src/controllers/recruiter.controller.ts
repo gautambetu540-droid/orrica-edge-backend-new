@@ -761,6 +761,7 @@ export const getRecruiters = async (
         recruiterType: true,
         isActive: true,
         mustSetPassword: true,
+        mfaEnabled: true,
         lastLoginAt: true,
         createdAt: true,
         assignedJobs: {
@@ -769,34 +770,66 @@ export const getRecruiters = async (
       },
     });
 
+    const recruiterRecords = await Promise.all(recruiters.map(async (recruiter) => {
+      const [
+        metrics,
+        paidPayouts,
+        outstandingPayouts,
+        replacementCount,
+      ] = await Promise.all([
+        getRecruiterMetricSnapshot(recruiter.id),
+        prisma.payout.aggregate({
+          where: { recruiterId: recruiter.id, status: 'PAID' },
+          _sum: { amount: true },
+        }),
+        prisma.payout.aggregate({
+          where: {
+            recruiterId: recruiter.id,
+            status: { in: ['PENDING', 'APPROVED', 'PROCESSING'] },
+          },
+          _sum: { amount: true },
+        }),
+        prisma.replacementCase.count({
+          where: {
+            primaryCandidate: {
+              is: { ownerRecruiterId: recruiter.id },
+            },
+          },
+        }),
+      ]);
+
+      return {
+        id: recruiter.id,
+        userId: recruiter.id,
+        recruiterId: recruiter.recruiterId,
+        recruiterType: recruiter.recruiterType,
+        fullName: recruiter.fullName,
+        name: recruiter.fullName,
+        email: recruiter.email,
+        phone: recruiter.phone || '',
+        avatarUrl: recruiter.avatarUrl,
+        avatar: recruiter.avatarUrl || undefined,
+        isActive: recruiter.isActive,
+        status: recruiter.isActive ? 'Active' : 'Inactive',
+        lastLoginAt: recruiter.lastLoginAt,
+        mustSetPassword: recruiter.mustSetPassword,
+        mfaEnabled: recruiter.mfaEnabled,
+        createdAt: recruiter.createdAt,
+        assignedJobIds: recruiter.assignedJobs.map((job) => job.id),
+        submittedCount: metrics.submittedCount,
+        shortlistedCount: metrics.shortlistedCount,
+        interviewedCount: metrics.interviewedCount,
+        selectedCount: metrics.selectedCount,
+        joinedCount: metrics.joinedCount,
+        replacementCount,
+        totalPayoutEarned: Number(paidPayouts._sum.amount || 0),
+        pendingPayout: Number(outstandingPayouts._sum.amount || 0),
+        metrics,
+      };
+    }));
+
     sendSuccess(res, {
-      recruiters: await Promise.all(recruiters.map(async (r) => ({
-        id: r.id,
-        userId: r.id,
-        recruiterId: r.recruiterId,
-        name: r.fullName,
-        email: r.email,
-        phone: r.phone || '',
-        location: '',
-        experience: 0,
-        specialization: [],
-        assignedJobIds: r.assignedJobs.map((job) => job.id),
-        submittedCount: 0,
-        shortlistedCount: 0,
-        interviewedCount: 0,
-        selectedCount: 0,
-        joinedCount: 0,
-        replacementCount: 0,
-        totalPayoutEarned: 0,
-        pendingPayout: 0,
-        status: r.isActive ? 'Active' : 'Inactive',
-        mustSetPassword: r.mustSetPassword,
-        lastLoginAt: r.lastLoginAt,
-        avatar: r.avatarUrl || undefined,
-        createdAt: r.createdAt,
-        recruiterType: r.recruiterType,
-        metrics: await getRecruiterMetricSnapshot(r.id),
-      }))),
+      recruiters: recruiterRecords,
       pagination: {
         total: recruiters.length,
         page: 1,
