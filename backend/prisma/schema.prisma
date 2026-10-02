@@ -300,6 +300,7 @@ model Candidate {
   feedback           String?          @db.Text
   dateOfJoin          DateTime?
   walkInStatus        String?
+  walkInResponse      String?
   walkInDate          DateTime?
   walkInTime          String?
   followUpAt          DateTime?
