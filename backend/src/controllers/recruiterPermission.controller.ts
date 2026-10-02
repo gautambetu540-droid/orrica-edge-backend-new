@@ -92,7 +92,7 @@ export const getMyRecruiterPermissions = async (
   next: NextFunction
 ): Promise<void> => {
   try {
-    const userId = req.user?.id;
+    const userId = req.user?.userId;
 
     if (!userId) {
       sendError(res, 'Authentication required', 401);
