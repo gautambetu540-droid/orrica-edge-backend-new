@@ -5,6 +5,7 @@ import {
   setPassword,
   getMe,
   keepAlive,
+  changeMyPassword,
 } from '../controllers/auth.controller';
 import { authenticateJwt } from '../middlewares/auth.middleware';
 
