@@ -51,6 +51,8 @@ const createCandidateSchema = z.object({
   source: z.string().trim().max(100).optional(),
   tags: z.array(z.string()).default([]),
   notes: z.string().max(10000).optional(),
+  feedback: z.string().max(10000).optional(),
+  dateOfJoin: z.coerce.date().optional(),
   status: candidateStatus.optional(),
   ownerRecruiterId: z.string().uuid().nullable().optional(),
 });
@@ -315,6 +317,8 @@ export const createCandidate = async (req: Request, res: Response, next: NextFun
           source: data.source || (isRecruiter ? 'Recruiter Added' : 'Admin Added'),
           tags: data.tags,
           notes: data.notes,
+          feedback: data.feedback,
+          dateOfJoin: data.dateOfJoin,
           status: data.status || 'NEW',
           ownerRecruiterId,
           createdById: currentUserId || null,
