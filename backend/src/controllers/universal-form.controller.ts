@@ -112,6 +112,12 @@ const resolveRecruiterRef = async (value: unknown) => {
   return recruiter || null;
 };
 
+const parseDate = (value: unknown): Date | undefined => {
+  if (typeof value !== 'string' || !value.trim()) return undefined;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? undefined : date;
+};
+
 const parseOptionalNumber = (value: unknown): number | undefined => {
   if (value === undefined || value === null || String(value).trim() === '') {
     return undefined;
