@@ -451,10 +451,25 @@ export const submitPublicUniversalForm = async (req: Request, res: Response, nex
     const fullName = String(body.fullName || '').trim();
     const email = String(body.email || '').trim().toLowerCase();
     const phone = String(body.phone || '').trim();
-    const location = String(body.location || '').trim();
 
-    if (!fullName || !email || !phone || !location) {
-      sendError(res, 'Full name, email, phone number and current location are required.', 400);
+    // The current public candidate form collects address as separate fields.
+    // Keep the legacy location field supported, but derive it from city/state
+    // when the new form is used.
+    const fullAddress = String(body.fullAddress || '').trim();
+    const city = String(body.city || '').trim();
+    const state = String(body.state || '').trim();
+    const legacyLocation = String(body.location || '').trim();
+    const location =
+      legacyLocation ||
+      [city, state].filter(Boolean).join(', ') ||
+      fullAddress;
+
+    if (!fullName || !email || !phone || !fullAddress || !city || !state) {
+      sendError(
+        res,
+        'Full name, email, phone number, full address, city and state are required.',
+        400
+      );
       return;
     }
 
