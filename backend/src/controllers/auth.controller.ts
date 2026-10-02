@@ -133,12 +133,9 @@ export const login = async (req: Request, res: Response, next: NextFunction): Pr
       return;
     }
 
-    const loggedInAt = new Date();
-
     await prisma.user.update({
       where: { id: user.id },
       data: {
-        lastLoginAt: loggedInAt,
         failedLoginAttempts: 0,
         lockUntil: null,
       },
@@ -153,7 +150,7 @@ export const login = async (req: Request, res: Response, next: NextFunction): Pr
       avatarUrl: user.avatarUrl,
       recruiterId: user.recruiterId,
       mustSetPassword: user.mustSetPassword,
-      lastLoginAt: loggedInAt,
+      lastLoginAt: user.lastLoginAt,
       mfaEnabled: user.mfaEnabled,
     };
 
