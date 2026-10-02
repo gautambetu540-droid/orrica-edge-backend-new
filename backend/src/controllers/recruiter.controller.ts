@@ -554,43 +554,80 @@ export const updateMyRecruiterProfile = async (
 type ProductivityRange = { from?: Date; to?: Date };
 
 const getRecruiterMetricSnapshot = async (recruiterId: string, range: ProductivityRange = {}) => {
-  const candidateWhere: any = {
-    OR: [
-      { ownerRecruiterId: recruiterId },
-      { createdById: recruiterId },
-      { applications: { some: { recruiterId } } },
-    ],
-  };
-  if (range.from || range.to) {
-    candidateWhere.createdAt = {
-      ...(range.from ? { gte: range.from } : {}),
-      ...(range.to ? { lte: range.to } : {}),
-    };
-  }
+  const dateFilter = range.from || range.to
+    ? {
+        ...(range.from ? { gte: range.from } : {}),
+        ...(range.to ? { lte: range.to } : {}),
+      }
+    : undefined;
 
-  const [candidateRows, submittedCount, shortlistedCount, interviewedCount, selectedCount, joinedCount, walkInAttended, walkInScheduled, walkInNoShow] = await Promise.all([
-    prisma.candidate.findMany({ where: candidateWhere, select: { id: true } }),
-    prisma.application.count({ where: { recruiterId, ...(range.from || range.to ? { appliedAt: { ...(range.from ? { gte: range.from } : {}), ...(range.to ? { lte: range.to } : {}) } } : {}) } }),
-    prisma.application.count({ where: { recruiterId, stage: 'SHORTLISTED', ...(range.from || range.to ? { updatedAt: { ...(range.from ? { gte: range.from } : {}), ...(range.to ? { lte: range.to } : {}) } } : {}) } }),
-    prisma.application.count({ where: { recruiterId, stage: 'INTERVIEW', ...(range.from || range.to ? { updatedAt: { ...(range.from ? { gte: range.from } : {}), ...(range.to ? { lte: range.to } : {}) } } : {}) } }),
-    prisma.application.count({ where: { recruiterId, stage: 'SELECTED', ...(range.from || range.to ? { updatedAt: { ...(range.from ? { gte: range.from } : {}), ...(range.to ? { lte: range.to } : {}) } } : {}) } }),
-    prisma.application.count({ where: { recruiterId, stage: 'JOINED', ...(range.from || range.to ? { updatedAt: { ...(range.from ? { gte: range.from } : {}), ...(range.to ? { lte: range.to } : {}) } } : {}) } }),
-    prisma.candidateActivity.count({ where: { recruiterId, action: 'WALK_IN_ATTENDED', ...(range.from || range.to ? { createdAt: { ...(range.from ? { gte: range.from } : {}), ...(range.to ? { lte: range.to } : {}) } } : {}) } }),
-    prisma.candidateActivity.count({ where: { recruiterId, action: 'WALK_IN_SCHEDULED', ...(range.from || range.to ? { createdAt: { ...(range.from ? { gte: range.from } : {}), ...(range.to ? { lte: range.to } : {}) } } : {}) } }),
-    prisma.candidateActivity.count({ where: { recruiterId, action: 'WALK_IN_NO_SHOW', ...(range.from || range.to ? { createdAt: { ...(range.from ? { gte: range.from } : {}), ...(range.to ? { lte: range.to } : {}) } } : {}) } }),
+  const candidateWhere: any = {
+    ownerRecruiterId: recruiterId,
+    ...(dateFilter ? { createdAt: dateFilter } : {}),
+  };
+
+  const [candidates, applications, activities] = await Promise.all([
+    prisma.candidate.findMany({
+      where: candidateWhere,
+      select: { id: true, status: true },
+    }),
+    prisma.application.findMany({
+      where: {
+        recruiterId,
+        ...(dateFilter ? { appliedAt: dateFilter } : {}),
+      },
+      select: {
+        stage: true,
+        candidateId: true,
+      },
+    }),
+    prisma.candidateActivity.findMany({
+      where: {
+        recruiterId,
+        ...(dateFilter ? { createdAt: dateFilter } : {}),
+      },
+      select: { action: true, candidateId: true },
+    }),
   ]);
 
+  const ownedCandidateIds = new Set(candidates.map((candidate) => candidate.id));
+  const scopedApplications = applications.filter((application) => ownedCandidateIds.has(application.candidateId));
+  const scopedActivities = activities.filter((activity) => ownedCandidateIds.has(activity.candidateId));
+
+  const submittedCount = Math.max(
+    candidates.length,
+    new Set(scopedApplications.map((application) => application.candidateId)).size
+  );
+
+  const countStage = (stage: string) =>
+    scopedApplications.filter((application) => application.stage === stage).length;
+
+  const countActivity = (action: string) =>
+    scopedActivities.filter((activity) => activity.action === action).length;
+
+  const selectedCount = countStage('SELECTED') ||
+    candidates.filter((candidate) => candidate.status === 'SELECTED').length;
+
+  const joinedCount = countStage('JOINED') ||
+    candidates.filter((candidate) => candidate.status === 'JOINED').length;
+
   return {
-    candidates: candidateRows.length,
+    candidates: candidates.length,
     submittedCount,
-    shortlistedCount,
-    interviewedCount,
+    shortlistedCount: countStage('SHORTLISTED') || candidates.filter((candidate) => candidate.status === 'SHORTLISTED').length,
+    interviewedCount: countStage('INTERVIEW') || candidates.filter((candidate) => candidate.status === 'INTERVIEW').length,
     selectedCount,
     joinedCount,
-    walkInAttended,
-    walkInScheduled,
-    walkInNoShow,
-    pendingCount: Math.max(0, submittedCount - selectedCount - joinedCount),
+    rejectedCount: countStage('REJECTED') || candidates.filter((candidate) => candidate.status === 'REJECTED').length,
+    walkInAttended: countActivity('WALK_IN_ATTENDED'),
+    walkInScheduled: countActivity('WALK_IN_SCHEDULED'),
+    walkInNoShow: countActivity('WALK_IN_NO_SHOW'),
+    pendingCount: Math.max(
+      0,
+      candidates.filter((candidate) =>
+        ['NEW', 'SCREENING'].includes(candidate.status)
+      ).length
+    ),
   };
 };
 
