@@ -298,7 +298,13 @@ model Candidate {
   tags               String[]         @default([])
   notes              String?          @db.Text
   feedback           String?          @db.Text
-  dateOfJoin         DateTime?
+  dateOfJoin          DateTime?
+  walkInStatus        String?
+  walkInDate          DateTime?
+  walkInTime          String?
+  followUpAt          DateTime?
+  followUpCompletedAt DateTime?
+  rescheduleCount     Int              @default(0)
   status             CandidateStatus  @default(NEW)
   createdAt          DateTime         @default(now())
   updatedAt          DateTime         @updatedAt
@@ -317,6 +323,8 @@ model Candidate {
 
   @@index([status, email, phone])
   @@index([ownerRecruiterId])
+  @@index([ownerRecruiterId, followUpAt])
+  @@index([ownerRecruiterId, walkInDate])
   @@index([createdById])
   @@map("candidates")
 }
