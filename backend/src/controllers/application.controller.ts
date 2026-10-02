@@ -431,7 +431,6 @@ export const updateApplicationStage = async (req: Request, res: Response, next: 
     });
 
     sendSuccess(res, { application: updated }, `Candidate stage moved to ${String(stage)}`);
-  }
   } catch (err) {
     next(err);
   }
