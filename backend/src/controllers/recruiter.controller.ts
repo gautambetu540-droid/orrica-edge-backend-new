@@ -105,8 +105,8 @@ export const createRecruiter = async (
           applications: true,
           interviews: true,
           payouts: false,
-          reports: false,
-          settings: false,
+          reports: true,
+          settings: true,
         },
       });
 
