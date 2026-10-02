@@ -7,6 +7,7 @@ export interface AuthUserPayload {
   userId: string;
   email: string;
   role: 'SUPER_ADMIN' | 'ADMIN' | 'RECRUITER' | 'CLIENT' | 'CANDIDATE';
+  mfaState?: 'SETUP_REQUIRED' | 'CHALLENGE_REQUIRED';
 }
 
 export type RecruiterPermissionKey =
@@ -45,6 +46,18 @@ export const authenticateJwt = (req: Request, res: Response, next: NextFunction)
     }
 
     req.user = decoded;
+
+    if (decoded.mfaState && !req.path.startsWith('/mfa/')) {
+      res.status(403).json({
+        success: false,
+        code: decoded.mfaState === 'SETUP_REQUIRED' ? 'MFA_SETUP_REQUIRED' : 'MFA_CHALLENGE_REQUIRED',
+        message: decoded.mfaState === 'SETUP_REQUIRED'
+          ? 'MFA setup is required before accessing this resource.'
+          : 'MFA verification is required before accessing this resource.',
+      });
+      return;
+    }
+
     next();
   } catch {
     res.status(401).json({ success: false, message: 'Unauthorized: Invalid or expired token' });
