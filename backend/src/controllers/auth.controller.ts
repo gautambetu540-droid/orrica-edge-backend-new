@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import crypto from 'crypto';
 import { z } from 'zod';
 import { prisma } from '../prisma/client';
 import { config } from '../config';
@@ -18,11 +19,28 @@ const loginSchema = z.object({
   password: z.string().min(1, 'Password is required'),
 });
 
+const setPasswordSchema = z
+  .object({
+    email: z.string().email(),
+    token: z.string().min(32, 'Invalid password setup token'),
+    password: z.string().min(8, 'Password must be at least 8 characters'),
+    confirmPassword: z.string().min(8, 'Confirm password is required'),
+  })
+  .refine((data) => data.password === data.confirmPassword, {
+    message: 'Passwords do not match',
+    path: ['confirmPassword'],
+  });
+
+const hashSetupToken = (token: string): string =>
+  crypto.createHash('sha256').update(token).digest('hex');
+
 export const register = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const data = registerSchema.parse(req.body);
 
-    const existingUser = await prisma.user.findUnique({ where: { email: data.email } });
+    const email = data.email.trim().toLowerCase();
+    const existingUser = await prisma.user.findUnique({ where: { email } });
+
     if (existingUser) {
       res.status(409).json({ success: false, message: 'User with this email already exists' });
       return;
@@ -33,9 +51,9 @@ export const register = async (req: Request, res: Response, next: NextFunction):
 
     const newUser = await prisma.user.create({
       data: {
-        email: data.email,
+        email,
         passwordHash,
-        fullName: data.fullName,
+        fullName: data.fullName.trim(),
         role: 'CANDIDATE',
         phone: data.phone,
       },
@@ -68,18 +86,45 @@ export const register = async (req: Request, res: Response, next: NextFunction):
 export const login = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const data = loginSchema.parse(req.body);
+    const email = data.email.trim().toLowerCase();
 
-    const user = await prisma.user.findUnique({ where: { email: data.email } });
+    const user = await prisma.user.findUnique({ where: { email } });
+
     if (!user || !user.isActive) {
       res.status(401).json({ success: false, message: 'Invalid credentials or inactive account' });
       return;
     }
 
+    if (user.role === 'RECRUITER' && user.mustSetPassword) {
+      res.status(403).json({
+        success: false,
+        code: 'PASSWORD_SETUP_REQUIRED',
+        message: 'Please set your password before logging in.',
+        data: {
+          recruiterId: user.recruiterId,
+          email: user.email,
+        },
+      });
+      return;
+    }
+
     const isMatch = await bcrypt.compare(data.password, user.passwordHash);
+
     if (!isMatch) {
       res.status(401).json({ success: false, message: 'Invalid credentials' });
       return;
     }
+
+    const loggedInAt = new Date();
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        lastLoginAt: loggedInAt,
+        failedLoginAttempts: 0,
+        lockUntil: null,
+      },
+    });
 
     const accessToken = jwt.sign(
       { userId: user.id, email: user.email, role: user.role },
@@ -99,8 +144,106 @@ export const login = async (req: Request, res: Response, next: NextFunction): Pr
           role: user.role,
           phone: user.phone,
           avatarUrl: user.avatarUrl,
+          recruiterId: user.recruiterId,
+          mustSetPassword: user.mustSetPassword,
+          lastLoginAt: loggedInAt,
         },
       },
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const setPassword = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const data = setPasswordSchema.parse(req.body);
+    const email = data.email.trim().toLowerCase();
+    const tokenHash = hashSetupToken(data.token);
+
+    const user = await prisma.user.findUnique({
+      where: { email },
+      select: {
+        id: true,
+        email: true,
+        fullName: true,
+        role: true,
+        recruiterId: true,
+        mustSetPassword: true,
+        resetPasswordToken: true,
+        resetPasswordExpires: true,
+        isActive: true,
+      },
+    });
+
+    if (!user || !user.isActive) {
+      res.status(404).json({ success: false, message: 'Account not found or inactive' });
+      return;
+    }
+
+    if (user.role !== 'RECRUITER') {
+      res.status(400).json({
+        success: false,
+        message: 'Password setup is only available for recruiter accounts',
+      });
+      return;
+    }
+
+    if (!user.mustSetPassword) {
+      res.status(400).json({
+        success: false,
+        code: 'PASSWORD_ALREADY_SET',
+        message: 'Password has already been set. Please use the login page.',
+      });
+      return;
+    }
+
+    if (
+      !user.resetPasswordToken ||
+      !user.resetPasswordExpires ||
+      user.resetPasswordExpires.getTime() < Date.now() ||
+      user.resetPasswordToken !== tokenHash
+    ) {
+      res.status(400).json({
+        success: false,
+        code: 'INVALID_OR_EXPIRED_TOKEN',
+        message: 'This password setup link is invalid or has expired.',
+      });
+      return;
+    }
+
+    const passwordHash = await bcrypt.hash(data.password, 12);
+
+    const updatedUser = await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        passwordHash,
+        mustSetPassword: false,
+        resetPasswordToken: null,
+        resetPasswordExpires: null,
+        failedLoginAttempts: 0,
+        lockUntil: null,
+      },
+      select: {
+        id: true,
+        email: true,
+        fullName: true,
+        role: true,
+        phone: true,
+        avatarUrl: true,
+        recruiterId: true,
+        mustSetPassword: true,
+      },
+    });
+
+    res.json({
+      success: true,
+      message: 'Password set successfully. You can now log in.',
+      data: { user: updatedUser },
     });
   } catch (err) {
     next(err);
@@ -110,6 +253,12 @@ export const login = async (req: Request, res: Response, next: NextFunction): Pr
 export const getMe = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const userId = req.user?.userId;
+
+    if (!userId) {
+      res.status(401).json({ success: false, message: 'Unauthorized' });
+      return;
+    }
+
     const user = await prisma.user.findUnique({
       where: { id: userId },
       select: {
@@ -119,6 +268,9 @@ export const getMe = async (req: Request, res: Response, next: NextFunction): Pr
         role: true,
         phone: true,
         avatarUrl: true,
+        recruiterId: true,
+        mustSetPassword: true,
+        lastLoginAt: true,
         createdAt: true,
       },
     });
@@ -134,10 +286,10 @@ export const getMe = async (req: Request, res: Response, next: NextFunction): Pr
   }
 };
 
-
 export const keepAlive = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const userId = req.user?.userId;
+
     if (!userId) {
       res.status(401).json({ success: false, message: 'Unauthorized' });
       return;
