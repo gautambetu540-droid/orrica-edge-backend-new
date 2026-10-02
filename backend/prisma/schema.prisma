@@ -139,7 +139,10 @@ model User {
   lastLoginAt          DateTime?
   avatarUrl            String?
   preferences          Json?
-  isActive             Boolean   @default(true)
+  mfaEnabled            Boolean   @default(false)
+  mfaSecret             String?
+  mfaBackupCodes        Json?
+  isActive              Boolean   @default(true)
   isEmailVerified      Boolean   @default(false)
   emailVerifyToken     String?
   resetPasswordToken   String?
