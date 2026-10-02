@@ -99,6 +99,21 @@ export const register = async (req: Request, res: Response, next: NextFunction):
   }
 };
 
+const buildMfaPendingToken = (
+  user: { id: string; email: string; role: string },
+  state: 'SETUP_REQUIRED' | 'CHALLENGE_REQUIRED'
+): string =>
+  jwt.sign(
+    {
+      userId: user.id,
+      email: user.email,
+      role: user.role,
+      mfaState: state,
+    },
+    config.jwt.accessSecret,
+    { expiresIn: '10m' }
+  );
+
 export const login = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const data = loginSchema.parse(req.body);
@@ -129,29 +144,49 @@ export const login = async (req: Request, res: Response, next: NextFunction): Pr
       },
     });
 
-    const accessToken = jwt.sign(
-      { userId: user.id, email: user.email, role: user.role },
-      config.jwt.accessSecret,
-      { expiresIn: '1d' }
-    );
+    const userData = {
+      id: user.id,
+      email: user.email,
+      fullName: user.fullName,
+      role: user.role,
+      phone: user.phone,
+      avatarUrl: user.avatarUrl,
+      recruiterId: user.recruiterId,
+      mustSetPassword: user.mustSetPassword,
+      lastLoginAt: loggedInAt,
+      mfaEnabled: user.mfaEnabled,
+    };
+
+    if (!user.mfaEnabled) {
+      const mfaSetupToken = buildMfaPendingToken(user, 'SETUP_REQUIRED');
+
+      res.json({
+        success: true,
+        message: 'Password verified. MFA setup is required before accessing the account.',
+        data: {
+          token: mfaSetupToken,
+          mfaSetupToken,
+          requiresMfaSetup: true,
+          requiresMfa: true,
+          requiresPasswordChange: user.role === 'RECRUITER' && user.mustSetPassword,
+          user: userData,
+        },
+      });
+      return;
+    }
+
+    const mfaChallengeToken = buildMfaPendingToken(user, 'CHALLENGE_REQUIRED');
 
     res.json({
       success: true,
-      message: 'Login successful',
+      message: 'Password verified. Enter your authenticator code to continue.',
       data: {
-        token: accessToken,
+        token: mfaChallengeToken,
+        mfaChallengeToken,
+        requiresMfaSetup: false,
+        requiresMfa: true,
         requiresPasswordChange: user.role === 'RECRUITER' && user.mustSetPassword,
-        user: {
-          id: user.id,
-          email: user.email,
-          fullName: user.fullName,
-          role: user.role,
-          phone: user.phone,
-          avatarUrl: user.avatarUrl,
-          recruiterId: user.recruiterId,
-          mustSetPassword: user.mustSetPassword,
-          lastLoginAt: loggedInAt,
-        },
+        user: userData,
       },
     });
   } catch (err) {
