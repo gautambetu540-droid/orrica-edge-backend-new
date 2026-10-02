@@ -196,6 +196,8 @@ export const getCandidates = async (req: Request, res: Response, next: NextFunct
     }
 
     const where = andFilters.length ? { AND: andFilters } : {};
+    const statusFilters = andFilters.filter((filter: any) => !Object.prototype.hasOwnProperty.call(filter, 'status'));
+    const statusSummaryWhere = statusFilters.length ? { AND: statusFilters } : {};
 
     const [total, candidates, statusGroups] = await Promise.all([
       prisma.candidate.count({ where }),
@@ -285,7 +287,7 @@ export const getCandidates = async (req: Request, res: Response, next: NextFunct
       }),
       prisma.candidate.groupBy({
         by: ['status'],
-        where,
+        where: statusSummaryWhere,
         _count: { _all: true },
       }),
     ]);
