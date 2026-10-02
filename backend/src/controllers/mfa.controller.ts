@@ -46,6 +46,9 @@ const getAuthenticatedUser = async (userId?: string) => {
       mfaEnabled: true,
       mfaSecret: true,
       mfaBackupCodes: true,
+      phone: true,
+      avatarUrl: true,
+      recruiterId: true,
     },
   });
 };
@@ -237,6 +240,11 @@ export const verifyMfaChallenge = async (
       });
     }
 
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { lastLoginAt: new Date() },
+    });
+
     const accessToken = jwt.sign(
       { userId: user.id, email: user.email, role: user.role },
       config.jwt.accessSecret,
@@ -253,9 +261,9 @@ export const verifyMfaChallenge = async (
           email: user.email,
           fullName: user.fullName,
           role: user.role,
-          phone: null,
-          avatarUrl: null,
-          recruiterId: null,
+          phone: user.phone,
+          avatarUrl: user.avatarUrl,
+          recruiterId: user.recruiterId,
           mfaEnabled: true,
         },
         remainingBackupCodes: remainingBackupCodes.length,
