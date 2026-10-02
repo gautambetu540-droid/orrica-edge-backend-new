@@ -715,10 +715,9 @@ export const updateCandidate = async (req: Request, res: Response, next: NextFun
 
     const { rescheduleReason, ...candidateData } = data;
     const walkInWasRescheduled =
-      data.walkInDate !== undefined &&
-      data.walkInDate !== null &&
       existing.walkInDate !== null &&
-      data.walkInDate.getTime() !== existing.walkInDate.getTime();
+      ((data.walkInDate != null && data.walkInDate.getTime() !== existing.walkInDate.getTime()) ||
+        (data.walkInTime !== undefined && data.walkInTime !== existing.walkInTime));
     if (walkInWasRescheduled && !rescheduleReason?.trim()) {
       sendError(res, 'A reason is required when rescheduling a walk-in.', 400);
       return;
