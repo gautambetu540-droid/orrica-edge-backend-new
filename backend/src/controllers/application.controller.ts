@@ -293,64 +293,131 @@ export const updateApplicationStage = async (req: Request, res: Response, next: 
     const { id } = req.params;
     const { stage, rejectionReason, note } = req.body;
 
-    const application = await prisma.application.findUnique({ where: { id } });
+    const validStages = [
+      'APPLIED',
+      'SCREENING',
+      'ASSESSMENT',
+      'INTERVIEW',
+      'SHORTLISTED',
+      'SELECTED',
+      'OFFERED',
+      'JOINED',
+      'REJECTED',
+    ];
+
+    if (!validStages.includes(String(stage))) {
+      sendError(res, 'Invalid application stage.', 400);
+      return;
+    }
+
+    const application = await prisma.application.findUnique({
+      where: { id },
+      include: {
+        candidate: {
+          select: { id: true, candidateCode: true, fullName: true, ownerRecruiterId: true },
+        },
+        job: { select: { id: true, title: true } },
+      },
+    });
+
     if (!application) {
       sendError(res, 'Application not found', 404);
       return;
     }
 
+    const isAdmin = req.user?.role === 'ADMIN' || req.user?.role === 'SUPER_ADMIN';
+    const isRecruiter = req.user?.role === 'RECRUITER';
+
+    if (isRecruiter) {
+      const currentUserId = req.user?.userId;
+      const ownsCandidate =
+        application.candidate.ownerRecruiterId === currentUserId ||
+        application.recruiterId === currentUserId;
+
+      if (!ownsCandidate) {
+        sendError(res, 'You are not authorized to update this application.', 403);
+        return;
+      }
+    }
+
     const existingNotes = Array.isArray(application.internalNotes) ? application.internalNotes : [];
     if (note) {
       existingNotes.push({
-        note,
-        addedBy: req.user?.email || 'Recruiter',
+        note: String(note),
+        addedBy: req.user?.email || 'User',
         timestamp: new Date().toISOString(),
       });
     }
 
     const timeline = Array.isArray(application.timeline) ? application.timeline : [];
     timeline.push({
-      stage,
+      stage: String(stage),
       timestamp: new Date().toISOString(),
-      action: `Moved to ${stage} by ${req.user?.email || 'Recruiter'}`,
+      action: `Moved to ${String(stage)} by ${req.user?.email || 'User'}`,
     });
 
     const effectiveRecruiterId =
-      application.recruiterId || (req.user?.role === 'RECRUITER' ? req.user.userId : null);
+      application.recruiterId ||
+      application.candidate.ownerRecruiterId ||
+      (isRecruiter ? req.user?.userId : null) ||
+      null;
 
-    const updated = await prisma.application.update({
-      where: { id },
-      data: {
-        stage: stage as any,
-        recruiterId: effectiveRecruiterId,
-        rejectionReason: stage === 'REJECTED' ? rejectionReason : null,
-        internalNotes: existingNotes,
-        timeline,
-      },
-    });
-
-    const activityAction =
-      stage === 'SELECTED'
-        ? 'SELECTED'
-        : stage === 'JOINED'
-          ? 'JOINED'
-          : stage === 'REJECTED'
-            ? 'REJECTED'
-            : 'STATUS_UPDATED';
-
-    await prisma.candidateActivity.create({
-      data: {
-        candidateId: application.candidateId,
-        userId: req.user?.userId || null,
-        recruiterId: effectiveRecruiterId,
-        applicationId: application.id,
-        jobId: application.jobId,
-        action: activityAction,
-        metadata: {
-          previousStage: application.stage,
-          newStage: stage,
+    const updated = await prisma.$transaction(async (tx) => {
+      const nextApplication = await tx.application.update({
+        where: { id },
+        data: {
+          stage: String(stage) as any,
+          recruiterId: effectiveRecruiterId,
+          rejectionReason: String(stage) === 'REJECTED' ? rejectionReason || null : null,
+          internalNotes: existingNotes,
+          timeline,
         },
-      },
+      });
+
+      const candidateStatus =
+        String(stage) === 'JOINED'
+          ? 'JOINED'
+          : String(stage) === 'SELECTED'
+            ? 'SELECTED'
+            : String(stage) === 'REJECTED'
+              ? 'REJECTED'
+              : String(stage) === 'INTERVIEW'
+                ? 'INTERVIEW'
+                : String(stage) === 'SHORTLISTED'
+                  ? 'SHORTLISTED'
+                  : 'SCREENING';
+
+      await tx.candidate.update({
+        where: { id: application.candidateId },
+        data: { status: candidateStatus as any },
+      });
+
+      await tx.candidateActivity.create({
+        data: {
+          candidateId: application.candidateId,
+          userId: req.user?.userId || null,
+          recruiterId: effectiveRecruiterId,
+          applicationId: application.id,
+          jobId: application.jobId,
+          action:
+            String(stage) === 'SELECTED'
+              ? 'SELECTED'
+              : String(stage) === 'JOINED'
+                ? 'JOINED'
+                : String(stage) === 'REJECTED'
+                  ? 'REJECTED'
+                  : 'STATUS_UPDATED',
+          notes: note || null,
+          metadata: {
+            previousStage: application.stage,
+            newStage: String(stage),
+            updatedBy: req.user?.userId || null,
+            adminOverride: isAdmin,
+          },
+        },
+      });
+
+      return nextApplication;
     });
 
     await logAudit({
@@ -359,11 +426,12 @@ export const updateApplicationStage = async (req: Request, res: Response, next: 
       module: 'ATS',
       entity: 'Application',
       entityId: id,
-      oldValue: { stage: application.stage },
-      newValue: { stage: updated.stage },
+      oldValue: { stage: application.stage, recruiterId: application.recruiterId },
+      newValue: { stage: updated.stage, recruiterId: updated.recruiterId },
     });
 
-    sendSuccess(res, { application: updated }, `Candidate stage moved to ${stage}`);
+    sendSuccess(res, { application: updated }, `Candidate stage moved to ${String(stage)}`);
+  }
   } catch (err) {
     next(err);
   }
