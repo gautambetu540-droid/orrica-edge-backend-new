@@ -86,7 +86,7 @@ export const setupMfa = async (
       data: {
         mfaSecret: secret,
         mfaEnabled: false,
-        mfaBackupCodes: null,
+        mfaBackupCodes: { set: null },
       },
     });
 
@@ -181,9 +181,7 @@ export const verifyMfaChallenge = async (
 ): Promise<void> => {
   try {
     const data = challengeSchema.parse(req.body);
-    const challengeToken = req.user?.mfaChallengeToken;
-
-    if (!challengeToken) {
+    if (req.user?.mfaState !== 'CHALLENGE_REQUIRED') {
       res.status(401).json({
         success: false,
         message: 'MFA challenge session is required.',
@@ -191,7 +189,7 @@ export const verifyMfaChallenge = async (
       return;
     }
 
-    const user = await getAuthenticatedUser(challengeToken.userId);
+    const user = await getAuthenticatedUser(req.user?.userId);
 
     if (!user || !user.mfaEnabled || !user.mfaSecret) {
       res.status(401).json({
