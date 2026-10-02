@@ -753,7 +753,6 @@ export const getRecruiters = async (
         email: r.email,
         phone: r.phone || '',
         location: '',
-        recruiterType: 'Internal',
         experience: 0,
         specialization: [],
         assignedJobIds: r.assignedJobs.map((job) => job.id),
