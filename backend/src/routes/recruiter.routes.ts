@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
 import {
   createRecruiter,
   getRecruiters,
@@ -22,6 +22,34 @@ import {
 } from '../middlewares/auth.middleware';
 
 const router = Router();
+
+const requireRecruiterSelfOrAdmin = (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): void => {
+  const user = req.user;
+
+  if (!user) {
+    res.status(401).json({ success: false, message: 'Unauthorized' });
+    return;
+  }
+
+  if (user.role === 'SUPER_ADMIN' || user.role === 'ADMIN') {
+    next();
+    return;
+  }
+
+  if (user.role === 'RECRUITER' && user.userId === req.params.id) {
+    next();
+    return;
+  }
+
+  res.status(403).json({
+    success: false,
+    message: 'Forbidden: Recruiters may access only their own data.',
+  });
+};
 
 router.post(
   '/',
@@ -47,21 +75,24 @@ router.patch(
 router.get(
   '/:id/analytics',
   authenticateJwt,
-  requireRoles('SUPER_ADMIN', 'ADMIN'),
+  requireRecruiterSelfOrAdmin,
+  requireRecruiterPermission('dashboard'),
   getRecruiterAnalytics
 );
 
 router.get(
   '/:id/productivity',
   authenticateJwt,
-  requireRoles('SUPER_ADMIN', 'ADMIN'),
+  requireRecruiterSelfOrAdmin,
+  requireRecruiterPermission('dashboard'),
   getRecruiterProductivity
 );
 
 router.get(
   '/:id/jobs',
   authenticateJwt,
-  requireRoles('SUPER_ADMIN', 'ADMIN'),
+  requireRecruiterSelfOrAdmin,
+  requireRecruiterPermission('jobs'),
   getRecruiterJobs
 );
 
