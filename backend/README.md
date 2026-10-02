@@ -131,3 +131,25 @@ To launch the backend API and PostgreSQL database with a single command:
 docker compose up -d --build
 ```
 This runs PostgreSQL on port `5432` and the Orrica Edge API server on port `5000`.
+
+## MFA / Google Authenticator
+
+MFA is mandatory for authenticated accounts. Password verification never issues a full-access JWT; users receive a short-lived MFA setup/challenge token first.
+
+Set this environment variable on Render before enabling MFA in production:
+
+```env
+MFA_ENCRYPTION_KEY=<long-random-secret>
+```
+
+This key is used to encrypt TOTP secrets stored in the database. Keep it stable; changing it without a migration will make existing encrypted MFA secrets unreadable.
+
+MFA flow:
+
+1. User submits email and password.
+2. If MFA is not configured, the API returns a short-lived setup token.
+3. User scans the Google Authenticator QR code and verifies the 6-digit code.
+4. If MFA is configured, the API returns a short-lived challenge token.
+5. A valid TOTP or one-time backup code returns the normal access token.
+6. Pending MFA tokens cannot access normal API routes.
+
