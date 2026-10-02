@@ -7,12 +7,26 @@ import { logAudit } from '../services/audit.service';
 
 const scheduleInterviewSchema = z.object({
   applicationId: z.string().uuid(),
-  roundName: z.string().min(2),
+  roundName: z.string().min(2).max(120),
   scheduledAt: z.string().datetime(),
-  interviewerName: z.string().min(2),
+  interviewerName: z.string().min(2).max(120),
   meetingLink: z.string().url().optional(),
-  notes: z.string().optional(),
+  notes: z.string().max(5000).optional(),
 });
+
+const updateInterviewSchema = z.object({
+  status: z.enum(['SCHEDULED', 'COMPLETED', 'CANCELLED', 'RESCHEDULED', 'NO_SHOW']),
+  feedbackRating: z.coerce.number().int().min(1).max(5).optional(),
+  feedbackNotes: z.string().max(5000).nullable().optional(),
+});
+
+const canRecruiterAccessApplication = (
+  req: Request,
+  application: { recruiterId: string | null; candidate: { ownerRecruiterId: string | null } }
+): boolean =>
+  req.user?.role !== 'RECRUITER' ||
+  application.recruiterId === req.user.userId ||
+  application.candidate.ownerRecruiterId === req.user.userId;
 
 export const scheduleInterview = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
@@ -21,8 +35,10 @@ export const scheduleInterview = async (req: Request, res: Response, next: NextF
     const application = await prisma.application.findUnique({
       where: { id: data.applicationId },
       include: {
-        job: true,
-        candidate: true,
+        job: { select: { id: true, title: true } },
+        candidate: {
+          select: { id: true, fullName: true, email: true, ownerRecruiterId: true },
+        },
       },
     });
 
@@ -31,26 +47,55 @@ export const scheduleInterview = async (req: Request, res: Response, next: NextF
       return;
     }
 
+    if (!canRecruiterAccessApplication(req, application)) {
+      sendError(res, 'Application not found', 404);
+      return;
+    }
+
     const scheduledDate = new Date(data.scheduledAt);
+    const effectiveRecruiterId =
+      application.recruiterId ||
+      application.candidate.ownerRecruiterId ||
+      (req.user?.role === 'RECRUITER' ? req.user.userId : null);
 
-    const interview = await prisma.interview.create({
-      data: {
-        applicationId: data.applicationId,
-        roundName: data.roundName,
-        scheduledAt: scheduledDate,
-        interviewerName: data.interviewerName,
-        meetingLink: data.meetingLink,
-        status: 'SCHEDULED',
-      },
+    const interview = await prisma.$transaction(async (tx) => {
+      const created = await tx.interview.create({
+        data: {
+          applicationId: data.applicationId,
+          roundName: data.roundName,
+          scheduledAt: scheduledDate,
+          interviewerName: data.interviewerName,
+          meetingLink: data.meetingLink,
+          status: 'SCHEDULED',
+        },
+      });
+
+      await tx.application.update({
+        where: { id: application.id },
+        data: { stage: 'INTERVIEW', recruiterId: effectiveRecruiterId },
+      });
+
+      await tx.candidate.update({
+        where: { id: application.candidateId },
+        data: { status: 'INTERVIEW' },
+      });
+
+      await tx.candidateActivity.create({
+        data: {
+          candidateId: application.candidateId,
+          userId: req.user?.userId || null,
+          recruiterId: effectiveRecruiterId,
+          applicationId: application.id,
+          jobId: application.jobId,
+          action: 'INTERVIEW_SCHEDULED',
+          notes: data.notes || null,
+          metadata: { interviewId: created.id, roundName: data.roundName },
+        },
+      });
+
+      return created;
     });
 
-    // Update application stage to INTERVIEW
-    await prisma.application.update({
-      where: { id: application.id },
-      data: { stage: 'INTERVIEW' },
-    });
-
-    // Send automatic email to candidate
     sendInterviewScheduledEmailAsync(
       application.candidate.fullName,
       application.candidate.email,
@@ -66,7 +111,7 @@ export const scheduleInterview = async (req: Request, res: Response, next: NextF
       module: 'INTERVIEWS',
       entity: 'Interview',
       entityId: interview.id,
-      newValue: { roundName: data.roundName, scheduledAt: data.scheduledAt },
+      newValue: { roundName: data.roundName, scheduledAt: data.scheduledAt, applicationId: application.id },
     });
 
     sendSuccess(res, { interview }, 'Interview scheduled and candidate notification sent');
@@ -78,18 +123,45 @@ export const scheduleInterview = async (req: Request, res: Response, next: NextF
 export const updateInterviewStatus = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const { id } = req.params;
-    const { status, feedbackRating, feedbackNotes } = req.body;
-
-    const interview = await prisma.interview.update({
+    const data = updateInterviewSchema.parse(req.body);
+    const existing = await prisma.interview.findUnique({
       where: { id },
-      data: {
-        status: status as any,
-        feedbackRating: feedbackRating ? parseInt(feedbackRating, 10) : undefined,
-        feedbackNotes,
+      include: {
+        application: {
+          select: {
+            id: true,
+            recruiterId: true,
+            candidate: { select: { ownerRecruiterId: true } },
+          },
+        },
       },
     });
 
-    sendSuccess(res, { interview }, 'Interview status updated');
+    if (!existing || !canRecruiterAccessApplication(req, existing.application)) {
+      sendError(res, 'Interview not found', 404);
+      return;
+    }
+
+    const updated = await prisma.interview.update({
+      where: { id },
+      data: {
+        status: data.status,
+        feedbackRating: data.feedbackRating,
+        feedbackNotes: data.feedbackNotes,
+      },
+    });
+
+    await logAudit({
+      req,
+      action: 'UPDATE_INTERVIEW_STATUS',
+      module: 'INTERVIEWS',
+      entity: 'Interview',
+      entityId: id,
+      oldValue: { status: existing.status, feedbackRating: existing.feedbackRating },
+      newValue: { status: updated.status, feedbackRating: updated.feedbackRating },
+    });
+
+    sendSuccess(res, { interview: updated }, 'Interview status updated');
   } catch (err) {
     next(err);
   }
