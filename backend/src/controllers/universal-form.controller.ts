@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { prisma } from '../prisma/client';
 import { uploadResumeFile } from '../services/storage.service';
 import { sendSuccess, sendError } from '../utils/response';
+import { createNotification } from '../services/notification.service';
 
 const universalFormBodySchema = z.object({
   name: z.string().min(2).max(120).optional(),
@@ -624,6 +625,16 @@ export const submitPublicUniversalForm = async (req: Request, res: Response, nex
 
       return { candidate, submission, application, activity };
     });
+
+    if (recruiter) {
+      await createNotification({
+        userId: recruiter.id,
+        title: 'New candidate received',
+        message: `${result.candidate.fullName} submitted their profile through your candidate link${targetJob ? ` for ${targetJob.title}` : ''}.`,
+        type: 'CANDIDATE_ADDED',
+        link: '/recruiter/candidates',
+      });
+    }
 
     sendSuccess(
       res,
