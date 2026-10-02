@@ -87,6 +87,30 @@ const parseList = (value: unknown): string[] => {
   return value.split(',').map((item) => item.trim()).filter(Boolean);
 };
 
+const resolveRecruiterRef = async (value: unknown) => {
+  const ref = String(value ?? '').trim();
+  if (!ref) return null;
+
+  const recruiter = await prisma.user.findFirst({
+    where: {
+      role: 'RECRUITER',
+      isActive: true,
+      OR: [
+        { recruiterId: ref },
+        { id: ref },
+      ],
+    },
+    select: {
+      id: true,
+      recruiterId: true,
+      fullName: true,
+      recruiterType: true,
+    },
+  });
+
+  return recruiter || null;
+};
+
 const parseOptionalNumber = (value: unknown): number | undefined => {
   if (value === undefined || value === null || String(value).trim() === '') {
     return undefined;
@@ -391,6 +415,32 @@ export const submitPublicUniversalForm = async (req: Request, res: Response, nex
     }
 
     const body = req.body || {};
+    const recruiter = await resolveRecruiterRef(body.recruiterRef || body.recruiterId);
+    const jobId = String(body.jobId || '').trim() || null;
+
+    if ((body.recruiterRef || body.recruiterId) && !recruiter) {
+      sendError(res, 'The recruiter link is invalid or the recruiter account is inactive.', 400);
+      return;
+    }
+
+    let targetJob: { id: string; title: string; status: string } | null = null;
+    if (jobId) {
+      targetJob = await prisma.job.findUnique({
+        where: { id: jobId },
+        select: { id: true, title: true, status: true },
+      });
+
+      if (!targetJob) {
+        sendError(res, 'The selected job is no longer available.', 404);
+        return;
+      }
+
+      if (String(targetJob.status).toUpperCase() !== 'PUBLISHED') {
+        sendError(res, 'The selected job is not currently open for submissions.', 400);
+        return;
+      }
+    }
+
     const fullName = String(body.fullName || '').trim();
     const email = String(body.email || '').trim().toLowerCase();
     const phone = String(body.phone || '').trim();
@@ -464,6 +514,8 @@ export const submitPublicUniversalForm = async (req: Request, res: Response, nex
       source: String(body.source || '').trim() || `Universal Form: ${form.slug}`,
       tags: parseList(body.tags),
       notes: String(body.notes || '').trim() || undefined,
+      feedback: String(body.feedback || '').trim() || undefined,
+      dateOfJoin: body.dateOfJoin ? new Date(String(body.dateOfJoin)) : undefined,
     };
 
     const result = await prisma.$transaction(async (tx) => {
@@ -498,9 +550,62 @@ export const submitPublicUniversalForm = async (req: Request, res: Response, nex
             email,
             resumeUrl: uploadResult?.fileUrl || '',
             ...candidateData,
+            ownerRecruiterId: recruiter?.id || null,
+            createdById: recruiter?.id || null,
+            status: recruiter ? 'SCREENING' : 'NEW',
           },
         });
       }
+
+      let application = null;
+
+      if (targetJob) {
+        const existingApplication = await tx.application.findUnique({
+          where: {
+            jobId_candidateId: {
+              jobId: targetJob.id,
+              candidateId: candidate.id,
+            },
+          },
+          select: { id: true },
+        });
+
+        if (!existingApplication) {
+          application = await tx.application.create({
+            data: {
+              candidateId: candidate.id,
+              jobId: targetJob.id,
+              recruiterId: recruiter?.id || null,
+              stage: 'APPLIED',
+              timeline: [{
+                stage: 'APPLIED',
+                at: new Date().toISOString(),
+                by: recruiter?.id || 'PUBLIC_FORM',
+              }],
+            },
+          });
+        } else {
+          application = existingApplication;
+        }
+      }
+
+      const activity = await tx.candidateActivity.create({
+        data: {
+          candidateId: candidate.id,
+          userId: recruiter?.id || null,
+          recruiterId: recruiter?.id || null,
+          applicationId: application?.id || null,
+          jobId: targetJob?.id || null,
+          action: 'PUBLIC_FORM_SUBMITTED',
+          notes: String(body.feedback || body.notes || '').trim() || null,
+          metadata: {
+            formSlug: form.slug,
+            recruiterRef: recruiter?.recruiterId || null,
+            jobTitle: targetJob?.title || null,
+            source: 'UNIVERSAL_PUBLIC_FORM',
+          },
+        },
+      });
 
       const submission = await tx.universalFormSubmission.create({
         data: {
@@ -508,6 +613,8 @@ export const submitPublicUniversalForm = async (req: Request, res: Response, nex
           candidateId: candidate.id,
           payload: {
             ...body,
+            recruiterRef: recruiter?.recruiterId || body.recruiterRef || null,
+            jobId: targetJob?.id || null,
             resumeFileName: uploadResult?.key || req.file?.originalname || null,
           },
           resumeUrl: uploadResult?.fileUrl || null,
@@ -515,7 +622,7 @@ export const submitPublicUniversalForm = async (req: Request, res: Response, nex
         },
       });
 
-      return { candidate, submission };
+      return { candidate, submission, application, activity };
     });
 
     sendSuccess(
@@ -524,6 +631,18 @@ export const submitPublicUniversalForm = async (req: Request, res: Response, nex
         candidateId: result.candidate.id,
         candidateCode: result.candidate.candidateCode,
         submissionId: result.submission.id,
+        applicationId: result.application?.id || null,
+        recruiter: recruiter
+          ? {
+              id: recruiter.id,
+              recruiterId: recruiter.recruiterId,
+              name: recruiter.fullName,
+              recruiterType: recruiter.recruiterType,
+            }
+          : null,
+        job: targetJob
+          ? { id: targetJob.id, title: targetJob.title }
+          : null,
         formSlug: form.slug,
       },
       form.successMessage || 'Your candidate profile has been submitted successfully.',
