@@ -161,13 +161,31 @@ export const verifyMfaSetup = async (
       data: {
         mfaEnabled: true,
         mfaBackupCodes: backupCodes.hashes,
+        lastLoginAt: new Date(),
       },
     });
+
+    const accessToken = jwt.sign(
+      { userId: user.id, email: user.email, role: user.role },
+      config.jwt.accessSecret,
+      { expiresIn: '1d' }
+    );
 
     res.json({
       success: true,
       message: 'Multi-factor authentication enabled successfully.',
       data: {
+        token: accessToken,
+        user: {
+          id: user.id,
+          email: user.email,
+          fullName: user.fullName,
+          role: user.role,
+          phone: user.phone,
+          avatarUrl: user.avatarUrl,
+          recruiterId: user.recruiterId,
+          mfaEnabled: true,
+        },
         backupCodes: backupCodes.plain,
         backupCodesCount: backupCodes.plain.length,
       },
