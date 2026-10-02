@@ -154,6 +154,104 @@ export const createRecruiter = async (
 };
 
 
+export const updateRecruiterStatus = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const recruiterId = req.params.id;
+
+    if (!recruiterId) {
+      sendError(res, 'Recruiter ID is required', 400);
+      return;
+    }
+
+    const recruiter = await prisma.user.findFirst({
+      where: {
+        id: recruiterId,
+        role: 'RECRUITER',
+      },
+      select: {
+        id: true,
+        recruiterId: true,
+        email: true,
+        fullName: true,
+        isActive: true,
+      },
+    });
+
+    if (!recruiter) {
+      sendError(res, 'Recruiter not found', 404);
+      return;
+    }
+
+    const nextStatus =
+      typeof req.body?.isActive === 'boolean'
+        ? req.body.isActive
+        : undefined;
+
+    if (nextStatus === undefined) {
+      sendError(res, 'isActive must be a boolean', 400);
+      return;
+    }
+
+    if (recruiter.isActive === nextStatus) {
+      sendSuccess(
+        res,
+        {
+          recruiter: {
+            id: recruiter.id,
+            recruiterId: recruiter.recruiterId,
+            email: recruiter.email,
+            fullName: recruiter.fullName,
+            isActive: recruiter.isActive,
+          },
+        },
+        `Recruiter is already ${nextStatus ? 'active' : 'inactive'}.`
+      );
+      return;
+    }
+
+    const updatedRecruiter = await prisma.user.update({
+      where: { id: recruiter.id },
+      data: { isActive: nextStatus },
+      select: {
+        id: true,
+        recruiterId: true,
+        email: true,
+        fullName: true,
+        isActive: true,
+        updatedAt: true,
+      },
+    });
+
+    await logAudit({
+      req,
+      action: nextStatus ? 'ACTIVATE_RECRUITER' : 'DEACTIVATE_RECRUITER',
+      module: 'RECRUITERS',
+      entity: 'User',
+      entityId: updatedRecruiter.id,
+      oldValue: {
+        isActive: recruiter.isActive,
+      },
+      newValue: {
+        isActive: updatedRecruiter.isActive,
+      },
+    });
+
+    sendSuccess(
+      res,
+      {
+        recruiter: updatedRecruiter,
+      },
+      `Recruiter ${nextStatus ? 'activated' : 'deactivated'} successfully.`
+    );
+  } catch (err) {
+    next(err);
+  }
+};
+
 const updateRecruiterProfileSchema = z.object({
   fullName: z.string().trim().min(2).max(120),
   phone: z.string().trim().max(30).nullable().optional(),
