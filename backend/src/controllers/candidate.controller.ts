@@ -399,45 +399,55 @@ export const assignCandidate = async (req: Request, res: Response, next: NextFun
       }
     }
 
-    const updated = await prisma.candidate.update({
-      where: { id: candidateId },
-      data: { ownerRecruiterId: recruiterId },
-      include: {
-        ownerRecruiter: { select: { id: true, recruiterId: true, fullName: true, email: true, recruiterType: true } },
-      },
-    });
-
-    await prisma.candidateActivity.create({
-      data: {
-        candidateId,
-        userId: req.user?.userId || null,
-        recruiterId,
-        action: 'OWNER_ASSIGNED',
-        metadata: {
-          previousOwnerRecruiterId: existing.ownerRecruiterId,
-          newOwnerRecruiterId: recruiterId,
+    const updated = await prisma.$transaction(async (tx) => {
+      const candidate = await tx.candidate.update({
+        where: { id: candidateId },
+        data: { ownerRecruiterId: recruiterId },
+        include: {
+          ownerRecruiter: { select: { id: true, recruiterId: true, fullName: true, email: true, recruiterType: true } },
         },
-      },
-    });
-
-    if (recruiterId && recruiterId !== existing.ownerRecruiterId) {
-      await createNotification({
-        userId: recruiterId,
-        title: 'Candidate assigned to you',
-        message: 'A candidate has been assigned to your recruiter bucket. Open My Candidates to review the profile.',
-        type: 'CANDIDATE_ASSIGNED',
-        link: '/recruiter/candidates',
       });
-    }
 
-    await logAudit({
-      req,
-      action: 'ASSIGN_CANDIDATE_RECRUITER',
-      module: 'CANDIDATES',
-      entity: 'Candidate',
-      entityId: candidateId,
-      oldValue: { ownerRecruiterId: existing.ownerRecruiterId },
-      newValue: { ownerRecruiterId: recruiterId },
+      await tx.candidateActivity.create({
+        data: {
+          candidateId,
+          userId: req.user?.userId || null,
+          recruiterId,
+          action: 'OWNER_ASSIGNED',
+          metadata: {
+            previousOwnerRecruiterId: existing.ownerRecruiterId,
+            newOwnerRecruiterId: recruiterId,
+          },
+        },
+      });
+
+      if (recruiterId && recruiterId !== existing.ownerRecruiterId) {
+        await tx.notification.create({
+          data: {
+            userId: recruiterId,
+            title: 'Candidate assigned to you',
+            message: 'A candidate has been assigned to your recruiter bucket. Open My Candidates to review the profile.',
+            type: 'CANDIDATE_ASSIGNED',
+            link: '/recruiter/candidates',
+          },
+        });
+      }
+
+      await tx.auditLog.create({
+        data: {
+          userId: req.user?.userId || null,
+          action: 'ASSIGN_CANDIDATE_RECRUITER',
+          module: 'CANDIDATES',
+          entity: 'Candidate',
+          entityId: candidateId,
+          oldValue: { ownerRecruiterId: existing.ownerRecruiterId },
+          newValue: { ownerRecruiterId: recruiterId },
+          ipAddress: req.ip || req.socket?.remoteAddress || null,
+          userAgent: req.headers['user-agent'] || null,
+        },
+      });
+
+      return candidate;
     });
 
     sendSuccess(res, { candidate: updated }, 'Candidate recruiter assignment updated successfully');
