@@ -66,6 +66,7 @@ const createCandidateSchema = z.object({
   walkInTime: z.string().max(32).nullable().optional(),
   followUpAt: z.coerce.date().nullable().optional(),
   followUpCompletedAt: z.coerce.date().nullable().optional(),
+  rescheduleReason: z.string().trim().max(1000).optional(),
   status: candidateStatus.optional(),
   ownerRecruiterId: z.string().uuid().nullable().optional(),
 });
@@ -127,6 +128,13 @@ export const getCandidates = async (req: Request, res: Response, next: NextFunct
       workMode,
       employmentType,
       walkInStatus,
+      walkInDateFrom,
+      walkInDateTo,
+      followUpDateFrom,
+      followUpDateTo,
+      followUpPending,
+      joiningDateFrom,
+      joiningDateTo,
       dateFrom,
       dateTo,
       page = '1',
@@ -178,14 +186,28 @@ export const getCandidates = async (req: Request, res: Response, next: NextFunct
     }
 
     if (walkInStatus) {
+      const requestedStatus = String(walkInStatus).toUpperCase();
       const actionMap: Record<string, string> = {
         SCHEDULED: 'WALK_IN_SCHEDULED',
         ATTENDED: 'WALK_IN_ATTENDED',
         NO_SHOW: 'WALK_IN_NO_SHOW',
       };
-      const action = actionMap[String(walkInStatus).toUpperCase()];
-      if (action) andFilters.push({ activities: { some: { action } } });
+      const action = actionMap[requestedStatus];
+      andFilters.push({
+        OR: [
+          { walkInStatus: requestedStatus },
+          ...(action ? [{ activities: { some: { action } } }] : []),
+        ],
+      });
     }
+
+    const walkInDate = buildDateFilter(parseDate(walkInDateFrom), parseDate(walkInDateTo));
+    if (walkInDate) andFilters.push({ walkInDate });
+    const followUpAt = buildDateFilter(parseDate(followUpDateFrom), parseDate(followUpDateTo));
+    if (followUpAt) andFilters.push({ followUpAt });
+    if (String(followUpPending).toLowerCase() === 'true') andFilters.push({ followUpAt: { not: null }, followUpCompletedAt: null });
+    const dateOfJoin = buildDateFilter(parseDate(joiningDateFrom), parseDate(joiningDateTo));
+    if (dateOfJoin) andFilters.push({ dateOfJoin });
 
     const createdAt = buildDateFilter(from, to);
     if (createdAt) andFilters.push({ createdAt });
@@ -377,6 +399,12 @@ export const createCandidate = async (req: Request, res: Response, next: NextFun
           notes: data.notes,
           feedback: data.feedback,
           dateOfJoin: data.dateOfJoin,
+          walkInStatus: data.walkInStatus,
+          walkInResponse: data.walkInResponse,
+          walkInDate: data.walkInDate,
+          walkInTime: data.walkInTime,
+          followUpAt: data.followUpAt,
+          followUpCompletedAt: data.followUpCompletedAt,
           status: data.status || 'NEW',
           ownerRecruiterId,
           createdById: currentUserId || null,
@@ -668,12 +696,52 @@ export const updateCandidate = async (req: Request, res: Response, next: NextFun
       return;
     }
 
-    const updated = await prisma.candidate.update({
-      where: { id: req.params.id },
-      data: {
-        ...data,
-        email: data.email ? data.email.toLowerCase() : undefined,
-      } as any,
+    const { rescheduleReason, ...candidateData } = data;
+    const walkInWasRescheduled =
+      data.walkInDate !== undefined &&
+      data.walkInDate !== null &&
+      existing.walkInDate !== null &&
+      data.walkInDate.getTime() !== existing.walkInDate.getTime();
+    const updated = await prisma.$transaction(async (tx) => {
+      const candidate = await tx.candidate.update({
+        where: { id: req.params.id },
+        data: {
+          ...candidateData,
+          email: data.email ? data.email.toLowerCase() : undefined,
+          ...(walkInWasRescheduled ? { rescheduleCount: { increment: 1 } } : {}),
+        } as any,
+      });
+
+      if (walkInWasRescheduled) {
+        await tx.candidateActivity.create({
+          data: {
+            candidateId: req.params.id,
+            userId: req.user?.userId || null,
+            recruiterId: existing.ownerRecruiterId || (req.user?.role === 'RECRUITER' ? req.user.userId : null),
+            action: 'WALK_IN_RESCHEDULED',
+            notes: rescheduleReason,
+            metadata: {
+              previousDate: existing.walkInDate?.toISOString(),
+              newDate: data.walkInDate?.toISOString(),
+              newTime: data.walkInTime ?? existing.walkInTime,
+            },
+          },
+        });
+      }
+
+      if (data.followUpCompletedAt && !existing.followUpCompletedAt) {
+        await tx.candidateActivity.create({
+          data: {
+            candidateId: req.params.id,
+            userId: req.user?.userId || null,
+            recruiterId: existing.ownerRecruiterId || (req.user?.role === 'RECRUITER' ? req.user.userId : null),
+            action: 'FOLLOW_UP_COMPLETED',
+            metadata: { followUpAt: existing.followUpAt?.toISOString() ?? null },
+          },
+        });
+      }
+
+      return candidate;
     });
 
     if (data.status && data.status !== existing.status) {
