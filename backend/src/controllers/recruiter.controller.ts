@@ -252,6 +252,140 @@ export const updateRecruiterStatus = async (
   }
 };
 
+const updateRecruiterJobsSchema = z.object({
+  jobIds: z.array(z.string().uuid()).max(500),
+});
+
+export const getRecruiterJobs = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const recruiter = await prisma.user.findFirst({
+      where: { id: req.params.id, role: 'RECRUITER' },
+      select: {
+        id: true,
+        recruiterId: true,
+        assignedJobs: {
+          orderBy: { updatedAt: 'desc' },
+          select: {
+            id: true,
+            jobCode: true,
+            title: true,
+            slug: true,
+            location: true,
+            status: true,
+            publishedAt: true,
+          },
+        },
+      },
+    });
+
+    if (!recruiter) {
+      sendError(res, 'Recruiter not found', 404);
+      return;
+    }
+
+    sendSuccess(res, {
+      recruiterId: recruiter.recruiterId,
+      jobs: recruiter.assignedJobs,
+      jobIds: recruiter.assignedJobs.map((job) => job.id),
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const updateRecruiterJobs = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const recruiterId = req.params.id;
+    const data = updateRecruiterJobsSchema.parse(req.body);
+
+    const recruiter = await prisma.user.findFirst({
+      where: { id: recruiterId, role: 'RECRUITER' },
+      select: {
+        id: true,
+        recruiterId: true,
+        fullName: true,
+        assignedJobs: {
+          select: { id: true },
+        },
+      },
+    });
+
+    if (!recruiter) {
+      sendError(res, 'Recruiter not found', 404);
+      return;
+    }
+
+    const uniqueJobIds = [...new Set(data.jobIds)];
+
+    const jobs = await prisma.job.findMany({
+      where: { id: { in: uniqueJobIds } },
+      select: { id: true, jobCode: true, title: true },
+    });
+
+    if (jobs.length !== uniqueJobIds.length) {
+      sendError(res, 'One or more selected jobs were not found', 404);
+      return;
+    }
+
+    const previousJobIds = recruiter.assignedJobs.map((job) => job.id);
+
+    await prisma.$transaction(async (tx) => {
+      await tx.user.update({
+        where: { id: recruiter.id },
+        data: {
+          assignedJobs: {
+            set: uniqueJobIds.map((id) => ({ id })),
+          },
+        },
+      });
+    });
+
+    const addedJobIds = uniqueJobIds.filter((id) => !previousJobIds.includes(id));
+    const removedJobIds = previousJobIds.filter((id) => !uniqueJobIds.includes(id));
+
+    await logAudit({
+      req,
+      action: 'UPDATE_RECRUITER_JOB_ASSIGNMENTS',
+      module: 'RECRUITERS',
+      entity: 'User',
+      entityId: recruiter.id,
+      oldValue: {
+        assignedJobIds: previousJobIds,
+      },
+      newValue: {
+        assignedJobIds: uniqueJobIds,
+        addedJobIds,
+        removedJobIds,
+      },
+    });
+
+    sendSuccess(
+      res,
+      {
+        recruiter: {
+          id: recruiter.id,
+          recruiterId: recruiter.recruiterId,
+          name: recruiter.fullName,
+        },
+        jobs,
+        jobIds: uniqueJobIds,
+      },
+      'Recruiter job assignments updated successfully.'
+    );
+  } catch (err) {
+    next(err);
+  }
+};
+
+
 const updateRecruiterProfileSchema = z.object({
   fullName: z.string().trim().min(2).max(120),
   phone: z.string().trim().max(30).nullable().optional(),
@@ -432,6 +566,9 @@ export const getRecruiters = async (
         mustSetPassword: true,
         lastLoginAt: true,
         createdAt: true,
+        assignedJobs: {
+          select: { id: true },
+        },
       },
     });
 
@@ -447,7 +584,7 @@ export const getRecruiters = async (
         recruiterType: 'Internal',
         experience: 0,
         specialization: [],
-        assignedJobIds: [],
+        assignedJobIds: r.assignedJobs.map((job) => job.id),
         submittedCount: 0,
         shortlistedCount: 0,
         interviewedCount: 0,
