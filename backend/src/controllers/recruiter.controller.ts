@@ -161,6 +161,167 @@ export const createRecruiter = async (
   }
 };
 
+
+const updateRecruiterProfileSchema = z.object({
+  fullName: z.string().trim().min(2).max(120),
+  phone: z.string().trim().max(30).nullable().optional(),
+  avatarUrl: z.string().url().max(1000).nullable().optional(),
+});
+
+export const getMyRecruiterProfile = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const userId = req.user?.userId;
+
+    if (!userId) {
+      sendError(res, 'Authentication required', 401);
+      return;
+    }
+
+    const recruiter = await prisma.user.findFirst({
+      where: {
+        id: userId,
+        role: 'RECRUITER',
+      },
+      select: {
+        id: true,
+        recruiterId: true,
+        email: true,
+        fullName: true,
+        phone: true,
+        avatarUrl: true,
+        isActive: true,
+        isEmailVerified: true,
+        lastLoginAt: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+
+    if (!recruiter) {
+      sendError(res, 'Recruiter account not found', 404);
+      return;
+    }
+
+    sendSuccess(res, {
+      profile: {
+        id: recruiter.id,
+        recruiterId: recruiter.recruiterId,
+        email: recruiter.email,
+        fullName: recruiter.fullName,
+        phone: recruiter.phone,
+        avatarUrl: recruiter.avatarUrl,
+        isActive: recruiter.isActive,
+        isEmailVerified: recruiter.isEmailVerified,
+        lastLoginAt: recruiter.lastLoginAt,
+        createdAt: recruiter.createdAt,
+        updatedAt: recruiter.updatedAt,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const updateMyRecruiterProfile = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const userId = req.user?.userId;
+
+    if (!userId) {
+      sendError(res, 'Authentication required', 401);
+      return;
+    }
+
+    const data = updateRecruiterProfileSchema.parse(req.body);
+
+    const existingRecruiter = await prisma.user.findFirst({
+      where: {
+        id: userId,
+        role: 'RECRUITER',
+      },
+      select: {
+        id: true,
+        recruiterId: true,
+        email: true,
+        fullName: true,
+        phone: true,
+        avatarUrl: true,
+        isActive: true,
+      },
+    });
+
+    if (!existingRecruiter) {
+      sendError(res, 'Recruiter account not found', 404);
+      return;
+    }
+
+    if (!existingRecruiter.isActive) {
+      sendError(res, 'Recruiter account is inactive', 403);
+      return;
+    }
+
+    const updatedRecruiter = await prisma.user.update({
+      where: { id: existingRecruiter.id },
+      data: {
+        fullName: data.fullName.trim(),
+        phone:
+          data.phone === undefined
+            ? existingRecruiter.phone
+            : data.phone?.trim() || null,
+        avatarUrl:
+          data.avatarUrl === undefined
+            ? existingRecruiter.avatarUrl
+            : data.avatarUrl || null,
+      },
+      select: {
+        id: true,
+        recruiterId: true,
+        email: true,
+        fullName: true,
+        phone: true,
+        avatarUrl: true,
+        isActive: true,
+        updatedAt: true,
+      },
+    });
+
+    await logAudit({
+      req,
+      action: 'UPDATE_RECRUITER_PROFILE',
+      module: 'RECRUITERS',
+      entity: 'User',
+      entityId: updatedRecruiter.id,
+      oldValue: {
+        fullName: existingRecruiter.fullName,
+        phone: existingRecruiter.phone,
+        avatarUrl: existingRecruiter.avatarUrl,
+      },
+      newValue: {
+        fullName: updatedRecruiter.fullName,
+        phone: updatedRecruiter.phone,
+        avatarUrl: updatedRecruiter.avatarUrl,
+      },
+    });
+
+    sendSuccess(
+      res,
+      {
+        profile: updatedRecruiter,
+      },
+      'Recruiter profile updated successfully.'
+    );
+  } catch (err) {
+    next(err);
+  }
+};
+
 export const getRecruiters = async (
   req: Request,
   res: Response,
