@@ -201,7 +201,9 @@ export const compileEmailTemplate = async (
   const interpolatedHtmlContent = interpolateVariables(template.htmlBody, enrichedVars);
   const interpolatedPlainText = interpolateVariables(template.plainText || '', enrichedVars);
 
-  const fullHtml = wrapHtmlEmail(interpolatedHtmlContent);
+  // The template body is now the complete email HTML.
+  // No automatic Orrica Edge header, footer, wrapper, or branding is injected.
+  const fullHtml = interpolatedHtmlContent;
 
   return {
     subject: interpolatedSubject,
