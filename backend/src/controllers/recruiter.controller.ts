@@ -576,10 +576,7 @@ const getRecruiterMetricSnapshot = async (recruiterId: string, range: Productivi
         recruiterId,
         ...(dateFilter ? { appliedAt: dateFilter } : {}),
       },
-      select: {
-        stage: true,
-        candidateId: true,
-      },
+      select: { stage: true, candidateId: true },
     }),
     prisma.candidateActivity.findMany({
       where: {
@@ -590,47 +587,38 @@ const getRecruiterMetricSnapshot = async (recruiterId: string, range: Productivi
     }),
   ]);
 
-  const ownedCandidateIds = new Set(candidates.map((candidate) => candidate.id));
-  const scopedApplications = applications.filter((application) => ownedCandidateIds.has(application.candidateId));
-  const scopedActivities = activities.filter((activity) => ownedCandidateIds.has(activity.candidateId));
+  const candidateIds = new Set(candidates.map((candidate) => candidate.id));
+  const ownedApplications = applications.filter((item) => candidateIds.has(item.candidateId));
+  const ownedActivities = activities.filter((item) => candidateIds.has(item.candidateId));
 
-  const submittedCount = Math.max(
-    candidates.length,
-    new Set(scopedApplications.map((application) => application.candidateId)).size
-  );
+  const uniqueSubmitted = new Set(ownedApplications.map((item) => item.candidateId));
+  const submittedCount = Math.max(candidates.length, uniqueSubmitted.size);
 
-  const countStage = (stage: string) =>
-    scopedApplications.filter((application) => application.stage === stage).length;
+  const stageCount = (stage: string) =>
+    ownedApplications.filter((item) => item.stage === stage).length;
 
-  const countActivity = (action: string) =>
-    scopedActivities.filter((activity) => activity.action === action).length;
+  const candidateStatusCount = (status: string) =>
+    candidates.filter((candidate) => candidate.status === status).length;
 
-  const selectedCount = countStage('SELECTED') ||
-    candidates.filter((candidate) => candidate.status === 'SELECTED').length;
-
-  const joinedCount = countStage('JOINED') ||
-    candidates.filter((candidate) => candidate.status === 'JOINED').length;
+  const activityCount = (action: string) =>
+    ownedActivities.filter((item) => item.action === action).length;
 
   return {
     candidates: candidates.length,
     submittedCount,
-    shortlistedCount: countStage('SHORTLISTED') || candidates.filter((candidate) => candidate.status === 'SHORTLISTED').length,
-    interviewedCount: countStage('INTERVIEW') || candidates.filter((candidate) => candidate.status === 'INTERVIEW').length,
-    selectedCount,
-    joinedCount,
-    rejectedCount: countStage('REJECTED') || candidates.filter((candidate) => candidate.status === 'REJECTED').length,
-    walkInAttended: countActivity('WALK_IN_ATTENDED'),
-    walkInScheduled: countActivity('WALK_IN_SCHEDULED'),
-    walkInNoShow: countActivity('WALK_IN_NO_SHOW'),
-    pendingCount: Math.max(
-      0,
-      candidates.filter((candidate) =>
-        ['NEW', 'SCREENING'].includes(candidate.status)
-      ).length
-    ),
+    shortlistedCount: Math.max(stageCount('SHORTLISTED'), candidateStatusCount('SHORTLISTED')),
+    interviewedCount: Math.max(stageCount('INTERVIEW'), candidateStatusCount('INTERVIEW')),
+    selectedCount: Math.max(stageCount('SELECTED'), candidateStatusCount('SELECTED')),
+    joinedCount: Math.max(stageCount('JOINED'), candidateStatusCount('JOINED')),
+    rejectedCount: Math.max(stageCount('REJECTED'), candidateStatusCount('REJECTED')),
+    walkInAttended: activityCount('WALK_IN_ATTENDED'),
+    walkInScheduled: activityCount('WALK_IN_SCHEDULED'),
+    walkInNoShow: activityCount('WALK_IN_NO_SHOW'),
+    pendingCount: candidates.filter((candidate) =>
+      ['NEW', 'SCREENING'].includes(candidate.status)
+    ).length,
   };
 };
-
 const parseAnalyticsRange = (req: Request): ProductivityRange => {
   const from = typeof req.query.dateFrom === 'string' ? new Date(req.query.dateFrom) : undefined;
   const to = typeof req.query.dateTo === 'string' ? new Date(req.query.dateTo) : undefined;
