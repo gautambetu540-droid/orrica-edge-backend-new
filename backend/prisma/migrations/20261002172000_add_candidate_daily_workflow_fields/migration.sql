@@ -1,6 +1,7 @@
 -- Persist recruiter walk-in and follow-up scheduling on candidate records.
 ALTER TABLE "candidates"
 ADD COLUMN "walkInStatus" TEXT,
+ADD COLUMN "walkInResponse" TEXT,
 ADD COLUMN "walkInDate" TIMESTAMP(3),
 ADD COLUMN "walkInTime" TEXT,
 ADD COLUMN "followUpAt" TIMESTAMP(3),
