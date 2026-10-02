@@ -51,7 +51,7 @@ const createCandidateSchema = z.object({
   noticePeriodDays: z.coerce.number().min(0).max(3650).optional(),
   skills: z.array(z.string()).default([]),
   languages: z.array(z.string()).default(['English']),
-  resumeUrl: z.string().url().max(2000),
+  resumeUrl: z.union([z.string().url().max(2000), z.literal('')]).optional(),
   source: z.string().trim().max(100).optional(),
   tags: z.array(z.string()).default([]),
   notes: z.string().max(10000).optional(),
@@ -350,7 +350,7 @@ export const createCandidate = async (req: Request, res: Response, next: NextFun
           noticePeriodDays: data.noticePeriodDays,
           skills: data.skills,
           languages: data.languages,
-          resumeUrl: data.resumeUrl,
+          resumeUrl: data.resumeUrl || '',
           source: data.source || (isRecruiter ? 'Recruiter Added' : 'Admin Added'),
           tags: data.tags,
           notes: data.notes,
@@ -702,11 +702,6 @@ export const recruiterSubmitCandidate = async (req: Request, res: Response, next
       return;
     }
 
-    if (!req.file) {
-      sendError(res, 'Candidate resume is required.', 400);
-      return;
-    }
-
     const body = req.body || {};
     const fullName = String(body.fullName || '').trim();
     const email = String(body.email || '').trim().toLowerCase();
@@ -775,6 +770,7 @@ export const recruiterSubmitCandidate = async (req: Request, res: Response, next
         email: true,
         phone: true,
         ownerRecruiterId: true,
+        resumeUrl: true,
       },
     });
 
@@ -800,7 +796,7 @@ export const recruiterSubmitCandidate = async (req: Request, res: Response, next
       }
     }
 
-    const uploaded = await uploadResumeFile(req.file, fullName);
+    const uploaded = req.file ? await uploadResumeFile(req.file, fullName) : null;
 
     const result = await prisma.$transaction(async (tx) => {
       let candidate;
@@ -819,7 +815,7 @@ export const recruiterSubmitCandidate = async (req: Request, res: Response, next
             noticePeriodDays: Number.isFinite(noticePeriodDays) ? noticePeriodDays : undefined,
             skills,
             languages: languages.length ? languages : ['English'],
-            resumeUrl: uploaded.fileUrl,
+            ...(uploaded ? { resumeUrl: uploaded.fileUrl } : {}),
             source: 'Recruiter Submission',
             tags: { push: 'Recruiter Submission' },
             notes: recruiterRemarks || undefined,
@@ -857,7 +853,7 @@ export const recruiterSubmitCandidate = async (req: Request, res: Response, next
             noticePeriodDays: Number.isFinite(noticePeriodDays) ? noticePeriodDays : undefined,
             skills,
             languages: languages.length ? languages : ['English'],
-            resumeUrl: uploaded.fileUrl,
+            resumeUrl: uploaded?.fileUrl || '',
             source: 'Recruiter Submission',
             tags: ['Recruiter Submission'],
             notes: recruiterRemarks || undefined,
@@ -893,7 +889,7 @@ export const recruiterSubmitCandidate = async (req: Request, res: Response, next
           metadata: {
             source: 'RECRUITER_SUBMISSION',
             candidateCode: candidate.candidateCode,
-            fileUrl: uploaded.fileUrl,
+            ...(uploaded ? { fileUrl: uploaded.fileUrl } : {}),
           },
         },
       });

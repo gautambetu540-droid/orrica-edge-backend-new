@@ -28,7 +28,7 @@ const defaultFields = [
   { key: 'noticePeriodDays', label: 'Notice Period (Days)', type: 'number', required: false },
   { key: 'skills', label: 'Skills', type: 'text', required: false, placeholder: 'JavaScript, Excel, Customer Support' },
   { key: 'languages', label: 'Languages', type: 'text', required: false, placeholder: 'English, Hindi' },
-  { key: 'resume', label: 'Resume', type: 'file', required: true },
+  { key: 'resume', label: 'Resume', type: 'file', required: false },
 ];
 
 const normalizeSlug = (value: string): string => {
@@ -472,31 +472,12 @@ export const submitPublicUniversalForm = async (req: Request, res: Response, nex
 
     const configuredFields = Array.isArray(form.fields) ? (form.fields as Array<Record<string, unknown>>) : [];
     for (const field of configuredFields) {
-      if (!field.required) continue;
-
       const key = String(field.key || '').trim();
-      if (key === 'resume') {
-        if (!req.file) {
-          sendError(res, 'Resume is required.', 400);
-          return;
-        }
-        continue;
-      }
+      if (key === 'resume' || !field.required) continue;
 
       const value = body[key];
       if (value === undefined || value === null || String(value).trim() === '') {
         sendError(res, `${String(field.label || key)} is required.`, 400);
-        return;
-      }
-    }
-
-    if (!req.file) {
-      const candidateByEmail = await prisma.candidate.findUnique({
-        where: { email },
-        select: { resumeUrl: true },
-      });
-      if (!candidateByEmail) {
-        sendError(res, 'Resume file is required (PDF or DOC/DOCX up to 5MB).', 400);
         return;
       }
     }
