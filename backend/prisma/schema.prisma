@@ -135,6 +135,7 @@ model User {
   role                 Role      @default(CANDIDATE)
   phone                String?
   recruiterId          String?   @unique
+  recruiterType        String    @default("INTERNAL")
   mustSetPassword      Boolean   @default(false)
   lastLoginAt          DateTime?
   avatarUrl            String?
@@ -155,11 +156,15 @@ model User {
   refreshTokens        RefreshToken[]
   jobsCreated          Job[]             @relation("CreatedJobs")
   candidateProfile     Candidate?
+  ownedCandidates      Candidate[]       @relation("CandidateOwner")
+  createdCandidates    Candidate[]       @relation("CandidateCreatedBy")
+  candidateActivities  CandidateActivity[] @relation("CandidateActivityUser")
   assignedApplications Application[]     @relation("RecruiterApplications")
   assignedJobs         Job[]             @relation("RecruiterJobs")
   payouts              Payout[]
   notifications        Notification[]
   auditLogs            AuditLog[]
+  candidateActivitiesAsRecruiter CandidateActivity[] @relation("CandidateActivityRecruiter")
   recruiterPermissions RecruiterPermission?
 
   @@map("users")
@@ -260,6 +265,7 @@ model Job {
   updatedAt             DateTime       @updatedAt
 
   assignedRecruiters    User[]         @relation("RecruiterJobs")
+  candidateActivities   CandidateActivity[]
   applications         Application[]
   payouts              Payout[]
   replacementCases     ReplacementCase[]
@@ -301,9 +307,40 @@ model Candidate {
   replacementCases   ReplacementCase[] @relation("PrimaryCandidate")
   replacedByCases    ReplacementCase[] @relation("ReplacementCandidate")
   universalFormSubmissions UniversalFormSubmission[]
+  ownerRecruiterId   String?
+  ownerRecruiter     User?            @relation("CandidateOwner", fields: [ownerRecruiterId], references: [id], onDelete: SetNull)
+  createdById        String?
+  createdBy          User?            @relation("CandidateCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  activities         CandidateActivity[]
 
   @@index([status, email, phone])
+  @@index([ownerRecruiterId])
+  @@index([createdById])
   @@map("candidates")
+}
+
+model CandidateActivity {
+  id            String   @id @default(uuid())
+  candidateId   String
+  candidate     Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  userId        String?
+  user          User?    @relation("CandidateActivityUser", fields: [userId], references: [id], onDelete: SetNull)
+  recruiterId   String?
+  recruiter     User?    @relation("CandidateActivityRecruiter", fields: [recruiterId], references: [id], onDelete: SetNull)
+  applicationId String?
+  application   Application? @relation(fields: [applicationId], references: [id], onDelete: SetNull)
+  jobId         String?
+  job           Job?     @relation(fields: [jobId], references: [id], onDelete: SetNull)
+  action        String
+  notes         String?  @db.Text
+  metadata      Json?
+  createdAt     DateTime @default(now())
+
+  @@index([candidateId, createdAt])
+  @@index([recruiterId, createdAt])
+  @@index([action, createdAt])
+  @@index([jobId, createdAt])
+  @@map("candidate_activities")
 }
 
 model Application {
@@ -325,6 +362,7 @@ model Application {
   updatedAt       DateTime          @updatedAt
 
   interviews      Interview[]
+  candidateActivities CandidateActivity[]
 
   @@unique([jobId, candidateId])
   @@index([jobId, stage])
