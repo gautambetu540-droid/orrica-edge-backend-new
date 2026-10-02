@@ -48,9 +48,10 @@ export const applyForJob = async (req: Request, res: Response, next: NextFunctio
 
     // Verify target job exists
     const job = await prisma.job.findUnique({
-      where: { id: data.jobId },
+      where: { id: data.jobId, status: 'PUBLISHED' },
       select: {
         id: true,
+        status: true,
         title: true,
         jobCode: true,
         skills: true,
@@ -63,7 +64,7 @@ export const applyForJob = async (req: Request, res: Response, next: NextFunctio
     });
 
     if (!job) {
-      sendError(res, 'Target job opening not found', 404);
+      sendError(res, 'Target job opening is unavailable', 404);
       return;
     }
 
@@ -223,19 +224,32 @@ export const getApplications = async (req: Request, res: Response, next: NextFun
     const pageNum = Math.max(1, parseInt(page as string, 10));
     const limitNum = Math.min(100, Math.max(1, parseInt(limit as string, 10)));
     const skip = (pageNum - 1) * limitNum;
+    const filters: any[] = [];
 
-    const where: any = {};
-    if (jobId) where.jobId = jobId as string;
-    if (stage) where.stage = stage as any;
+    if (jobId) filters.push({ jobId: jobId as string });
+    if (stage) filters.push({ stage: stage as any });
     if (search) {
-      where.candidate = {
-        OR: [
-          { fullName: { contains: search as string, mode: 'insensitive' } },
-          { email: { contains: search as string, mode: 'insensitive' } },
-          { location: { contains: search as string, mode: 'insensitive' } },
-        ],
-      };
+      filters.push({
+        candidate: {
+          OR: [
+            { fullName: { contains: search as string, mode: 'insensitive' } },
+            { email: { contains: search as string, mode: 'insensitive' } },
+            { location: { contains: search as string, mode: 'insensitive' } },
+          ],
+        },
+      });
     }
+
+    if (req.user?.role === 'RECRUITER') {
+      filters.push({
+        OR: [
+          { recruiterId: req.user.userId },
+          { candidate: { ownerRecruiterId: req.user.userId } },
+        ],
+      });
+    }
+
+    const where = filters.length ? { AND: filters } : {};
 
     const [total, applications] = await Promise.all([
       prisma.application.count({ where }),

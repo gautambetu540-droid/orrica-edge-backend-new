@@ -191,8 +191,11 @@ export const getJobs = async (req: Request, res: Response, next: NextFunction): 
     const limitNum = Math.min(50, Math.max(1, parseInt(limit as string, 10)));
     const skip = (pageNum - 1) * limitNum;
 
-    // Check cache for standard public queries
-    const cacheKey = `jobs:${search || ''}:${department || ''}:${category || ''}:${location || ''}:${workMode || ''}:${status}:${pageNum}:${limitNum}`;
+    const isAdmin = req.user?.role === 'ADMIN' || req.user?.role === 'SUPER_ADMIN';
+    const isRecruiter = req.user?.role === 'RECRUITER';
+    const visibleStatus = isAdmin ? status : 'PUBLISHED';
+    const scope = isAdmin ? req.user!.role : isRecruiter ? `recruiter:${req.user!.userId}` : 'public';
+    const cacheKey = `jobs:${scope}:${search || ''}:${department || ''}:${category || ''}:${location || ''}:${workMode || ''}:${employmentType || ''}:${visibleStatus}:${pageNum}:${limitNum}`;
     const cachedData = cache.get(cacheKey);
     if (cachedData) {
       sendSuccess(res, cachedData);
@@ -200,8 +203,12 @@ export const getJobs = async (req: Request, res: Response, next: NextFunction): 
     }
 
     const where: any = {
-      status: status as any,
+      status: visibleStatus as any,
     };
+
+    if (isRecruiter) {
+      where.assignedRecruiters = { some: { id: req.user!.userId } };
+    }
 
     if (search) {
       where.OR = [
@@ -279,18 +286,25 @@ export const getJobBySlug = async (req: Request, res: Response, next: NextFuncti
   try {
     const { slug } = req.params;
 
-    const cacheKey = `job:slug:${slug}`;
+    const isAdmin = req.user?.role === 'ADMIN' || req.user?.role === 'SUPER_ADMIN';
+    const isRecruiter = req.user?.role === 'RECRUITER';
+    const scope = isAdmin ? req.user!.role : isRecruiter ? `recruiter:${req.user!.userId}` : 'public';
+    const cacheKey = `job:slug:${slug}:${scope}`;
     const cachedJob = cache.get(cacheKey);
     if (cachedJob) {
       // Async increment view counter without blocking
-      prisma.job.update({ where: { slug }, data: { views: { increment: 1 } } }).catch(() => {});
+      prisma.job.update({ where: { id: cachedJob.id }, data: { views: { increment: 1 } } }).catch(() => {});
       sendSuccess(res, { job: cachedJob });
       return;
     }
 
     const job = await prisma.job.findFirst({
       where: {
-        OR: [{ slug }, { id: slug }, { jobCode: slug }],
+        AND: [
+          { OR: [{ slug }, { id: slug }, { jobCode: slug }] },
+          ...(isAdmin ? [] : [{ status: 'PUBLISHED' as const }]),
+          ...(isRecruiter ? [{ assignedRecruiters: { some: { id: req.user!.userId } } }] : []),
+        ],
       },
       include: {
         client: {
