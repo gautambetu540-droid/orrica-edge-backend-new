@@ -8,7 +8,9 @@ import {
   assignCandidate,
   addCandidateActivity,
   getCandidateActivities,
+  recruiterSubmitCandidate,
 } from '../controllers/candidate.controller';
+import { uploadResume } from '../middlewares/upload.middleware';
 import {
   authenticateJwt,
   requireRoles,
@@ -16,6 +18,15 @@ import {
 } from '../middlewares/auth.middleware';
 
 const router = Router();
+
+router.post(
+  '/recruiter-submit',
+  authenticateJwt,
+  requireRoles('RECRUITER'),
+  requireRecruiterPermission('candidates'),
+  uploadResume.single('resume'),
+  recruiterSubmitCandidate
+);
 
 router.get(
   '/',
