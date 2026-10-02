@@ -8,6 +8,10 @@ export const config = {
   nodeEnv: process.env.NODE_ENV || 'development',
   databaseUrl: process.env.DATABASE_URL || '',
 
+  mfa: {
+    encryptionKey: process.env.MFA_ENCRYPTION_KEY || '',
+  },
+
   jwt: {
     accessSecret: process.env.JWT_ACCESS_SECRET || 'orrica_edge_access_default_secret',
     refreshSecret: process.env.JWT_REFRESH_SECRET || 'orrica_edge_refresh_default_secret',
