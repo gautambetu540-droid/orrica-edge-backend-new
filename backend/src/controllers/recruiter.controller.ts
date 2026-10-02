@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import crypto from 'crypto';
 import { z } from 'zod';
 import { prisma } from '../prisma/client';
+import { config } from '../config';
 import { sendSuccess, sendError } from '../utils/response';
 import { logAudit } from '../services/audit.service';
 import { dispatchEmail } from '../services/email.service';
@@ -15,7 +16,10 @@ const createRecruiterSchema = z.object({
 
 const generateRecruiterId = async (): Promise<string> => {
   const recruiters = await prisma.user.findMany({
-    where: { recruiterId: { not: null } },
+    where: {
+      role: 'RECRUITER',
+      recruiterId: { not: null },
+    },
     select: { recruiterId: true },
   });
 
@@ -41,7 +45,7 @@ export const createRecruiter = async (
 ): Promise<void> => {
   try {
     const data = createRecruiterSchema.parse(req.body);
-    const email = data.email.toLowerCase();
+    const email = data.email.trim().toLowerCase();
 
     const existingUser = await prisma.user.findUnique({
       where: { email },
@@ -55,21 +59,26 @@ export const createRecruiter = async (
 
     const recruiterId = await generateRecruiterId();
 
+    // Only the hash is stored. The raw setup token is sent once by email.
     const setupToken = crypto.randomBytes(32).toString('hex');
     const setupTokenHash = crypto.createHash('sha256').update(setupToken).digest('hex');
+
+    const setupExpiresAt = new Date(
+      Date.now() + config.recruiter.passwordSetupExpiryHours * 60 * 60 * 1000
+    );
 
     const recruiter = await prisma.user.create({
       data: {
         email,
         passwordHash: setupTokenHash,
-        fullName: data.fullName,
+        fullName: data.fullName.trim(),
         role: 'RECRUITER',
-        phone: data.phone,
+        phone: data.phone?.trim() || undefined,
         avatarUrl: data.avatarUrl,
         recruiterId,
         mustSetPassword: true,
         resetPasswordToken: setupTokenHash,
-        resetPasswordExpires: new Date(Date.now() + 24 * 60 * 60 * 1000),
+        resetPasswordExpires: setupExpiresAt,
       },
       select: {
         id: true,
@@ -100,14 +109,14 @@ export const createRecruiter = async (
     });
 
     const setupUrl =
-      `${process.env.RECRUITER_PASSWORD_SETUP_URL || 'https://orricaedge.com/set-password'}?token=${encodeURIComponent(setupToken)}&email=${encodeURIComponent(recruiter.email)}`;
+      `${config.recruiter.passwordSetupUrl}?token=${encodeURIComponent(setupToken)}&email=${encodeURIComponent(recruiter.email)}`;
 
     dispatchEmail('RECRUITER_WELCOME', recruiter.email, {
       recruiter_id: recruiter.recruiterId || '',
       recruiter_name: recruiter.fullName,
       recruiter_email: recruiter.email,
       password_setup_url: setupUrl,
-      login_url: process.env.RECRUITER_LOGIN_URL || 'https://orricaedge.com/login',
+      login_url: config.recruiter.loginUrl,
     });
 
     sendSuccess(
