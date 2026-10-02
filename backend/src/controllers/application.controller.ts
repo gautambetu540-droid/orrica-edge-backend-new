@@ -315,13 +315,41 @@ export const updateApplicationStage = async (req: Request, res: Response, next: 
       action: `Moved to ${stage} by ${req.user?.email || 'Recruiter'}`,
     });
 
+    const effectiveRecruiterId =
+      application.recruiterId || (req.user?.role === 'RECRUITER' ? req.user.userId : null);
+
     const updated = await prisma.application.update({
       where: { id },
       data: {
         stage: stage as any,
+        recruiterId: effectiveRecruiterId,
         rejectionReason: stage === 'REJECTED' ? rejectionReason : null,
         internalNotes: existingNotes,
         timeline,
+      },
+    });
+
+    const activityAction =
+      stage === 'SELECTED'
+        ? 'SELECTED'
+        : stage === 'JOINED'
+          ? 'JOINED'
+          : stage === 'REJECTED'
+            ? 'REJECTED'
+            : 'STATUS_UPDATED';
+
+    await prisma.candidateActivity.create({
+      data: {
+        candidateId: application.candidateId,
+        userId: req.user?.userId || null,
+        recruiterId: effectiveRecruiterId,
+        applicationId: application.id,
+        jobId: application.jobId,
+        action: activityAction,
+        metadata: {
+          previousStage: application.stage,
+          newStage: stage,
+        },
       },
     });
 
