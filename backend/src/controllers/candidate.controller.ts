@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { prisma } from '../prisma/client';
 import { sendSuccess, sendError } from '../utils/response';
 import { logAudit } from '../services/audit.service';
+import { createNotification } from '../services/notification.service';
 import { uploadResumeFile } from '../services/storage.service';
 
 
@@ -406,6 +407,16 @@ export const assignCandidate = async (req: Request, res: Response, next: NextFun
         },
       },
     });
+
+    if (recruiterId && recruiterId !== existing.ownerRecruiterId) {
+      await createNotification({
+        userId: recruiterId,
+        title: 'Candidate assigned to you',
+        message: 'A candidate has been assigned to your recruiter bucket. Open My Candidates to review the profile.',
+        type: 'CANDIDATE_ASSIGNED',
+        link: '/recruiter/candidates',
+      });
+    }
 
     await logAudit({
       req,
@@ -821,6 +832,14 @@ export const recruiterSubmitCandidate = async (req: Request, res: Response, next
       });
 
       return { candidate, application };
+    });
+
+    await createNotification({
+      userId: recruiter.id,
+      title: 'Candidate submitted successfully',
+      message: `${result.candidate.fullName} has been added to your candidate bucket for ${job.title}.`,
+      type: 'CANDIDATE_ADDED',
+      link: '/recruiter/candidates',
     });
 
     await logAudit({
