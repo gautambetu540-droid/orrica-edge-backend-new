@@ -37,6 +37,9 @@ const activitySchema = z.object({
   metadata: z.record(z.any()).optional(),
 });
 
+const walkInStatuses = ['EXPECTED', 'CONFIRMED', 'ARRIVED', 'RESCHEDULED', 'NO_SHOW', 'CANCELLED', 'COMPLETED'] as const;
+const walkInResponses = ['COMING_TODAY', 'COMING_TOMORROW', 'SPECIFIC_DATE', 'NOT_SURE', 'NOT_INTERESTED', 'NO_RESPONSE'] as const;
+
 const createCandidateSchema = z.object({
   fullName: z.string().trim().min(2).max(160),
   email: z.string().trim().email().max(180),
@@ -57,6 +60,12 @@ const createCandidateSchema = z.object({
   notes: z.string().max(10000).optional(),
   feedback: z.string().max(10000).optional(),
   dateOfJoin: z.coerce.date().optional(),
+  walkInStatus: z.enum(walkInStatuses).nullable().optional(),
+  walkInResponse: z.enum(walkInResponses).nullable().optional(),
+  walkInDate: z.coerce.date().nullable().optional(),
+  walkInTime: z.string().max(32).nullable().optional(),
+  followUpAt: z.coerce.date().nullable().optional(),
+  followUpCompletedAt: z.coerce.date().nullable().optional(),
   status: candidateStatus.optional(),
   ownerRecruiterId: z.string().uuid().nullable().optional(),
 });
