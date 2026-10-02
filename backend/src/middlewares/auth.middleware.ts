@@ -64,6 +64,15 @@ export const authenticateJwt = (req: Request, res: Response, next: NextFunction)
   }
 };
 
+export const optionalAuthenticateJwt = (req: Request, res: Response, next: NextFunction): void => {
+  if (!req.headers.authorization) {
+    next();
+    return;
+  }
+
+  authenticateJwt(req, res, next);
+};
+
 export const requireRoles = (...allowedRoles: string[]) => {
   return (req: Request, res: Response, next: NextFunction): void => {
     if (!req.user) {
