@@ -37,6 +37,9 @@ const activitySchema = z.object({
   metadata: z.record(z.any()).optional(),
 });
 
+const walkInStatuses = ['EXPECTED', 'CONFIRMED', 'ARRIVED', 'RESCHEDULED', 'NO_SHOW', 'CANCELLED', 'COMPLETED'] as const;
+const walkInResponses = ['COMING_TODAY', 'COMING_TOMORROW', 'SPECIFIC_DATE', 'NOT_SURE', 'NOT_INTERESTED', 'NO_RESPONSE'] as const;
+
 const createCandidateSchema = z.object({
   fullName: z.string().trim().min(2).max(160),
   email: z.string().trim().email().max(180),
@@ -57,6 +60,13 @@ const createCandidateSchema = z.object({
   notes: z.string().max(10000).optional(),
   feedback: z.string().max(10000).optional(),
   dateOfJoin: z.coerce.date().optional(),
+  walkInStatus: z.enum(walkInStatuses).nullable().optional(),
+  walkInResponse: z.enum(walkInResponses).nullable().optional(),
+  walkInDate: z.coerce.date().nullable().optional(),
+  walkInTime: z.string().max(32).nullable().optional(),
+  followUpAt: z.coerce.date().nullable().optional(),
+  followUpCompletedAt: z.coerce.date().nullable().optional(),
+  rescheduleReason: z.string().trim().max(1000).optional(),
   status: candidateStatus.optional(),
   ownerRecruiterId: z.string().uuid().nullable().optional(),
 });
@@ -118,6 +128,13 @@ export const getCandidates = async (req: Request, res: Response, next: NextFunct
       workMode,
       employmentType,
       walkInStatus,
+      walkInDateFrom,
+      walkInDateTo,
+      followUpDateFrom,
+      followUpDateTo,
+      followUpPending,
+      joiningDateFrom,
+      joiningDateTo,
       dateFrom,
       dateTo,
       page = '1',
@@ -169,14 +186,28 @@ export const getCandidates = async (req: Request, res: Response, next: NextFunct
     }
 
     if (walkInStatus) {
+      const requestedStatus = String(walkInStatus).toUpperCase();
       const actionMap: Record<string, string> = {
         SCHEDULED: 'WALK_IN_SCHEDULED',
         ATTENDED: 'WALK_IN_ATTENDED',
         NO_SHOW: 'WALK_IN_NO_SHOW',
       };
-      const action = actionMap[String(walkInStatus).toUpperCase()];
-      if (action) andFilters.push({ activities: { some: { action } } });
+      const action = actionMap[requestedStatus];
+      andFilters.push({
+        OR: [
+          { walkInStatus: requestedStatus },
+          ...(action ? [{ activities: { some: { action } } }] : []),
+        ],
+      });
     }
+
+    const walkInDate = buildDateFilter(parseDate(walkInDateFrom), parseDate(walkInDateTo));
+    if (walkInDate) andFilters.push({ walkInDate });
+    const followUpAt = buildDateFilter(parseDate(followUpDateFrom), parseDate(followUpDateTo));
+    if (followUpAt) andFilters.push({ followUpAt });
+    if (String(followUpPending).toLowerCase() === 'true') andFilters.push({ followUpAt: { not: null }, followUpCompletedAt: null });
+    const dateOfJoin = buildDateFilter(parseDate(joiningDateFrom), parseDate(joiningDateTo));
+    if (dateOfJoin) andFilters.push({ dateOfJoin });
 
     const createdAt = buildDateFilter(from, to);
     if (createdAt) andFilters.push({ createdAt });
@@ -368,6 +399,12 @@ export const createCandidate = async (req: Request, res: Response, next: NextFun
           notes: data.notes,
           feedback: data.feedback,
           dateOfJoin: data.dateOfJoin,
+          walkInStatus: data.walkInStatus,
+          walkInResponse: data.walkInResponse,
+          walkInDate: data.walkInDate,
+          walkInTime: data.walkInTime,
+          followUpAt: data.followUpAt,
+          followUpCompletedAt: data.followUpCompletedAt,
           status: data.status || 'NEW',
           ownerRecruiterId,
           createdById: currentUserId || null,
@@ -383,6 +420,23 @@ export const createCandidate = async (req: Request, res: Response, next: NextFun
           metadata: { source: created.source },
         },
       });
+      if (created.walkInDate || created.walkInResponse || created.followUpAt) {
+        await tx.candidateActivity.create({
+          data: {
+            candidateId: created.id,
+            userId: currentUserId || null,
+            recruiterId: ownerRecruiterId,
+            action: 'WALK_IN_SCHEDULED',
+            metadata: {
+              walkInStatus: created.walkInStatus,
+              walkInResponse: created.walkInResponse,
+              walkInDate: created.walkInDate?.toISOString() ?? null,
+              walkInTime: created.walkInTime,
+              followUpAt: created.followUpAt?.toISOString() ?? null,
+            },
+          },
+        });
+      }
 
       return created;
     });
@@ -659,12 +713,89 @@ export const updateCandidate = async (req: Request, res: Response, next: NextFun
       return;
     }
 
-    const updated = await prisma.candidate.update({
-      where: { id: req.params.id },
-      data: {
-        ...data,
-        email: data.email ? data.email.toLowerCase() : undefined,
-      } as any,
+    const { rescheduleReason, ...candidateData } = data;
+    const walkInWasRescheduled =
+      existing.walkInDate !== null &&
+      ((data.walkInDate != null && data.walkInDate.getTime() !== existing.walkInDate.getTime()) ||
+        (data.walkInTime !== undefined && data.walkInTime !== existing.walkInTime));
+    if (walkInWasRescheduled && !rescheduleReason?.trim()) {
+      sendError(res, 'A reason is required when rescheduling a walk-in.', 400);
+      return;
+    }
+    const updated = await prisma.$transaction(async (tx) => {
+      const candidate = await tx.candidate.update({
+        where: { id: req.params.id },
+        data: {
+          ...candidateData,
+          email: data.email ? data.email.toLowerCase() : undefined,
+          ...(walkInWasRescheduled ? { rescheduleCount: { increment: 1 } } : {}),
+        } as any,
+      });
+
+      if (walkInWasRescheduled) {
+        await tx.candidateActivity.create({
+          data: {
+            candidateId: req.params.id,
+            userId: req.user?.userId || null,
+            recruiterId: existing.ownerRecruiterId || (req.user?.role === 'RECRUITER' ? req.user.userId : null),
+            action: 'WALK_IN_RESCHEDULED',
+            notes: rescheduleReason,
+            metadata: {
+              previousDate: existing.walkInDate?.toISOString(),
+              newDate: data.walkInDate?.toISOString(),
+              newTime: data.walkInTime ?? existing.walkInTime,
+            },
+          },
+        });
+      }
+
+      const walkInChanged =
+        (data.walkInStatus !== undefined && data.walkInStatus !== existing.walkInStatus) ||
+        (data.walkInResponse !== undefined && data.walkInResponse !== existing.walkInResponse) ||
+        (data.walkInDate !== undefined && data.walkInDate?.getTime() !== existing.walkInDate?.getTime()) ||
+        (data.walkInTime !== undefined && data.walkInTime !== existing.walkInTime);
+      if (walkInChanged && !walkInWasRescheduled) {
+        await tx.candidateActivity.create({
+          data: {
+            candidateId: req.params.id,
+            userId: req.user?.userId || null,
+            recruiterId: existing.ownerRecruiterId || (req.user?.role === 'RECRUITER' ? req.user.userId : null),
+            action: 'WALK_IN_UPDATED',
+            metadata: {
+              walkInStatus: data.walkInStatus ?? existing.walkInStatus,
+              walkInResponse: data.walkInResponse ?? existing.walkInResponse,
+              walkInDate: data.walkInDate?.toISOString() ?? existing.walkInDate?.toISOString() ?? null,
+              walkInTime: data.walkInTime ?? existing.walkInTime,
+            },
+          },
+        });
+      }
+
+      if (data.followUpAt !== undefined && data.followUpAt?.getTime() !== existing.followUpAt?.getTime()) {
+        await tx.candidateActivity.create({
+          data: {
+            candidateId: req.params.id,
+            userId: req.user?.userId || null,
+            recruiterId: existing.ownerRecruiterId || (req.user?.role === 'RECRUITER' ? req.user.userId : null),
+            action: 'FOLLOW_UP_SCHEDULED',
+            metadata: { followUpAt: data.followUpAt?.toISOString() ?? null },
+          },
+        });
+      }
+
+      if (data.followUpCompletedAt && !existing.followUpCompletedAt) {
+        await tx.candidateActivity.create({
+          data: {
+            candidateId: req.params.id,
+            userId: req.user?.userId || null,
+            recruiterId: existing.ownerRecruiterId || (req.user?.role === 'RECRUITER' ? req.user.userId : null),
+            action: 'FOLLOW_UP_COMPLETED',
+            metadata: { followUpAt: existing.followUpAt?.toISOString() ?? null },
+          },
+        });
+      }
+
+      return candidate;
     });
 
     if (data.status && data.status !== existing.status) {
