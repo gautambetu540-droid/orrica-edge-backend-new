@@ -515,7 +515,7 @@ export const submitPublicUniversalForm = async (req: Request, res: Response, nex
       tags: parseList(body.tags),
       notes: String(body.notes || '').trim() || undefined,
       feedback: String(body.feedback || '').trim() || undefined,
-      dateOfJoin: body.dateOfJoin ? new Date(String(body.dateOfJoin)) : undefined,
+      dateOfJoin: parseDate(body.dateOfJoin),
     };
 
     const result = await prisma.$transaction(async (tx) => {
