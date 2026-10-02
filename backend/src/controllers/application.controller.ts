@@ -89,7 +89,7 @@ export const applyForJob = async (req: Request, res: Response, next: NextFunctio
       // Upsert candidate
       const existingCandidate = await tx.candidate.findUnique({
         where: { email: data.email },
-        select: { candidateCode: true },
+        select: { candidateCode: true, resumeUrl: true },
       });
 
       const nextCode = async () => {
@@ -118,7 +118,7 @@ export const applyForJob = async (req: Request, res: Response, next: NextFunctio
           location: data.location,
           skills: data.skills,
           languages: data.languages,
-          resumeUrl: uploadResult?.fileUrl || '',
+          ...(uploadResult ? { resumeUrl: uploadResult.fileUrl } : {}),
           experienceYears: data.experienceYears,
           currentCompany: data.currentCompany,
           currentDesignation: data.currentDesignation,
@@ -137,7 +137,7 @@ export const applyForJob = async (req: Request, res: Response, next: NextFunctio
           location: data.location,
           skills: data.skills,
           languages: data.languages,
-          resumeUrl: uploadResult.fileUrl,
+          resumeUrl: uploadResult?.fileUrl || '',
           experienceYears: data.experienceYears,
           currentCompany: data.currentCompany,
           currentDesignation: data.currentDesignation,
