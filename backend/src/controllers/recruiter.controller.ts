@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import crypto from 'crypto';
+import bcrypt from 'bcryptjs';
 import { z } from 'zod';
 import { prisma } from '../prisma/client';
 import { config } from '../config';
@@ -59,28 +60,22 @@ export const createRecruiter = async (
 
     const recruiterId = await generateRecruiterId();
 
-    // Only the hash is stored. The raw setup token is sent once by email.
-    const setupToken = crypto.randomBytes(32).toString('hex');
-    const setupTokenHash = crypto.createHash('sha256').update(setupToken).digest('hex');
-
-    const setupExpiresAt = new Date(
-      Date.now() + config.recruiter.passwordSetupExpiryHours * 60 * 60 * 1000
-    );
+    // Generate a temporary password for first login. Only its bcrypt hash is stored.
+    const temporaryPassword = crypto.randomBytes(9).toString('base64url').slice(0, 12);
+    const temporaryPasswordHash = await bcrypt.hash(temporaryPassword, 12);
 
     // Create the recruiter and their default permissions atomically.
     const recruiter = await prisma.$transaction(async (tx) => {
       const createdRecruiter = await tx.user.create({
         data: {
           email,
-          passwordHash: setupTokenHash,
+          passwordHash: temporaryPasswordHash,
           fullName: data.fullName.trim(),
           role: 'RECRUITER',
           phone: data.phone?.trim() || undefined,
           avatarUrl: data.avatarUrl,
           recruiterId,
           mustSetPassword: true,
-          resetPasswordToken: setupTokenHash,
-          resetPasswordExpires: setupExpiresAt,
         },
         select: {
           id: true,
@@ -127,14 +122,11 @@ export const createRecruiter = async (
       },
     });
 
-    const setupUrl =
-      `${config.recruiter.passwordSetupUrl}?token=${encodeURIComponent(setupToken)}&email=${encodeURIComponent(recruiter.email)}`;
-
     dispatchEmail('RECRUITER_WELCOME', recruiter.email, {
       recruiter_id: recruiter.recruiterId || '',
       recruiter_name: recruiter.fullName,
       recruiter_email: recruiter.email,
-      password_setup_url: setupUrl,
+      temporary_password: temporaryPassword,
       login_url: config.recruiter.loginUrl,
     });
 
@@ -154,7 +146,7 @@ export const createRecruiter = async (
           createdAt: recruiter.createdAt,
         },
       },
-      'Recruiter created successfully and welcome email queued.'
+      'Recruiter created successfully and temporary password sent by email.'
     );
   } catch (err) {
     next(err);
