@@ -6,6 +6,7 @@ import { generateSecret, generateURI, verify } from 'otplib';
 import { z } from 'zod';
 import { prisma } from '../prisma/client';
 import { config } from '../config';
+import { decryptMfaSecret, encryptMfaSecret } from '../services/mfaCrypto.service';
 
 const setupSchema = z.object({
   code: z.string().regex(/^\d{6}$/, 'Authentication code must be 6 digits'),
@@ -87,7 +88,7 @@ export const setupMfa = async (
     await prisma.user.update({
       where: { id: user.id },
       data: {
-        mfaSecret: secret,
+        mfaSecret: encryptMfaSecret(secret),
         mfaEnabled: false,
         mfaBackupCodes: { set: [] },
       },
@@ -140,8 +141,10 @@ export const verifyMfaSetup = async (
       return;
     }
 
+    const decryptedSecret = decryptMfaSecret(user.mfaSecret);
+
     const result = await verify({
-      secret: user.mfaSecret,
+      secret: decryptedSecret.secret,
       token: data.code,
     });
 
@@ -152,6 +155,14 @@ export const verifyMfaSetup = async (
         message: 'Invalid authentication code. Please enter the current 6-digit code.',
       });
       return;
+    }
+
+    // Upgrade any legacy plaintext secret to encrypted storage after a successful verification.
+    if (decryptedSecret.legacy) {
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { mfaSecret: encryptMfaSecret(decryptedSecret.secret) },
+      });
     }
 
     const backupCodes = generateBackupCodes();
@@ -220,6 +231,8 @@ export const verifyMfaChallenge = async (
       return;
     }
 
+    const decryptedSecret = decryptMfaSecret(user.mfaSecret);
+
     let valid = false;
     let remainingBackupCodes: string[] = Array.isArray(user.mfaBackupCodes)
       ? user.mfaBackupCodes.filter((value): value is string => typeof value === 'string')
@@ -227,7 +240,7 @@ export const verifyMfaChallenge = async (
 
     if (data.token) {
       const result = await verify({
-        secret: user.mfaSecret,
+        secret: decryptedSecret.secret,
         token: data.token,
       });
       valid = result.valid;
@@ -249,6 +262,13 @@ export const verifyMfaChallenge = async (
         message: 'Invalid authentication code or backup code.',
       });
       return;
+    }
+
+    if (decryptedSecret.legacy) {
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { mfaSecret: encryptMfaSecret(decryptedSecret.secret) },
+      });
     }
 
     if (data.backupCode) {
