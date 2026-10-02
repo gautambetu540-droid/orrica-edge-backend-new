@@ -420,6 +420,23 @@ export const createCandidate = async (req: Request, res: Response, next: NextFun
           metadata: { source: created.source },
         },
       });
+      if (created.walkInDate || created.walkInResponse || created.followUpAt) {
+        await tx.candidateActivity.create({
+          data: {
+            candidateId: created.id,
+            userId: currentUserId || null,
+            recruiterId: ownerRecruiterId,
+            action: 'WALK_IN_SCHEDULED',
+            metadata: {
+              walkInStatus: created.walkInStatus,
+              walkInResponse: created.walkInResponse,
+              walkInDate: created.walkInDate?.toISOString() ?? null,
+              walkInTime: created.walkInTime,
+              followUpAt: created.followUpAt?.toISOString() ?? null,
+            },
+          },
+        });
+      }
 
       return created;
     });
