@@ -30,9 +30,13 @@ export const getEmailTemplates = async (req: Request, res: Response, next: NextF
       orderBy: [{ category: 'asc' }, { name: 'asc' }],
     });
 
-    // Auto-seed defaults into DB if empty
-    if (templates.length === 0) {
-      const defaultList = Object.values(DEFAULT_TEMPLATES);
+    // Ensure every system default exists in DB.
+    // Previously defaults were seeded only when the table was completely empty,
+    // so a database that already contained candidate templates never received
+    // newer defaults such as RECRUITER_WELCOME.
+    const defaultList = Object.values(DEFAULT_TEMPLATES);
+
+    if (defaultList.length > 0) {
       await prisma.emailTemplate.createMany({
         data: defaultList.map((dt) => ({
           templateKey: dt.templateKey,
