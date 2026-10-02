@@ -81,6 +81,27 @@ const buildDateFilter = (from?: Date, to?: Date) => {
 
 // Admin gets the complete candidate database. Recruiters see only their owned,
 // created, or assigned application candidates.
+const canAccessCandidate = async (req: Request, candidateId: string): Promise<boolean> => {
+  const user = req.user;
+  if (!user) return false;
+  if (user.role === 'ADMIN' || user.role === 'SUPER_ADMIN') return true;
+  if (user.role !== 'RECRUITER') return false;
+
+  const accessibleCandidate = await prisma.candidate.findFirst({
+    where: {
+      id: candidateId,
+      OR: [
+        { ownerRecruiterId: user.userId },
+        { createdById: user.userId },
+        { applications: { some: { recruiterId: user.userId } } },
+      ],
+    },
+    select: { id: true },
+  });
+
+  return Boolean(accessibleCandidate);
+};
+
 export const getCandidates = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const {
@@ -455,7 +476,7 @@ export const addCandidateActivity = async (req: Request, res: Response, next: Ne
       where: { id: candidateId },
       select: { id: true, ownerRecruiterId: true },
     });
-    if (!candidate) {
+    if (!candidate || !(await canAccessCandidate(req, candidateId))) {
       sendError(res, 'Candidate not found', 404);
       return;
     }
@@ -499,6 +520,11 @@ export const addCandidateActivity = async (req: Request, res: Response, next: Ne
 
 export const getCandidateActivities = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
+    if (!(await canAccessCandidate(req, req.params.id))) {
+      sendError(res, 'Candidate not found', 404);
+      return;
+    }
+
     const activities = await prisma.candidateActivity.findMany({
       where: { candidateId: req.params.id },
       orderBy: { createdAt: 'desc' },
@@ -517,6 +543,11 @@ export const getCandidateActivities = async (req: Request, res: Response, next: 
 
 export const getCandidateById = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
+    if (!(await canAccessCandidate(req, req.params.id))) {
+      sendError(res, 'Candidate not found', 404);
+      return;
+    }
+
     const candidate = await prisma.candidate.findUnique({
       where: { id: req.params.id },
       include: {
@@ -592,8 +623,17 @@ export const updateCandidate = async (req: Request, res: Response, next: NextFun
     const data = updateCandidateSchema.parse(req.body);
     const existing = await prisma.candidate.findUnique({ where: { id: req.params.id } });
 
-    if (!existing) {
+    if (!existing || !(await canAccessCandidate(req, req.params.id))) {
       sendError(res, 'Candidate not found', 404);
+      return;
+    }
+
+    if (
+      req.user?.role === 'RECRUITER' &&
+      data.ownerRecruiterId !== undefined &&
+      data.ownerRecruiterId !== existing.ownerRecruiterId
+    ) {
+      sendError(res, 'Recruiters cannot change candidate ownership.', 403);
       return;
     }
 
@@ -727,6 +767,11 @@ export const recruiterSubmitCandidate = async (req: Request, res: Response, next
         ownerRecruiterId: true,
       },
     });
+
+    if (existingCandidate?.ownerRecruiterId && existingCandidate.ownerRecruiterId !== recruiter.id) {
+      sendError(res, 'This candidate is owned by another recruiter. Ask an admin to reassign them.', 409);
+      return;
+    }
 
     if (existingCandidate) {
       const existingApplication = await prisma.application.findUnique({
