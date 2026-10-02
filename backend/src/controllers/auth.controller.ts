@@ -83,16 +83,22 @@ export const register = async (req: Request, res: Response, next: NextFunction):
       },
     });
 
-    const accessToken = jwt.sign(
-      { userId: newUser.id, email: newUser.email, role: newUser.role },
-      config.jwt.accessSecret,
-      { expiresIn: '1h' }
-    );
+    const mfaSetupToken = buildMfaPendingToken(newUser, 'SETUP_REQUIRED');
 
     res.status(201).json({
       success: true,
-      message: 'Account registered successfully',
-      data: { user: newUser, token: accessToken },
+      message: 'Account registered successfully. MFA setup is required before accessing the account.',
+      data: {
+        user: {
+          ...newUser,
+          mfaEnabled: false,
+          requiresMfaSetup: true,
+        },
+        token: mfaSetupToken,
+        mfaSetupToken,
+        requiresMfaSetup: true,
+        requiresMfa: true,
+      },
     });
   } catch (err) {
     next(err);
