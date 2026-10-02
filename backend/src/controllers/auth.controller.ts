@@ -111,19 +111,6 @@ export const login = async (req: Request, res: Response, next: NextFunction): Pr
       return;
     }
 
-    if (user.role === 'RECRUITER' && user.mustSetPassword) {
-      res.status(403).json({
-        success: false,
-        code: 'PASSWORD_SETUP_REQUIRED',
-        message: 'Please set your password before logging in.',
-        data: {
-          recruiterId: user.recruiterId,
-          email: user.email,
-        },
-      });
-      return;
-    }
-
     const isMatch = await bcrypt.compare(data.password, user.passwordHash);
 
     if (!isMatch) {
@@ -153,6 +140,7 @@ export const login = async (req: Request, res: Response, next: NextFunction): Pr
       message: 'Login successful',
       data: {
         token: accessToken,
+        requiresPasswordChange: user.role === 'RECRUITER' && user.mustSetPassword,
         user: {
           id: user.id,
           email: user.email,
