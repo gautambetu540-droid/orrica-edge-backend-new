@@ -20,6 +20,20 @@ ADD CONSTRAINT "candidates_createdById_fkey"
 FOREIGN KEY ("createdById") REFERENCES "users"("id")
 ON DELETE SET NULL ON UPDATE CASCADE;
 
+-- Backfill candidate ownership from the latest recruiter-assigned application.
+UPDATE "candidates" AS c
+SET "ownerRecruiterId" = latest."recruiterId"
+FROM LATERAL (
+  SELECT a."recruiterId"
+  FROM "applications" AS a
+  WHERE a."candidateId" = c."id"
+    AND a."recruiterId" IS NOT NULL
+  ORDER BY a."appliedAt" DESC
+  LIMIT 1
+) AS latest
+WHERE c."ownerRecruiterId" IS NULL
+  AND latest."recruiterId" IS NOT NULL;
+
 -- Candidate activity / EOD productivity ledger
 CREATE TABLE "candidate_activities" (
   "id" TEXT NOT NULL,
