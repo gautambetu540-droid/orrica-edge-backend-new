@@ -24,6 +24,7 @@ import seoRoutes from './routes/seo.routes';
 import templateRoutes from './routes/template.routes';
 import migrationRoutes from './routes/migration.routes';
 import universalFormRoutes from './routes/universal-form.routes';
+import notificationRoutes from './routes/notification.routes';
 import { ensureDefaultUniversalForm } from './controllers/universal-form.controller';
 import swaggerRouter from './swagger/swagger';
 
@@ -94,6 +95,7 @@ app.use('/api/v1/seo', seoRoutes);
 app.use('/api/v1/email-templates', templateRoutes);
 app.use('/api/v1/admin/migrate', migrationRoutes);
 app.use('/api/v1/universal-forms', universalFormRoutes);
+app.use('/api/v1/notifications', notificationRoutes);
 
 // 404 Route Handler
 app.use('*', (req, res) => {
