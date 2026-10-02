@@ -540,6 +540,12 @@ export const submitPublicUniversalForm = async (req: Request, res: Response, nex
             ...candidateData,
             email: existing.email,
             resumeUrl: uploadResult?.fileUrl || existing.resumeUrl,
+            ...(recruiter
+              ? {
+                  ownerRecruiterId: recruiter.id,
+                  createdById: existing.createdById || recruiter.id,
+                }
+              : {}),
           },
         });
       } else {
