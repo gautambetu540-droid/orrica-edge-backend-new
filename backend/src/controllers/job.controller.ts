@@ -290,7 +290,7 @@ export const getJobBySlug = async (req: Request, res: Response, next: NextFuncti
     const isRecruiter = req.user?.role === 'RECRUITER';
     const scope = isAdmin ? req.user!.role : isRecruiter ? `recruiter:${req.user!.userId}` : 'public';
     const cacheKey = `job:slug:${slug}:${scope}`;
-    const cachedJob = cache.get(cacheKey);
+    const cachedJob = cache.get<{ id: string } & Record<string, unknown>>(cacheKey);
     if (cachedJob) {
       // Async increment view counter without blocking
       prisma.job.update({ where: { id: cachedJob.id }, data: { views: { increment: 1 } } }).catch(() => {});
