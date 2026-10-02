@@ -156,6 +156,7 @@ model User {
   jobsCreated          Job[]             @relation("CreatedJobs")
   candidateProfile     Candidate?
   assignedApplications Application[]     @relation("RecruiterApplications")
+  assignedJobs         Job[]             @relation("RecruiterJobs")
   payouts              Payout[]
   notifications        Notification[]
   auditLogs            AuditLog[]
@@ -258,6 +259,7 @@ model Job {
   createdAt             DateTime       @default(now())
   updatedAt             DateTime       @updatedAt
 
+  assignedRecruiters    User[]         @relation("RecruiterJobs")
   applications         Application[]
   payouts              Payout[]
   replacementCases     ReplacementCase[]
