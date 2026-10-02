@@ -7,6 +7,12 @@ import {
   keepAlive,
   changeMyPassword,
 } from '../controllers/auth.controller';
+import {
+  setupMfa,
+  verifyMfaSetup,
+  verifyMfaChallenge,
+  getMfaStatus,
+} from '../controllers/mfa.controller';
 import { authenticateJwt } from '../middlewares/auth.middleware';
 
 const router = Router();
@@ -21,6 +27,11 @@ router.post('/login', login);
 router.post('/set-password', setPassword);
 
 router.put('/me/password', authenticateJwt, changeMyPassword);
+
+router.get('/mfa/status', authenticateJwt, getMfaStatus);
+router.post('/mfa/setup', authenticateJwt, setupMfa);
+router.post('/mfa/verify-setup', authenticateJwt, verifyMfaSetup);
+router.post('/mfa/verify', authenticateJwt, verifyMfaChallenge);
 
 // Authenticated user endpoints
 router.get('/me', authenticateJwt, getMe);
