@@ -138,6 +138,7 @@ model User {
   mustSetPassword      Boolean   @default(false)
   lastLoginAt          DateTime?
   avatarUrl            String?
+  preferences          Json?
   isActive             Boolean   @default(true)
   isEmailVerified      Boolean   @default(false)
   emailVerifyToken     String?
