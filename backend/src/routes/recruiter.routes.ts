@@ -7,6 +7,8 @@ import {
   updateRecruiterStatus,
   getRecruiterJobs,
   updateRecruiterJobs,
+  getRecruiterAnalytics,
+  getRecruiterProductivity,
 } from '../controllers/recruiter.controller';
 import {
   getMyRecruiterPermissions,
@@ -40,6 +42,20 @@ router.patch(
   authenticateJwt,
   requireRoles('SUPER_ADMIN', 'ADMIN'),
   updateRecruiterStatus
+);
+
+router.get(
+  '/:id/analytics',
+  authenticateJwt,
+  requireRoles('SUPER_ADMIN', 'ADMIN'),
+  getRecruiterAnalytics
+);
+
+router.get(
+  '/:id/productivity',
+  authenticateJwt,
+  requireRoles('SUPER_ADMIN', 'ADMIN'),
+  getRecruiterProductivity
 );
 
 router.get(
