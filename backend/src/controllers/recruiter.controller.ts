@@ -67,31 +67,50 @@ export const createRecruiter = async (
       Date.now() + config.recruiter.passwordSetupExpiryHours * 60 * 60 * 1000
     );
 
-    const recruiter = await prisma.user.create({
-      data: {
-        email,
-        passwordHash: setupTokenHash,
-        fullName: data.fullName.trim(),
-        role: 'RECRUITER',
-        phone: data.phone?.trim() || undefined,
-        avatarUrl: data.avatarUrl,
-        recruiterId,
-        mustSetPassword: true,
-        resetPasswordToken: setupTokenHash,
-        resetPasswordExpires: setupExpiresAt,
-      },
-      select: {
-        id: true,
-        recruiterId: true,
-        email: true,
-        fullName: true,
-        role: true,
-        phone: true,
-        avatarUrl: true,
-        isActive: true,
-        mustSetPassword: true,
-        createdAt: true,
-      },
+    // Create the recruiter and their default permissions atomically.
+    const recruiter = await prisma.$transaction(async (tx) => {
+      const createdRecruiter = await tx.user.create({
+        data: {
+          email,
+          passwordHash: setupTokenHash,
+          fullName: data.fullName.trim(),
+          role: 'RECRUITER',
+          phone: data.phone?.trim() || undefined,
+          avatarUrl: data.avatarUrl,
+          recruiterId,
+          mustSetPassword: true,
+          resetPasswordToken: setupTokenHash,
+          resetPasswordExpires: setupExpiresAt,
+        },
+        select: {
+          id: true,
+          recruiterId: true,
+          email: true,
+          fullName: true,
+          role: true,
+          phone: true,
+          avatarUrl: true,
+          isActive: true,
+          mustSetPassword: true,
+          createdAt: true,
+        },
+      });
+
+      await tx.recruiterPermission.create({
+        data: {
+          recruiterId: createdRecruiter.id,
+          dashboard: true,
+          candidates: true,
+          jobs: true,
+          applications: true,
+          interviews: true,
+          payouts: false,
+          reports: false,
+          settings: false,
+        },
+      });
+
+      return createdRecruiter;
     });
 
     await logAudit({
