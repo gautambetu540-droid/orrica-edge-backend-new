@@ -297,6 +297,8 @@ model Candidate {
   source             String           @default("Website Direct")
   tags               String[]         @default([])
   notes              String?          @db.Text
+  feedback           String?          @db.Text
+  dateOfJoin         DateTime?
   status             CandidateStatus  @default(NEW)
   createdAt          DateTime         @default(now())
   updatedAt          DateTime         @updatedAt
