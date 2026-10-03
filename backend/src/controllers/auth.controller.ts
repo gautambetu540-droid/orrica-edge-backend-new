@@ -55,7 +55,10 @@ export const register = async (req: Request, res: Response, next: NextFunction):
     const data = registerSchema.parse(req.body);
 
     const email = data.email.trim().toLowerCase();
-    const existingUser = await prisma.user.findUnique({ where: { email } });
+    const existingUser = await prisma.user.findUnique({
+      where: { email },
+      select: { id: true },
+    });
 
     if (existingUser) {
       res.status(409).json({ success: false, message: 'User with this email already exists' });
@@ -125,7 +128,25 @@ export const login = async (req: Request, res: Response, next: NextFunction): Pr
     const data = loginSchema.parse(req.body);
     const email = data.email.trim().toLowerCase();
 
-    const user = await prisma.user.findUnique({ where: { email } });
+    const user = await prisma.user.findUnique({
+      where: { email },
+      select: {
+        id: true,
+        email: true,
+        passwordHash: true,
+        fullName: true,
+        role: true,
+        phone: true,
+        avatarUrl: true,
+        recruiterId: true,
+        recruiterType: true,
+        mustSetPassword: true,
+        lastLoginAt: true,
+        isActive: true,
+        mfaSecret: true,
+        mfaEnabled: true,
+      },
+    });
 
     if (!user || !user.isActive) {
       res.status(401).json({ success: false, message: 'Invalid credentials or inactive account' });
