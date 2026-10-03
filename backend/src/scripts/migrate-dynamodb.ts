@@ -1,7 +1,19 @@
 import { DynamoDBClient, ScanCommand, type AttributeValue } from '@aws-sdk/client-dynamodb';
 import { unmarshall } from '@aws-sdk/util-dynamodb';
-import { PrismaClient, CandidateStatus, Role, JobStatus, WorkMode, EmploymentType } from '@prisma/client';
+import { PrismaClient, Role, JobStatus, WorkMode, EmploymentType } from '@prisma/client';
 import crypto from 'node:crypto';
+
+export enum CandidateStatus {
+  NEW = 'NEW',
+  SCREENING = 'SCREENING',
+  SHORTLISTED = 'SHORTLISTED',
+  INTERVIEW = 'INTERVIEW',
+  SELECTED = 'SELECTED',
+  REJECTED = 'REJECTED',
+  ON_HOLD = 'ON_HOLD',
+  JOINED = 'JOINED',
+  DROPPED = 'DROPPED',
+}
 
 const prisma = new PrismaClient();
 const dynamo = new DynamoDBClient({ region: process.env.AWS_REGION || 'ap-south-1' });

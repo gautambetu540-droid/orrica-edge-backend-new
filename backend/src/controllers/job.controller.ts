@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { prisma } from '../prisma/client';
 import { cache } from '../utils/cache';
 import { sendSuccess, sendError } from '../utils/response';
+import { generateJobCode } from '../utils/codeGenerators';
 
 
 const parseExperienceRange = (value: unknown): { min: number; max: number } | null => {
@@ -145,24 +146,6 @@ const createJobSchema = z.object({
   status: z.enum(['DRAFT', 'PUBLISHED', 'PAUSED', 'CLOSED', 'ARCHIVED']).default('DRAFT'),
 });
 
-const generateJobCode = async (): Promise<string> => {
-  const currentYear = new Date().getFullYear();
-  const prefix = `OE-${currentYear}-`;
-
-  // Generate from the highest existing sequence, not total row count.
-  const latest = await prisma.job.findFirst({
-    where: { jobCode: { startsWith: prefix } },
-    orderBy: { jobCode: 'desc' },
-    select: { jobCode: true },
-  });
-
-  const suffix = latest?.jobCode?.slice(prefix.length);
-  const latestSeq = suffix && Number.isInteger(Number(suffix)) ? Number(suffix) : 0;
-  const nextSeq = String(latestSeq + 1).padStart(3, '0');
-
-  return `${prefix}${nextSeq}`;
-};
-
 const slugify = (text: string): string => {
   return text
     .toLowerCase()
@@ -191,10 +174,14 @@ export const getJobs = async (req: Request, res: Response, next: NextFunction): 
     const limitNum = Math.min(50, Math.max(1, parseInt(limit as string, 10)));
     const skip = (pageNum - 1) * limitNum;
 
-    const isAdmin = req.user?.role === 'ADMIN' || req.user?.role === 'SUPER_ADMIN';
-    const isRecruiter = req.user?.role === 'RECRUITER';
+    const userRole = req.user?.role;
+    const currentUserId = req.user?.userId;
+    const isAdmin = userRole === 'ADMIN' || userRole === 'SUPER_ADMIN';
+    const isRecruiter = userRole === 'RECRUITER' || userRole === 'FREELANCE_RECRUITER';
+    const isTeamLeader = userRole === 'TEAM_LEADER';
+
     const visibleStatus = isAdmin ? status : 'PUBLISHED';
-    const scope = isAdmin ? req.user!.role : isRecruiter ? `recruiter:${req.user!.userId}` : 'public';
+    const scope = isAdmin ? req.user!.role : isRecruiter ? `recruiter:${currentUserId}` : isTeamLeader ? `tl:${currentUserId}` : 'public';
     const cacheKey = `jobs:${scope}:${search || ''}:${department || ''}:${category || ''}:${location || ''}:${workMode || ''}:${employmentType || ''}:${visibleStatus}:${pageNum}:${limitNum}`;
     const cachedData = cache.get(cacheKey);
     if (cachedData) {
@@ -206,8 +193,17 @@ export const getJobs = async (req: Request, res: Response, next: NextFunction): 
       status: visibleStatus as any,
     };
 
-    if (isRecruiter) {
-      where.assignedRecruiters = { some: { id: req.user!.userId } };
+    if (isRecruiter && currentUserId) {
+      where.assignedRecruiters = { some: { id: currentUserId } };
+    } else if (isTeamLeader && currentUserId) {
+      where.assignedRecruiters = {
+        some: {
+          OR: [
+            { id: currentUserId },
+            { teamLeaderId: currentUserId },
+          ],
+        },
+      };
     }
 
     if (search) {

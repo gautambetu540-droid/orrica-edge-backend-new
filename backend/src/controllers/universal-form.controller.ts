@@ -458,16 +458,17 @@ export const submitPublicUniversalForm = async (req: Request, res: Response, nex
     const fullAddress = String(body.fullAddress || '').trim();
     const city = String(body.city || '').trim();
     const state = String(body.state || '').trim();
-    const legacyLocation = String(body.location || '').trim();
+    const legacyLocation = String(body.location || body.currentLocation || '').trim();
     const location =
       legacyLocation ||
       [city, state].filter(Boolean).join(', ') ||
-      fullAddress;
+      fullAddress ||
+      'Not Specified';
 
-    if (!fullName || !email || !phone || !fullAddress || !city || !state) {
+    if (!fullName || !email || !phone) {
       sendError(
         res,
-        'Full name, email, phone number, full address, city and state are required.',
+        'Full name, email, and phone number are required.',
         400
       );
       return;
@@ -506,22 +507,39 @@ export const submitPublicUniversalForm = async (req: Request, res: Response, nex
       ? await uploadResumeFile(req.file, fullName)
       : null;
 
+    const totalExp = parseOptionalNumber(body.totalExperience ?? body.experienceYears) ?? 0;
+    const relExp = parseOptionalNumber(body.relevantExperience) ?? 0;
+    const highestQual = String(body.highestQualification || body.education || '').trim() || undefined;
+    const currSal = parseOptionalNumber(body.currentSalary ?? body.currentCtc);
+    const expSal = parseOptionalNumber(body.expectedSalary ?? body.expectedCtc);
+    const noticeDays = parseOptionalNumber(body.noticePeriodDays);
+    const noticePeriod = body.noticePeriod ? String(body.noticePeriod) : (noticeDays ? `${noticeDays} Days` : undefined);
+
     const candidateData = {
+      name: fullName,
       fullName,
       phone: phoneDigits,
       location,
-      education: String(body.education || '').trim() || undefined,
-      experienceYears: parseOptionalNumber(body.experienceYears) ?? 0,
+      currentLocation: location,
+      highestQualification: highestQual,
+      education: highestQual,
+      totalExperience: totalExp,
+      relevantExperience: relExp,
+      experienceYears: totalExp,
       currentCompany: String(body.currentCompany || '').trim() || undefined,
       currentDesignation: String(body.currentDesignation || '').trim() || undefined,
-      currentCtc: parseOptionalNumber(body.currentCtc),
-      expectedCtc: parseOptionalNumber(body.expectedCtc),
-      noticePeriodDays: parseOptionalNumber(body.noticePeriodDays),
+      previousCompany: String(body.previousCompany || '').trim() || undefined,
+      currentSalary: currSal,
+      expectedSalary: expSal,
+      currentCtc: currSal,
+      expectedCtc: expSal,
+      noticePeriod,
+      noticePeriodDays: noticeDays,
       skills: parseList(body.skills),
-      languages: parseList(body.languages).length ? parseList(body.languages) : ['English'],
+      languages: parseList(body.languages).length ? parseList(body.languages) : ['English', 'Hindi'],
       source: String(body.source || '').trim() || `Universal Form: ${form.slug}`,
       tags: parseList(body.tags),
-      notes: String(body.notes || '').trim() || undefined,
+      notes: String(body.notes || body.recruiterRemarks || '').trim() || undefined,
       feedback: String(body.feedback || '').trim() || undefined,
       dateOfJoin: parseDate(body.dateOfJoin),
     };

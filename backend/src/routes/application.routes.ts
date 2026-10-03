@@ -13,7 +13,7 @@ const router = Router();
 router.post('/apply', uploadResume.single('resume'), applyForJob);
 
 // Protected ATS Pipeline endpoints
-router.get('/', authenticateJwt, requireRoles('SUPER_ADMIN', 'ADMIN', 'RECRUITER'), requireRecruiterPermission('applications'), getApplications);
-router.patch('/:id/stage', authenticateJwt, requireRoles('SUPER_ADMIN', 'ADMIN', 'RECRUITER'), requireRecruiterPermission('applications'), updateApplicationStage);
+router.get('/', authenticateJwt, requireRoles('SUPER_ADMIN', 'ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'), requireRecruiterPermission('applications'), getApplications);
+router.patch('/:id/stage', authenticateJwt, requireRoles('SUPER_ADMIN', 'ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'), requireRecruiterPermission('applications'), updateApplicationStage);
 
 export default router;

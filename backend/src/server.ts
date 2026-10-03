@@ -25,6 +25,8 @@ import templateRoutes from './routes/template.routes';
 import migrationRoutes from './routes/migration.routes';
 import universalFormRoutes from './routes/universal-form.routes';
 import notificationRoutes from './routes/notification.routes';
+import teamLeaderRoutes from './routes/team-leader.routes';
+import searchRoutes from './routes/search.routes';
 import { ensureDefaultUniversalForm } from './controllers/universal-form.controller';
 import swaggerRouter from './swagger/swagger';
 
@@ -83,23 +85,32 @@ app.get(['/health', '/api/health'], (req, res) => {
 // Swagger API Documentation
 app.use('/api/docs', swaggerRouter);
 
-// API v1 Routes
-app.use('/api/v1/auth', authRoutes);
-app.use('/api/v1/jobs', jobRoutes);
-app.use('/api/v1/applications', applicationRoutes);
-app.use('/api/v1/blogs', blogRoutes);
-app.use('/api/v1/inquiries', inquiryRoutes);
-app.use('/api/v1/candidates', candidateRoutes);
-app.use('/api/v1/recruiters', recruiterRoutes);
-app.use('/api/v1/recruiter-applications', recruiterApplicationRoutes);
-app.use('/api/v1/admin', adminPortalRoutes);
-app.use('/api/v1/interviews', interviewRoutes);
-app.use('/api/v1/dashboard', dashboardRoutes);
-app.use('/api/v1/seo', seoRoutes);
-app.use('/api/v1/email-templates', templateRoutes);
-app.use('/api/v1/admin/migrate', migrationRoutes);
-app.use('/api/v1/universal-forms', universalFormRoutes);
-app.use('/api/v1/notifications', notificationRoutes);
+// Register API Routes for both /api/v1 and /api (Recruitment OS architecture)
+const registerApiRoutes = (prefix: string) => {
+  app.use(`${prefix}/auth`, authRoutes);
+  app.use(`${prefix}/jobs`, jobRoutes);
+  app.use(`${prefix}/applications`, applicationRoutes);
+  app.use(`${prefix}/blogs`, blogRoutes);
+  app.use(`${prefix}/inquiries`, inquiryRoutes);
+  app.use(`${prefix}/candidates`, candidateRoutes);
+  app.use(`${prefix}/team-leader`, teamLeaderRoutes);
+  app.use(`${prefix}/tl`, teamLeaderRoutes);
+  app.use(`${prefix}/search`, searchRoutes);
+  app.use(`${prefix}/recruiters`, recruiterRoutes);
+  app.use(`${prefix}/recruiter`, recruiterRoutes);
+  app.use(`${prefix}/recruiter-applications`, recruiterApplicationRoutes);
+  app.use(`${prefix}/admin`, adminPortalRoutes);
+  app.use(`${prefix}/interviews`, interviewRoutes);
+  app.use(`${prefix}/dashboard`, dashboardRoutes);
+  app.use(`${prefix}/seo`, seoRoutes);
+  app.use(`${prefix}/email-templates`, templateRoutes);
+  app.use(`${prefix}/admin/migrate`, migrationRoutes);
+  app.use(`${prefix}/universal-forms`, universalFormRoutes);
+  app.use(`${prefix}/notifications`, notificationRoutes);
+};
+
+registerApiRoutes('/api/v1');
+registerApiRoutes('/api');
 
 // 404 Route Handler
 app.use('*', (req, res) => {

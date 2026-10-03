@@ -13,9 +13,25 @@ datasource db {
 enum Role {
   SUPER_ADMIN
   ADMIN
+  TEAM_LEADER
   RECRUITER
+  FREELANCE_RECRUITER
+  EMPLOYER
   CLIENT
   CANDIDATE
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+}
+
+enum ReviewStatus {
+  PENDING_TL_REVIEW
+  TL_APPROVED
+  TL_SENT_BACK
+  TL_REJECTED
 }
 
 enum JobStatus {
@@ -161,6 +177,13 @@ model User {
   candidateActivities  CandidateActivity[] @relation("CandidateActivityUser")
   assignedApplications Application[]     @relation("RecruiterApplications")
   assignedJobs         Job[]             @relation("RecruiterJobs")
+  teamLeaderId         String?
+  teamLeader           User?             @relation("TeamLeaderRecruiters", fields: [teamLeaderId], references: [id], onDelete: SetNull)
+  recruiterPod         User[]            @relation("TeamLeaderRecruiters")
+  sourcedCandidates    Candidate[]       @relation("CandidateSourcingRecruiter")
+  tlCandidates         Candidate[]       @relation("CandidateTeamLeader")
+  tlApplications       Application[]     @relation("TeamLeaderApplications")
+  candidateTimelines   CandidateTimeline[] @relation("TimelineCreatedBy")
   payouts              Payout[]
   notifications        Notification[]
   auditLogs            AuditLog[]
@@ -275,29 +298,42 @@ model Job {
 }
 
 model Candidate {
-  id                 String           @id @default(uuid())
-  candidateCode      String           @unique
-  userId             String?          @unique
-  user               User?            @relation(fields: [userId], references: [id], onDelete: SetNull)
+  id                  String              @id @default(uuid())
+  candidateCode       String              @unique
+  userId              String?             @unique
+  user                User?               @relation(fields: [userId], references: [id], onDelete: SetNull)
+  name                String?
   fullName            String
-  email              String           @unique
-  phone              String
-  location           String
-  education          String?
-  experienceYears    Decimal          @default(0) @db.Decimal(4, 1)
-  currentCompany     String?
-  currentDesignation String?
-  currentCtc         Decimal?         @db.Decimal(10, 2)
-  expectedCtc        Decimal?         @db.Decimal(10, 2)
-  noticePeriodDays   Int?
-  skills             String[]
-  languages          String[]         @default(["English"])
-  resumeUrl          String
-  resumeText         String?          @db.Text
-  source             String           @default("Website Direct")
-  tags               String[]         @default([])
-  notes              String?          @db.Text
-  feedback           String?          @db.Text
+  phone               String              @unique
+  email               String              @unique
+  fatherName          String?
+  dateOfBirth         DateTime?
+  gender              Gender?
+  currentLocation     String?
+  location            String              @default("")
+  preferredLocation   String?
+  totalExperience     Decimal?            @default(0) @db.Decimal(4, 1)
+  relevantExperience  Decimal?            @default(0) @db.Decimal(4, 1)
+  experienceYears     Decimal             @default(0) @db.Decimal(4, 1)
+  highestQualification String?
+  education           String?
+  currentCompany      String?
+  currentDesignation  String?
+  previousCompany     String?
+  noticePeriod        String?
+  noticePeriodDays    Int?
+  currentSalary       Decimal?            @db.Decimal(10, 2)
+  expectedSalary      Decimal?            @db.Decimal(10, 2)
+  currentCtc          Decimal?            @db.Decimal(10, 2)
+  expectedCtc         Decimal?            @db.Decimal(10, 2)
+  skills              String[]            @default([])
+  languages           String[]            @default(["English", "Hindi"])
+  resumeUrl           String              @default("")
+  resumeText          String?             @db.Text
+  source              String              @default("Website Direct")
+  tags                String[]            @default([])
+  notes               String?             @db.Text
+  feedback            String?             @db.Text
   dateOfJoin          DateTime?
   walkInStatus        String?
   walkInResponse      String?
@@ -305,25 +341,40 @@ model Candidate {
   walkInTime          String?
   followUpAt          DateTime?
   followUpCompletedAt DateTime?
-  rescheduleCount     Int              @default(0)
-  status             CandidateStatus  @default(NEW)
-  createdAt          DateTime         @default(now())
-  updatedAt          DateTime         @updatedAt
+  rescheduleCount     Int                 @default(0)
+  status              String              @default("New")
+  nextActionDate      DateTime?
+  nextActionType      String?
+  nextActionRemarks   String?             @db.Text
+  sourcingRecruiterId String?
+  sourcingRecruiter   User?               @relation("CandidateSourcingRecruiter", fields: [sourcingRecruiterId], references: [id], onDelete: SetNull)
+  teamLeaderId        String?
+  teamLeader          User?               @relation("CandidateTeamLeader", fields: [teamLeaderId], references: [id], onDelete: SetNull)
+  ownerRecruiterId    String?
+  ownerRecruiter      User?               @relation("CandidateOwner", fields: [ownerRecruiterId], references: [id], onDelete: SetNull)
+  createdById         String?
+  createdBy           User?               @relation("CandidateCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
 
-  applications       Application[]
-  assessmentAttempts AssessmentAttempt[]
-  payouts            Payout[]
-  replacementCases   ReplacementCase[] @relation("PrimaryCandidate")
-  replacedByCases    ReplacementCase[] @relation("ReplacementCandidate")
+  applications        Application[]
+  assessmentAttempts  AssessmentAttempt[]
+  payouts             Payout[]
+  replacementCases    ReplacementCase[]   @relation("PrimaryCandidate")
+  replacedByCases     ReplacementCase[]   @relation("ReplacementCandidate")
   universalFormSubmissions UniversalFormSubmission[]
-  ownerRecruiterId   String?
-  ownerRecruiter     User?            @relation("CandidateOwner", fields: [ownerRecruiterId], references: [id], onDelete: SetNull)
-  createdById        String?
-  createdBy          User?            @relation("CandidateCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
-  activities         CandidateActivity[]
+  activities          CandidateActivity[]
+  timelines           CandidateTimeline[]
 
+  @@index([status])
   @@index([status, email, phone])
+  @@index([phone])
+  @@index([email])
+  @@index([candidateCode])
+  @@index([sourcingRecruiterId])
+  @@index([teamLeaderId])
   @@index([ownerRecruiterId])
+  @@index([nextActionDate])
   @@index([ownerRecruiterId, followUpAt])
   @@index([ownerRecruiterId, walkInDate])
   @@index([createdById])
@@ -356,13 +407,21 @@ model CandidateActivity {
 
 model Application {
   id              String            @id @default(uuid())
+  applicationCode String?           @unique
   jobId           String
   job             Job               @relation(fields: [jobId], references: [id], onDelete: Cascade)
   candidateId     String
-  candidate        Candidate        @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  candidate       Candidate         @relation(fields: [candidateId], references: [id], onDelete: Cascade)
   recruiterId     String?
   recruiter       User?             @relation("RecruiterApplications", fields: [recruiterId], references: [id], onDelete: SetNull)
-  stage           ApplicationStage @default(APPLIED)
+  teamLeaderId    String?
+  teamLeader      User?             @relation("TeamLeaderApplications", fields: [teamLeaderId], references: [id], onDelete: SetNull)
+  appliedDate     DateTime          @default(now())
+  status          String            @default("Submitted")
+  stage           ApplicationStage  @default(APPLIED)
+  reviewStatus    ReviewStatus?     @default(PENDING_TL_REVIEW)
+  sendBackReason  String?
+  sendBackRemarks String?           @db.Text
   atsScore        Int               @default(0)
   matchReason     String?           @db.Text
   missingSkills   String[]          @default([])
@@ -372,12 +431,39 @@ model Application {
   appliedAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
 
-  interviews      Interview[]
+  interviews          Interview[]
   candidateActivities CandidateActivity[]
+  candidateTimelines  CandidateTimeline[]
 
   @@unique([jobId, candidateId])
   @@index([jobId, stage])
+  @@index([status])
+  @@index([reviewStatus])
+  @@index([recruiterId])
+  @@index([teamLeaderId])
   @@map("applications")
+}
+
+model CandidateTimeline {
+  id             String       @id @default(uuid())
+  candidateId    String
+  candidate      Candidate    @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  applicationId  String?
+  application    Application? @relation(fields: [applicationId], references: [id], onDelete: SetNull)
+  userId         String?
+  user           User?        @relation("TimelineCreatedBy", fields: [userId], references: [id], onDelete: SetNull)
+  userName       String?
+  userRole       String?
+  action         String
+  previousStatus String?
+  newStatus      String?
+  remarks        String?      @db.Text
+  createdAt      DateTime     @default(now())
+
+  @@index([candidateId, createdAt])
+  @@index([applicationId, createdAt])
+  @@index([userId, createdAt])
+  @@map("candidate_timelines")
 }
 
 model Interview {

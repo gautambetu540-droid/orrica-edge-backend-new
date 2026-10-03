@@ -15,6 +15,8 @@ import {
   getRecruiterPermissions,
   updateRecruiterPermissions,
 } from '../controllers/recruiterPermission.controller';
+import { getRecruiterDashboard } from '../controllers/dashboard.controller';
+import { prisma } from '../prisma/client';
 import {
   authenticateJwt,
   requireRoles,
@@ -23,11 +25,11 @@ import {
 
 const router = Router();
 
-const requireRecruiterSelfOrAdmin = (
+const requireRecruiterSelfOrAdmin = async (
   req: Request,
   res: Response,
   next: NextFunction
-): void => {
+): Promise<void> => {
   const user = req.user;
 
   if (!user) {
@@ -40,9 +42,27 @@ const requireRecruiterSelfOrAdmin = (
     return;
   }
 
-  if (user.role === 'RECRUITER' && user.userId === req.params.id) {
+  if (
+    (user.role === 'RECRUITER' || user.role === 'FREELANCE_RECRUITER') &&
+    user.userId === req.params.id
+  ) {
     next();
     return;
+  }
+
+  if (user.role === 'TEAM_LEADER') {
+    const isMemberOfPod = await prisma.user.findFirst({
+      where: {
+        id: req.params.id,
+        teamLeaderId: user.userId,
+      },
+      select: { id: true },
+    });
+
+    if (isMemberOfPod) {
+      next();
+      return;
+    }
   }
 
   res.status(403).json({
@@ -50,6 +70,13 @@ const requireRecruiterSelfOrAdmin = (
     message: 'Forbidden: Recruiters may access only their own data.',
   });
 };
+
+router.get(
+  '/dashboard',
+  authenticateJwt,
+  requireRoles('SUPER_ADMIN', 'ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
+  getRecruiterDashboard
+);
 
 router.post(
   '/',
@@ -61,7 +88,7 @@ router.post(
 router.get(
   '/',
   authenticateJwt,
-  requireRoles('SUPER_ADMIN', 'ADMIN'),
+  requireRoles('SUPER_ADMIN', 'ADMIN', 'TEAM_LEADER'),
   getRecruiters
 );
 

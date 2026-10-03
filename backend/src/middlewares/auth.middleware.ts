@@ -6,7 +6,7 @@ import { prisma } from '../prisma/client';
 export interface AuthUserPayload {
   userId: string;
   email: string;
-  role: 'SUPER_ADMIN' | 'ADMIN' | 'RECRUITER' | 'CLIENT' | 'CANDIDATE';
+  role: 'SUPER_ADMIN' | 'ADMIN' | 'TEAM_LEADER' | 'RECRUITER' | 'FREELANCE_RECRUITER' | 'EMPLOYER' | 'CLIENT' | 'CANDIDATE';
   mfaState?: 'SETUP_REQUIRED' | 'CHALLENGE_REQUIRED';
 }
 
@@ -99,13 +99,21 @@ export const requireRecruiterPermission = (permission: RecruiterPermissionKey) =
       return;
     }
 
-    // Admins and super admins are not restricted by recruiter module permissions.
-    if (req.user.role === 'SUPER_ADMIN' || req.user.role === 'ADMIN') {
+    // Admins, super admins, and team leaders are not restricted by recruiter module permissions.
+    if (req.user.role === 'SUPER_ADMIN' || req.user.role === 'ADMIN' || req.user.role === 'TEAM_LEADER') {
       next();
       return;
     }
 
-    if (req.user.role !== 'RECRUITER') {
+    if (req.user.role === 'FREELANCE_RECRUITER') {
+      // Freelance recruiters have access to standard operations (candidates, jobs, applications, dashboard)
+      if (['candidates', 'jobs', 'applications', 'dashboard', 'interviews'].includes(permission)) {
+        next();
+        return;
+      }
+    }
+
+    if (req.user.role !== 'RECRUITER' && req.user.role !== 'FREELANCE_RECRUITER') {
       res.status(403).json({
         success: false,
         code: 'RECRUITER_PERMISSION_REQUIRED',

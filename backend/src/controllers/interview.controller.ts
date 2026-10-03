@@ -20,13 +20,50 @@ const updateInterviewSchema = z.object({
   feedbackNotes: z.string().max(5000).nullable().optional(),
 });
 
-const canRecruiterAccessApplication = (
+const canAccessApplicationForInterview = async (
   req: Request,
-  application: { recruiterId: string | null; candidate: { ownerRecruiterId: string | null } }
-): boolean =>
-  req.user?.role !== 'RECRUITER' ||
-  application.recruiterId === req.user.userId ||
-  application.candidate.ownerRecruiterId === req.user.userId;
+  application: {
+    id: string;
+    recruiterId: string | null;
+    teamLeaderId?: string | null;
+    candidate: {
+      ownerRecruiterId: string | null;
+      sourcingRecruiterId?: string | null;
+      teamLeaderId?: string | null;
+    };
+  }
+): Promise<boolean> => {
+  const user = req.user;
+  if (!user) return false;
+
+  if (user.role === 'ADMIN' || user.role === 'SUPER_ADMIN') {
+    return true;
+  }
+
+  if (user.role === 'TEAM_LEADER') {
+    if (application.teamLeaderId === user.userId || application.candidate.teamLeaderId === user.userId) {
+      return true;
+    }
+    if (application.recruiterId) {
+      const rec = await prisma.user.findFirst({
+        where: { id: application.recruiterId, teamLeaderId: user.userId },
+        select: { id: true },
+      });
+      if (rec) return true;
+    }
+    return false;
+  }
+
+  if (user.role === 'RECRUITER' || user.role === 'FREELANCE_RECRUITER') {
+    return (
+      application.recruiterId === user.userId ||
+      application.candidate.ownerRecruiterId === user.userId ||
+      application.candidate.sourcingRecruiterId === user.userId
+    );
+  }
+
+  return false;
+};
 
 export const scheduleInterview = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
@@ -37,7 +74,14 @@ export const scheduleInterview = async (req: Request, res: Response, next: NextF
       include: {
         job: { select: { id: true, title: true } },
         candidate: {
-          select: { id: true, fullName: true, email: true, ownerRecruiterId: true },
+          select: {
+            id: true,
+            fullName: true,
+            email: true,
+            ownerRecruiterId: true,
+            sourcingRecruiterId: true,
+            teamLeaderId: true,
+          },
         },
       },
     });
@@ -47,8 +91,9 @@ export const scheduleInterview = async (req: Request, res: Response, next: NextF
       return;
     }
 
-    if (!canRecruiterAccessApplication(req, application)) {
-      sendError(res, 'Application not found', 404);
+    const hasAccess = await canAccessApplicationForInterview(req, application);
+    if (!hasAccess) {
+      sendError(res, 'You are not authorized to schedule an interview for this candidate.', 403);
       return;
     }
 
@@ -56,7 +101,8 @@ export const scheduleInterview = async (req: Request, res: Response, next: NextF
     const effectiveRecruiterId =
       application.recruiterId ||
       application.candidate.ownerRecruiterId ||
-      (req.user?.role === 'RECRUITER' ? req.user.userId : null);
+      application.candidate.sourcingRecruiterId ||
+      ((req.user?.role === 'RECRUITER' || req.user?.role === 'FREELANCE_RECRUITER') ? req.user.userId : null);
 
     const interview = await prisma.$transaction(async (tx) => {
       const created = await tx.interview.create({
@@ -131,14 +177,27 @@ export const updateInterviewStatus = async (req: Request, res: Response, next: N
           select: {
             id: true,
             recruiterId: true,
-            candidate: { select: { ownerRecruiterId: true } },
+            teamLeaderId: true,
+            candidate: {
+              select: {
+                ownerRecruiterId: true,
+                sourcingRecruiterId: true,
+                teamLeaderId: true,
+              },
+            },
           },
         },
       },
     });
 
-    if (!existing || !canRecruiterAccessApplication(req, existing.application)) {
+    if (!existing) {
       sendError(res, 'Interview not found', 404);
+      return;
+    }
+
+    const hasAccess = await canAccessApplicationForInterview(req, existing.application);
+    if (!hasAccess) {
+      sendError(res, 'You are not authorized to update this interview.', 403);
       return;
     }
 

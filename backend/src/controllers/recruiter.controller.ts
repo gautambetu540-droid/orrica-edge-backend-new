@@ -742,8 +742,17 @@ export const getRecruiters = async (
   next: NextFunction
 ): Promise<void> => {
   try {
+    const user = req.user;
+    const where: any = {
+      role: { in: ['RECRUITER', 'FREELANCE_RECRUITER'] },
+    };
+
+    if (user?.role === 'TEAM_LEADER') {
+      where.teamLeaderId = user.userId;
+    }
+
     const recruiters = await prisma.user.findMany({
-      where: { role: 'RECRUITER' },
+      where,
       orderBy: { createdAt: 'asc' },
       select: {
         id: true,
@@ -752,12 +761,21 @@ export const getRecruiters = async (
         fullName: true,
         phone: true,
         avatarUrl: true,
+        role: true,
         recruiterType: true,
         isActive: true,
         mustSetPassword: true,
         mfaEnabled: true,
         lastLoginAt: true,
         createdAt: true,
+        teamLeaderId: true,
+        teamLeader: {
+          select: {
+            id: true,
+            fullName: true,
+            email: true,
+          },
+        },
         assignedJobs: {
           select: { id: true },
         },
@@ -767,22 +785,9 @@ export const getRecruiters = async (
     const recruiterRecords = await Promise.all(recruiters.map(async (recruiter) => {
       const [
         metrics,
-        paidPayouts,
-        outstandingPayouts,
         replacementCount,
       ] = await Promise.all([
         getRecruiterMetricSnapshot(recruiter.id),
-        prisma.payout.aggregate({
-          where: { recruiterId: recruiter.id, status: 'PAID' },
-          _sum: { amount: true },
-        }),
-        prisma.payout.aggregate({
-          where: {
-            recruiterId: recruiter.id,
-            status: { in: ['PENDING', 'APPROVED', 'PROCESSING'] },
-          },
-          _sum: { amount: true },
-        }),
         prisma.replacementCase.count({
           where: {
             primaryCandidate: {
@@ -797,12 +802,15 @@ export const getRecruiters = async (
         userId: recruiter.id,
         recruiterId: recruiter.recruiterId,
         recruiterType: recruiter.recruiterType,
+        role: recruiter.role,
         fullName: recruiter.fullName,
         name: recruiter.fullName,
         email: recruiter.email,
         phone: recruiter.phone || '',
         avatarUrl: recruiter.avatarUrl,
         avatar: recruiter.avatarUrl || undefined,
+        teamLeaderId: recruiter.teamLeaderId,
+        teamLeaderName: recruiter.teamLeader?.fullName || null,
         isActive: recruiter.isActive,
         status: recruiter.isActive ? 'Active' : 'Inactive',
         lastLoginAt: recruiter.lastLoginAt,
@@ -816,8 +824,8 @@ export const getRecruiters = async (
         selectedCount: metrics.selectedCount,
         joinedCount: metrics.joinedCount,
         replacementCount,
-        totalPayoutEarned: Number(paidPayouts._sum.amount || 0),
-        pendingPayout: Number(outstandingPayouts._sum.amount || 0),
+        totalPayoutEarned: 0,
+        pendingPayout: 0,
         metrics,
       };
     }));

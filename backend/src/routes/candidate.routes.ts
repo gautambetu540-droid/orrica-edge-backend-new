@@ -9,6 +9,7 @@ import {
   addCandidateActivity,
   getCandidateActivities,
   recruiterSubmitCandidate,
+  checkDuplicateCandidate,
 } from '../controllers/candidate.controller';
 import { uploadResume } from '../middlewares/upload.middleware';
 import {
@@ -19,10 +20,17 @@ import {
 
 const router = Router();
 
+// Duplicate Candidate Check API
+router.post(
+  '/check-duplicate',
+  authenticateJwt,
+  checkDuplicateCandidate
+);
+
 router.post(
   '/recruiter-submit',
   authenticateJwt,
-  requireRoles('RECRUITER'),
+  requireRoles('SUPER_ADMIN', 'ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
   requireRecruiterPermission('candidates'),
   uploadResume.single('resume'),
   recruiterSubmitCandidate
@@ -31,7 +39,7 @@ router.post(
 router.get(
   '/',
   authenticateJwt,
-  requireRoles('SUPER_ADMIN', 'ADMIN', 'RECRUITER'),
+  requireRoles('SUPER_ADMIN', 'ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
   requireRecruiterPermission('candidates'),
   getCandidates
 );
@@ -39,7 +47,7 @@ router.get(
 router.post(
   '/',
   authenticateJwt,
-  requireRoles('SUPER_ADMIN', 'ADMIN', 'RECRUITER'),
+  requireRoles('SUPER_ADMIN', 'ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
   requireRecruiterPermission('candidates'),
   createCandidate
 );
@@ -47,7 +55,7 @@ router.post(
 router.get(
   '/:id/activities',
   authenticateJwt,
-  requireRoles('SUPER_ADMIN', 'ADMIN', 'RECRUITER'),
+  requireRoles('SUPER_ADMIN', 'ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
   requireRecruiterPermission('candidates'),
   getCandidateActivities
 );
@@ -55,7 +63,7 @@ router.get(
 router.post(
   '/:id/activities',
   authenticateJwt,
-  requireRoles('SUPER_ADMIN', 'ADMIN', 'RECRUITER'),
+  requireRoles('SUPER_ADMIN', 'ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
   requireRecruiterPermission('candidates'),
   addCandidateActivity
 );
@@ -63,14 +71,14 @@ router.post(
 router.patch(
   '/:id/assign-recruiter',
   authenticateJwt,
-  requireRoles('SUPER_ADMIN', 'ADMIN'),
+  requireRoles('SUPER_ADMIN', 'ADMIN', 'TEAM_LEADER'),
   assignCandidate
 );
 
 router.get(
   '/:id',
   authenticateJwt,
-  requireRoles('SUPER_ADMIN', 'ADMIN', 'RECRUITER'),
+  requireRoles('SUPER_ADMIN', 'ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
   requireRecruiterPermission('candidates'),
   getCandidateById
 );
@@ -78,7 +86,7 @@ router.get(
 router.put(
   '/:id',
   authenticateJwt,
-  requireRoles('SUPER_ADMIN', 'ADMIN', 'RECRUITER'),
+  requireRoles('SUPER_ADMIN', 'ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
   requireRecruiterPermission('candidates'),
   updateCandidate
 );

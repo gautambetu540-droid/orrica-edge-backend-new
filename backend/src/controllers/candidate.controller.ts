@@ -5,10 +5,30 @@ import { sendSuccess, sendError } from '../utils/response';
 import { logAudit } from '../services/audit.service';
 import { createNotification } from '../services/notification.service';
 import { uploadResumeFile } from '../services/storage.service';
+import { generateCandidateCode, generateApplicationCode } from '../utils/codeGenerators';
+import { logCandidateTimeline } from '../services/timeline.service';
 
-
-
-const candidateStatus = z.enum([
+export const CANONICAL_PIPELINE_STAGES = [
+  'New',
+  'Contacted',
+  'Interested',
+  'Screening',
+  'Eligible',
+  'Submitted',
+  'Shortlisted',
+  'Assessment',
+  'Interview Scheduled',
+  'Interview Completed',
+  'Selected',
+  'Joining Pending',
+  'Joined',
+  'Rejected',
+  'On Hold',
+  'Not Interested',
+  'No Response',
+  'Not Eligible',
+  'Withdrawn',
+  'Duplicate',
   'NEW',
   'SCREENING',
   'SHORTLISTED',
@@ -18,7 +38,9 @@ const candidateStatus = z.enum([
   'ON_HOLD',
   'JOINED',
   'DROPPED',
-]);
+] as const;
+
+const candidateStatus = z.string();
 
 const activitySchema = z.object({
   action: z.enum([
@@ -40,39 +62,71 @@ const activitySchema = z.object({
 const walkInStatuses = ['EXPECTED', 'CONFIRMED', 'ARRIVED', 'RESCHEDULED', 'NO_SHOW', 'CANCELLED', 'COMPLETED'] as const;
 const walkInResponses = ['COMING_TODAY', 'COMING_TOMORROW', 'SPECIFIC_DATE', 'NOT_SURE', 'NOT_INTERESTED', 'NO_RESPONSE'] as const;
 
+const safeDate = z
+  .union([z.coerce.date(), z.string(), z.literal('')])
+  .nullable()
+  .optional()
+  .transform((val) => {
+    if (!val || val === '') return null;
+    const d = new Date(val);
+    return isNaN(d.getTime()) ? null : d;
+  });
+
 const createCandidateSchema = z.object({
-  fullName: z.string().trim().min(2).max(160),
+  name: z.string().trim().min(2).max(160).optional(),
+  fullName: z.string().trim().min(2).max(160).optional(),
   email: z.string().trim().email().max(180),
   phone: z.string().trim().min(7).max(30),
-  location: z.string().trim().min(2).max(160),
+  fatherName: z.string().trim().max(160).nullable().optional(),
+  dateOfBirth: safeDate,
+  gender: z.enum(['MALE', 'FEMALE', 'OTHER']).nullable().optional(),
+  currentLocation: z.string().trim().max(160).optional(),
+  location: z.string().trim().max(160).optional(),
+  preferredLocation: z.string().trim().max(160).nullable().optional(),
+  totalExperience: z.coerce.number().min(0).max(60).optional(),
+  relevantExperience: z.coerce.number().min(0).max(60).optional(),
+  experienceYears: z.coerce.number().min(0).max(60).optional(),
+  highestQualification: z.string().trim().max(160).optional(),
   education: z.string().optional(),
-  experienceYears: z.coerce.number().min(0).max(60).default(0),
-  currentCompany: z.string().optional(),
-  currentDesignation: z.string().optional(),
+  currentCompany: z.string().nullable().optional(),
+  currentDesignation: z.string().nullable().optional(),
+  previousCompany: z.string().nullable().optional(),
+  noticePeriod: z.union([z.string(), z.number()]).nullable().optional(),
+  noticePeriodDays: z.coerce.number().min(0).max(3650).optional(),
+  currentSalary: z.coerce.number().min(0).optional(),
+  expectedSalary: z.coerce.number().min(0).optional(),
   currentCtc: z.coerce.number().min(0).optional(),
   expectedCtc: z.coerce.number().min(0).optional(),
-  noticePeriodDays: z.coerce.number().min(0).max(3650).optional(),
   skills: z.array(z.string()).default([]),
-  languages: z.array(z.string()).default(['English']),
+  languages: z.array(z.string()).default(['English', 'Hindi']),
   resumeUrl: z.union([z.string().url().max(2000), z.literal('')]).optional(),
   source: z.string().trim().max(100).optional(),
   tags: z.array(z.string()).default([]),
   notes: z.string().max(10000).optional(),
   feedback: z.string().max(10000).optional(),
-  dateOfJoin: z.coerce.date().optional(),
+  recruiterRemarks: z.string().max(10000).optional(),
+  dateOfJoin: safeDate,
   walkInStatus: z.enum(walkInStatuses).nullable().optional(),
   walkInResponse: z.enum(walkInResponses).nullable().optional(),
-  walkInDate: z.coerce.date().nullable().optional(),
+  walkInDate: safeDate,
   walkInTime: z.string().max(32).nullable().optional(),
-  followUpAt: z.coerce.date().nullable().optional(),
-  followUpCompletedAt: z.coerce.date().nullable().optional(),
+  followUpAt: safeDate,
+  followUpCompletedAt: safeDate,
   rescheduleReason: z.string().trim().max(1000).optional(),
   status: candidateStatus.optional(),
-  ownerRecruiterId: z.string().uuid().nullable().optional(),
+  sourcingRecruiterId: z.string().nullable().optional(),
+  teamLeaderId: z.string().nullable().optional(),
+  ownerRecruiterId: z.string().nullable().optional(),
+  assignedRecruiterId: z.string().nullable().optional(),
+  jobId: z.string().nullable().optional(),
+  targetJobId: z.string().nullable().optional(),
+  nextActionDate: safeDate,
+  nextActionType: z.enum(['Call', 'Confirm Interview', 'Follow-up', 'Prep']).nullable().optional(),
+  nextActionRemarks: z.string().max(5000).nullable().optional(),
 });
 
 const updateCandidateSchema = createCandidateSchema.partial().extend({
-  candidateCode: z.string().regex(/^OE-CAND-\d{4}$/).optional(),
+  candidateCode: z.string().optional(),
 });
 
 const parseDate = (value: unknown): Date | undefined => {
@@ -89,28 +143,146 @@ const buildDateFilter = (from?: Date, to?: Date) => {
   };
 };
 
-// Admin gets the complete candidate database. Recruiters see only their owned,
-// created, or assigned application candidates.
-const canAccessCandidate = async (req: Request, candidateId: string): Promise<boolean> => {
+// Admin gets the complete candidate database.
+// Team Leader sees all candidates in their pod.
+// Recruiters see only their owned, sourced, created, or assigned candidates.
+const canAccessCandidate = async (req: Request, candidateIdentifier: string): Promise<boolean> => {
   const user = req.user;
   if (!user) return false;
   if (user.role === 'ADMIN' || user.role === 'SUPER_ADMIN') return true;
-  if (user.role !== 'RECRUITER') return false;
 
-  const accessibleCandidate = await prisma.candidate.findFirst({
-    where: {
-      id: candidateId,
-      OR: [
-        { ownerRecruiterId: user.userId },
-        { createdById: user.userId },
-        { applications: { some: { recruiterId: user.userId } } },
-      ],
-    },
-    select: { id: true },
-  });
+  const candidateIdFilter = [
+    { id: candidateIdentifier },
+    { candidateCode: candidateIdentifier },
+  ];
 
-  return Boolean(accessibleCandidate);
+  if (user.role === 'TEAM_LEADER') {
+    const accessible = await prisma.candidate.findFirst({
+      where: {
+        OR: candidateIdFilter,
+        AND: {
+          OR: [
+            { teamLeaderId: user.userId },
+            { sourcingRecruiter: { teamLeaderId: user.userId } },
+            { sourcingRecruiterId: user.userId },
+            { ownerRecruiterId: user.userId },
+          ],
+        },
+      },
+      select: { id: true },
+    });
+    return Boolean(accessible);
+  }
+
+  if (user.role === 'RECRUITER' || user.role === 'FREELANCE_RECRUITER') {
+    const accessibleCandidate = await prisma.candidate.findFirst({
+      where: {
+        OR: candidateIdFilter,
+        AND: {
+          OR: [
+            { sourcingRecruiterId: user.userId },
+            { ownerRecruiterId: user.userId },
+            { createdById: user.userId },
+            { applications: { some: { recruiterId: user.userId } } },
+          ],
+        },
+      },
+      select: { id: true },
+    });
+    return Boolean(accessibleCandidate);
+  }
+
+  return false;
 };
+
+/**
+ * 2. DUPLICATE CANDIDATE CHECK API (Critical Requirement)
+ * Endpoint: POST /api/candidates/check-duplicate
+ */
+export const checkDuplicateCandidate = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const phone = req.body.phone ? String(req.body.phone).trim() : undefined;
+    const email = req.body.email ? String(req.body.email).trim().toLowerCase() : undefined;
+
+    if (!phone && !email) {
+      sendError(res, 'At least one of phone or email is required to check for duplicates.', 400);
+      return;
+    }
+
+    const candidate = await prisma.candidate.findFirst({
+      where: {
+        OR: [
+          ...(phone ? [{ phone }] : []),
+          ...(email ? [{ email }] : []),
+        ],
+      },
+      include: {
+        sourcingRecruiter: {
+          select: { id: true, fullName: true, email: true },
+        },
+        teamLeader: {
+          select: { id: true, fullName: true, email: true },
+        },
+        ownerRecruiter: {
+          select: { id: true, fullName: true, email: true },
+        },
+        applications: {
+          orderBy: { appliedDate: 'desc' },
+          take: 1,
+          include: {
+            job: {
+              select: { id: true, jobCode: true, title: true, department: true },
+            },
+          },
+        },
+      },
+    });
+
+    if (candidate) {
+      const latestApp = candidate.applications[0];
+      const sourcingRecruiterName =
+        candidate.sourcingRecruiter?.fullName ||
+        candidate.ownerRecruiter?.fullName ||
+        null;
+      const teamLeaderName = candidate.teamLeader?.fullName || null;
+
+      sendSuccess(res, {
+        exists: true,
+        candidateId: candidate.candidateCode || candidate.id,
+        candidate: {
+          id: candidate.id,
+          candidateCode: candidate.candidateCode,
+          name: candidate.name || candidate.fullName,
+          phone: candidate.phone,
+          email: candidate.email,
+          status: candidate.status,
+          sourcingRecruiterName,
+          teamLeaderName,
+          currentApplication: latestApp
+            ? {
+                jobCode: latestApp.job.jobCode,
+                jobTitle: latestApp.job.title,
+                status: latestApp.status || latestApp.stage,
+              }
+            : null,
+        },
+      });
+      return;
+    }
+
+    sendSuccess(res, {
+      exists: false,
+      candidate: null,
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
 
 export const getCandidates = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
@@ -122,6 +294,8 @@ export const getCandidates = async (req: Request, res: Response, next: NextFunct
       language,
       source,
       recruiterId,
+      sourcingRecruiterId,
+      teamLeaderId,
       ownerRecruiterId,
       createdById,
       jobId,
@@ -133,6 +307,8 @@ export const getCandidates = async (req: Request, res: Response, next: NextFunct
       followUpDateFrom,
       followUpDateTo,
       followUpPending,
+      followUpCategory,
+      nextActionType,
       joiningDateFrom,
       joiningDateTo,
       dateFrom,
@@ -157,20 +333,51 @@ export const getCandidates = async (req: Request, res: Response, next: NextFunct
     if (language) andFilters.push({ languages: { has: String(language) } });
     if (source) andFilters.push({ source: { contains: String(source), mode: 'insensitive' } });
     if (ownerRecruiterId) andFilters.push({ ownerRecruiterId: String(ownerRecruiterId) });
+    if (sourcingRecruiterId) andFilters.push({ sourcingRecruiterId: String(sourcingRecruiterId) });
+    if (teamLeaderId) andFilters.push({ teamLeaderId: String(teamLeaderId) });
     if (createdById) andFilters.push({ createdById: String(createdById) });
+    if (nextActionType) andFilters.push({ nextActionType: String(nextActionType) });
 
-    const isAdmin = req.user?.role === 'ADMIN' || req.user?.role === 'SUPER_ADMIN';
+    // Section 5: Follow-Up Engine API filters
+    if (followUpCategory) {
+      const now = new Date();
+      const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+      const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+      const upcomingEnd = new Date(now.getTime() + 72 * 60 * 60 * 1000); // 72 hours window
+
+      if (followUpCategory === 'overdue') {
+        andFilters.push({ nextActionDate: { lt: startOfToday } });
+      } else if (followUpCategory === 'due_today') {
+        andFilters.push({ nextActionDate: { gte: startOfToday, lte: endOfToday } });
+      } else if (followUpCategory === 'upcoming') {
+        andFilters.push({ nextActionDate: { gt: endOfToday, lte: upcomingEnd } });
+      }
+    }
+
+    // Section 4: Role-Based Access Control (RBAC) & Data Ownership
+    const userRole = req.user?.role;
     const currentUserId = req.user?.userId;
 
-    if (!isAdmin && req.user?.role === 'RECRUITER') {
+    if (userRole === 'RECRUITER' || userRole === 'FREELANCE_RECRUITER') {
       andFilters.push({
         OR: [
+          { sourcingRecruiterId: currentUserId },
           { ownerRecruiterId: currentUserId },
           { createdById: currentUserId },
           { applications: { some: { recruiterId: currentUserId } } },
         ],
       });
+    } else if (userRole === 'TEAM_LEADER') {
+      andFilters.push({
+        OR: [
+          { teamLeaderId: currentUserId },
+          { sourcingRecruiter: { teamLeaderId: currentUserId } },
+          { sourcingRecruiterId: currentUserId },
+          { ownerRecruiterId: currentUserId },
+        ],
+      });
     }
+    // Admins and Super Admins have global visibility across all candidates.
 
     const applicationSome: any = {};
     if (recruiterId) applicationSome.recruiterId = String(recruiterId);
@@ -213,10 +420,11 @@ export const getCandidates = async (req: Request, res: Response, next: NextFunct
     if (createdAt) andFilters.push({ createdAt });
 
     if (search) {
-      const q = String(search);
+      const q = String(search).trim();
       andFilters.push({
         OR: [
           { candidateCode: { contains: q, mode: 'insensitive' } },
+          { name: { contains: q, mode: 'insensitive' } },
           { fullName: { contains: q, mode: 'insensitive' } },
           { email: { contains: q, mode: 'insensitive' } },
           { phone: { contains: q, mode: 'insensitive' } },
@@ -238,6 +446,22 @@ export const getCandidates = async (req: Request, res: Response, next: NextFunct
         take: limitNum,
         orderBy: { createdAt: 'desc' },
         include: {
+          sourcingRecruiter: {
+            select: {
+              id: true,
+              recruiterId: true,
+              fullName: true,
+              email: true,
+              recruiterType: true,
+            },
+          },
+          teamLeader: {
+            select: {
+              id: true,
+              fullName: true,
+              email: true,
+            },
+          },
           ownerRecruiter: {
             select: {
               id: true,
@@ -256,7 +480,7 @@ export const getCandidates = async (req: Request, res: Response, next: NextFunct
             },
           },
           applications: {
-            orderBy: { appliedAt: 'desc' },
+            orderBy: { appliedDate: 'desc' },
             include: {
               job: {
                 select: {
@@ -278,8 +502,19 @@ export const getCandidates = async (req: Request, res: Response, next: NextFunct
                   recruiterType: true,
                 },
               },
+              teamLeader: {
+                select: {
+                  id: true,
+                  fullName: true,
+                  email: true,
+                },
+              },
               interviews: true,
             },
+          },
+          timelines: {
+            orderBy: { createdAt: 'desc' },
+            take: 20,
           },
           activities: {
             orderBy: { createdAt: 'desc' },
@@ -312,6 +547,7 @@ export const getCandidates = async (req: Request, res: Response, next: NextFunct
               applications: true,
               assessmentAttempts: true,
               activities: true,
+              timelines: true,
             },
           },
         },
@@ -344,59 +580,158 @@ export const getCandidates = async (req: Request, res: Response, next: NextFunct
 export const createCandidate = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const data = createCandidateSchema.parse(req.body);
+    const userRole = req.user?.role;
     const currentUserId = req.user?.userId;
-    const isRecruiter = req.user?.role === 'RECRUITER';
-    const ownerRecruiterId = isRecruiter ? currentUserId : data.ownerRecruiterId ?? null;
 
-    if (ownerRecruiterId) {
-      const recruiter = await prisma.user.findFirst({
-        where: { id: ownerRecruiterId, role: 'RECRUITER', isActive: true },
-        select: { id: true },
-      });
-      if (!recruiter) {
-        sendError(res, 'Assigned recruiter not found or inactive', 400);
-        return;
-      }
-    }
+    const cleanPhone = data.phone.trim();
+    const cleanEmail = data.email.trim().toLowerCase();
 
-    const existing = await prisma.candidate.findUnique({
-      where: { email: data.email.toLowerCase() },
-      select: { id: true },
+    // 2. Hard server-side duplicate check (Critical Requirement)
+    const existingCandidate = await prisma.candidate.findFirst({
+      where: {
+        OR: [
+          { phone: cleanPhone },
+          { email: cleanEmail },
+        ],
+      },
+      include: {
+        sourcingRecruiter: { select: { id: true, fullName: true, email: true } },
+        teamLeader: { select: { id: true, fullName: true, email: true } },
+        ownerRecruiter: { select: { id: true, fullName: true, email: true } },
+        applications: {
+          orderBy: { appliedDate: 'desc' },
+          take: 1,
+          include: {
+            job: { select: { id: true, jobCode: true, title: true } },
+          },
+        },
+      },
     });
-    if (existing) {
-      sendError(res, 'A candidate with this email already exists', 409);
+
+    if (existingCandidate) {
+      const latestApp = existingCandidate.applications[0];
+      const sourcingRecruiterName =
+        existingCandidate.sourcingRecruiter?.fullName ||
+        existingCandidate.ownerRecruiter?.fullName ||
+        null;
+      const teamLeaderName = existingCandidate.teamLeader?.fullName || null;
+
+      res.status(409).json({
+        success: false,
+        code: 'DUPLICATE_CANDIDATE',
+        message: 'A candidate with this phone number or email already exists in the system.',
+        data: {
+          exists: true,
+          candidateId: existingCandidate.candidateCode || existingCandidate.id,
+          candidate: {
+            id: existingCandidate.id,
+            candidateCode: existingCandidate.candidateCode,
+            name: existingCandidate.name || existingCandidate.fullName,
+            phone: existingCandidate.phone,
+            email: existingCandidate.email,
+            status: existingCandidate.status,
+            sourcingRecruiterName,
+            teamLeaderName,
+            currentApplication: latestApp
+              ? {
+                  jobCode: latestApp.job.jobCode,
+                  jobTitle: latestApp.job.title,
+                  status: latestApp.status || latestApp.stage,
+                }
+              : null,
+          },
+        },
+      });
       return;
     }
 
-    const candidate = await prisma.$transaction(async (tx) => {
-      const last = await tx.candidate.findMany({
-        select: { candidateCode: true },
-        orderBy: { createdAt: 'desc' },
-        take: 1,
+    // Determine Recruiter Pod Lineage
+    let sourcingRecruiterId = data.sourcingRecruiterId || null;
+    let teamLeaderId = data.teamLeaderId || null;
+
+    if (!sourcingRecruiterId && (userRole === 'RECRUITER' || userRole === 'FREELANCE_RECRUITER')) {
+      sourcingRecruiterId = currentUserId || null;
+    }
+
+    if (sourcingRecruiterId && !teamLeaderId) {
+      const recruiter = await prisma.user.findUnique({
+        where: { id: sourcingRecruiterId },
+        select: { teamLeaderId: true },
       });
-      const current = last[0]?.candidateCode ? Number(last[0].candidateCode.replace('OE-CAND-', '')) : 0;
-      const candidateCode = `OE-CAND-${String((Number.isFinite(current) ? current : 0) + 1).padStart(4, '0')}`;
+      if (recruiter?.teamLeaderId) {
+        teamLeaderId = recruiter.teamLeaderId;
+      }
+    }
+
+    if (!teamLeaderId && userRole === 'TEAM_LEADER') {
+      teamLeaderId = currentUserId || null;
+    }
+
+    const ownerRecruiterId = (userRole === 'RECRUITER' || userRole === 'FREELANCE_RECRUITER')
+      ? currentUserId
+      : (data.assignedRecruiterId || data.ownerRecruiterId || sourcingRecruiterId || null);
+
+    const targetJobIdentifier = data.jobId || data.targetJobId;
+    let targetJob: { id: string; jobCode: string; title: string; department: string | null } | null = null;
+    if (targetJobIdentifier) {
+      targetJob = await prisma.job.findFirst({
+        where: {
+          OR: [
+            { id: targetJobIdentifier },
+            { jobCode: targetJobIdentifier },
+          ],
+        },
+        select: { id: true, jobCode: true, title: true, department: true },
+      });
+    }
+
+    const candidateName = data.name || data.fullName || 'Candidate';
+    const candidateLocation = data.currentLocation || data.location || '';
+    const totalExp = data.totalExperience ?? data.experienceYears ?? 0;
+    const relExp = data.relevantExperience ?? 0;
+    const highestQual = data.highestQualification || data.education || null;
+    const notice = data.noticePeriod !== undefined ? String(data.noticePeriod) : (data.noticePeriodDays ? `${data.noticePeriodDays} Days` : null);
+    const currSal = data.currentSalary ?? data.currentCtc ?? null;
+    const expSal = data.expectedSalary ?? data.expectedCtc ?? null;
+    const candidateNotes = data.notes || data.recruiterRemarks || null;
+
+    const candidate = await prisma.$transaction(async (tx) => {
+      // 7. Auto-incrementing candidate code: CND-XXXXXX
+      const candidateCode = await generateCandidateCode(tx);
 
       const created = await tx.candidate.create({
         data: {
           candidateCode,
-          fullName: data.fullName,
-          email: data.email.toLowerCase(),
-          phone: data.phone,
-          location: data.location,
-          education: data.education,
-          experienceYears: data.experienceYears,
-          currentCompany: data.currentCompany,
-          currentDesignation: data.currentDesignation,
-          currentCtc: data.currentCtc,
-          expectedCtc: data.expectedCtc,
-          noticePeriodDays: data.noticePeriodDays,
+          name: candidateName,
+          fullName: candidateName,
+          email: cleanEmail,
+          phone: cleanPhone,
+          fatherName: data.fatherName || null,
+          dateOfBirth: data.dateOfBirth ? new Date(data.dateOfBirth) : null,
+          gender: data.gender || null,
+          currentLocation: candidateLocation,
+          location: candidateLocation,
+          preferredLocation: data.preferredLocation || null,
+          totalExperience: totalExp,
+          relevantExperience: relExp,
+          experienceYears: totalExp,
+          highestQualification: highestQual,
+          education: highestQual,
+          currentCompany: data.currentCompany || null,
+          currentDesignation: data.currentDesignation || null,
+          previousCompany: data.previousCompany || null,
+          noticePeriod: notice,
+          noticePeriodDays: data.noticePeriodDays || (typeof data.noticePeriod === 'number' ? data.noticePeriod : null),
+          currentSalary: currSal,
+          expectedSalary: expSal,
+          currentCtc: currSal,
+          expectedCtc: expSal,
           skills: data.skills,
           languages: data.languages,
           resumeUrl: data.resumeUrl || '',
-          source: data.source || (isRecruiter ? 'Recruiter Added' : 'Admin Added'),
+          source: data.source || (userRole === 'RECRUITER' ? 'Recruiter Added' : 'Direct Entry'),
           tags: data.tags,
-          notes: data.notes,
+          notes: candidateNotes,
           feedback: data.feedback,
           dateOfJoin: data.dateOfJoin,
           walkInStatus: data.walkInStatus,
@@ -405,21 +740,58 @@ export const createCandidate = async (req: Request, res: Response, next: NextFun
           walkInTime: data.walkInTime,
           followUpAt: data.followUpAt,
           followUpCompletedAt: data.followUpCompletedAt,
-          status: data.status || 'NEW',
+          status: data.status || 'New',
+          nextActionDate: data.nextActionDate || null,
+          nextActionType: data.nextActionType || null,
+          nextActionRemarks: data.nextActionRemarks || null,
+          sourcingRecruiterId,
+          teamLeaderId,
           ownerRecruiterId,
           createdById: currentUserId || null,
         },
-      });
-
-      await tx.candidateActivity.create({
-        data: {
-          candidateId: created.id,
-          userId: currentUserId || null,
-          recruiterId: ownerRecruiterId,
-          action: 'CANDIDATE_CREATED',
-          metadata: { source: created.source },
+        include: {
+          sourcingRecruiter: { select: { id: true, fullName: true, email: true } },
+          teamLeader: { select: { id: true, fullName: true, email: true } },
         },
       });
+
+      // If target job was passed, link Application atomically
+      if (targetJob) {
+        const appCode = await generateApplicationCode(tx);
+        await tx.application.create({
+          data: {
+            applicationCode: appCode,
+            jobId: targetJob.id,
+            candidateId: created.id,
+            recruiterId: ownerRecruiterId || sourcingRecruiterId || null,
+            teamLeaderId: teamLeaderId || null,
+            status: 'Submitted',
+            stage: 'APPLIED',
+            reviewStatus: 'PENDING_TL_REVIEW',
+            appliedDate: new Date(),
+            timeline: [
+              {
+                stage: 'Submitted',
+                timestamp: new Date().toISOString(),
+                action: `Candidate added directly for job ${targetJob.title} (${targetJob.jobCode})`,
+              },
+            ],
+          },
+        });
+      }
+
+      // 1.D Audit Timeline record
+      await logCandidateTimeline({
+        candidateId: created.id,
+        userId: currentUserId || null,
+        userName: req.user?.email,
+        userRole: req.user?.role,
+        action: 'Candidate Created',
+        newStatus: created.status,
+        remarks: `Candidate profile created (${created.candidateCode}) by ${req.user?.email || 'User'}`,
+        client: tx,
+      });
+
       if (created.walkInDate || created.walkInResponse || created.followUpAt) {
         await tx.candidateActivity.create({
           data: {
@@ -449,12 +821,32 @@ export const createCandidate = async (req: Request, res: Response, next: NextFun
       entityId: candidate.id,
       newValue: {
         candidateCode: candidate.candidateCode,
+        sourcingRecruiterId: candidate.sourcingRecruiterId,
+        teamLeaderId: candidate.teamLeaderId,
         ownerRecruiterId: candidate.ownerRecruiterId,
-        createdById: candidate.createdById,
       },
     });
 
-    sendSuccess(res, { candidate }, 'Candidate created successfully', 201);
+    const fullCandidate = await prisma.candidate.findUnique({
+      where: { id: candidate.id },
+      include: {
+        sourcingRecruiter: { select: { id: true, recruiterId: true, fullName: true, email: true, recruiterType: true } },
+        teamLeader: { select: { id: true, fullName: true, email: true } },
+        ownerRecruiter: { select: { id: true, recruiterId: true, fullName: true, email: true, recruiterType: true } },
+        createdBy: { select: { id: true, fullName: true, role: true, recruiterId: true } },
+        applications: {
+          include: {
+            job: { select: { id: true, title: true, jobCode: true, department: true, location: true, workMode: true, employmentType: true } },
+            recruiter: { select: { id: true, recruiterId: true, fullName: true, email: true, recruiterType: true } },
+            teamLeader: { select: { id: true, fullName: true, email: true } },
+            interviews: true,
+          },
+          orderBy: { appliedDate: 'desc' },
+        },
+      },
+    });
+
+    sendSuccess(res, { candidate: fullCandidate || candidate }, 'Candidate created successfully', 201);
   } catch (err) {
     next(err);
   }
@@ -462,12 +854,17 @@ export const createCandidate = async (req: Request, res: Response, next: NextFun
 
 export const assignCandidate = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const candidateId = req.params.id;
+    const identifier = req.params.id;
     const schema = z.object({ recruiterId: z.string().uuid().nullable() });
     const { recruiterId } = schema.parse(req.body);
 
-    const existing = await prisma.candidate.findUnique({
-      where: { id: candidateId },
+    const existing = await prisma.candidate.findFirst({
+      where: {
+        OR: [
+          { id: identifier },
+          { candidateCode: identifier },
+        ],
+      },
       select: { id: true, ownerRecruiterId: true },
     });
     if (!existing) {
@@ -488,7 +885,7 @@ export const assignCandidate = async (req: Request, res: Response, next: NextFun
 
     const updated = await prisma.$transaction(async (tx) => {
       const candidate = await tx.candidate.update({
-        where: { id: candidateId },
+        where: { id: existing.id },
         data: { ownerRecruiterId: recruiterId },
         include: {
           ownerRecruiter: { select: { id: true, recruiterId: true, fullName: true, email: true, recruiterType: true } },
@@ -497,7 +894,7 @@ export const assignCandidate = async (req: Request, res: Response, next: NextFun
 
       await tx.candidateActivity.create({
         data: {
-          candidateId,
+          candidateId: existing.id,
           userId: req.user?.userId || null,
           recruiterId,
           action: 'OWNER_ASSIGNED',
@@ -526,7 +923,7 @@ export const assignCandidate = async (req: Request, res: Response, next: NextFun
           action: 'ASSIGN_CANDIDATE_RECRUITER',
           module: 'CANDIDATES',
           entity: 'Candidate',
-          entityId: candidateId,
+          entityId: existing.id,
           oldValue: { ownerRecruiterId: existing.ownerRecruiterId },
           newValue: { ownerRecruiterId: recruiterId },
           ipAddress: req.ip || req.socket?.remoteAddress || null,
@@ -545,14 +942,19 @@ export const assignCandidate = async (req: Request, res: Response, next: NextFun
 
 export const addCandidateActivity = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const candidateId = req.params.id;
+    const identifier = req.params.id;
     const data = activitySchema.parse(req.body);
 
-    const candidate = await prisma.candidate.findUnique({
-      where: { id: candidateId },
+    const candidate = await prisma.candidate.findFirst({
+      where: {
+        OR: [
+          { id: identifier },
+          { candidateCode: identifier },
+        ],
+      },
       select: { id: true, ownerRecruiterId: true },
     });
-    if (!candidate || !(await canAccessCandidate(req, candidateId))) {
+    if (!candidate || !(await canAccessCandidate(req, identifier))) {
       sendError(res, 'Candidate not found', 404);
       return;
     }
@@ -562,7 +964,7 @@ export const addCandidateActivity = async (req: Request, res: Response, next: Ne
 
     const activity = await prisma.candidateActivity.create({
       data: {
-        candidateId,
+        candidateId: candidate.id,
         userId: req.user?.userId || null,
         recruiterId,
         applicationId: data.applicationId,
@@ -583,7 +985,7 @@ export const addCandidateActivity = async (req: Request, res: Response, next: Ne
     };
     if (statusByAction[data.action]) {
       await prisma.candidate.update({
-        where: { id: candidateId },
+        where: { id: candidate.id },
         data: { status: statusByAction[data.action] },
       });
     }
@@ -596,13 +998,28 @@ export const addCandidateActivity = async (req: Request, res: Response, next: Ne
 
 export const getCandidateActivities = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    if (!(await canAccessCandidate(req, req.params.id))) {
+    const identifier = req.params.id;
+    if (!(await canAccessCandidate(req, identifier))) {
+      sendError(res, 'Candidate not found', 404);
+      return;
+    }
+
+    const candidate = await prisma.candidate.findFirst({
+      where: {
+        OR: [
+          { id: identifier },
+          { candidateCode: identifier },
+        ],
+      },
+      select: { id: true },
+    });
+    if (!candidate) {
       sendError(res, 'Candidate not found', 404);
       return;
     }
 
     const activities = await prisma.candidateActivity.findMany({
-      where: { candidateId: req.params.id },
+      where: { candidateId: candidate.id },
       orderBy: { createdAt: 'desc' },
       take: 200,
       include: {
@@ -619,18 +1036,33 @@ export const getCandidateActivities = async (req: Request, res: Response, next: 
 
 export const getCandidateById = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    if (!(await canAccessCandidate(req, req.params.id))) {
+    const identifier = req.params.id;
+    if (!(await canAccessCandidate(req, identifier))) {
       sendError(res, 'Candidate not found', 404);
       return;
     }
 
-    const candidate = await prisma.candidate.findUnique({
-      where: { id: req.params.id },
+    const candidate = await prisma.candidate.findFirst({
+      where: {
+        OR: [
+          { id: identifier },
+          { candidateCode: identifier },
+        ],
+      },
       include: {
+        sourcingRecruiter: {
+          select: { id: true, recruiterId: true, fullName: true, email: true, recruiterType: true },
+        },
+        teamLeader: {
+          select: { id: true, fullName: true, email: true },
+        },
         ownerRecruiter: {
           select: { id: true, recruiterId: true, fullName: true, email: true, recruiterType: true },
         },
         createdBy: { select: { id: true, fullName: true, role: true, recruiterId: true } },
+        timelines: {
+          orderBy: { createdAt: 'desc' },
+        },
         activities: {
           orderBy: { createdAt: 'desc' },
           take: 200,
@@ -644,9 +1076,10 @@ export const getCandidateById = async (req: Request, res: Response, next: NextFu
           include: {
             job: { select: { id: true, title: true, jobCode: true, department: true, location: true, workMode: true, employmentType: true } },
             recruiter: { select: { id: true, recruiterId: true, fullName: true, email: true, recruiterType: true } },
+            teamLeader: { select: { id: true, fullName: true, email: true } },
             interviews: true,
           },
-          orderBy: { appliedAt: 'desc' },
+          orderBy: { appliedDate: 'desc' },
         },
         assessmentAttempts: {
           include: { assessment: { select: { title: true, category: true } } },
@@ -667,8 +1100,14 @@ export const getCandidateById = async (req: Request, res: Response, next: NextFu
 
 export const deleteCandidate = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const existing = await prisma.candidate.findUnique({
-      where: { id: req.params.id },
+    const identifier = req.params.id;
+    const existing = await prisma.candidate.findFirst({
+      where: {
+        OR: [
+          { id: identifier },
+          { candidateCode: identifier },
+        ],
+      },
       select: { id: true, candidateCode: true, fullName: true, email: true },
     });
     if (!existing) {
@@ -676,19 +1115,19 @@ export const deleteCandidate = async (req: Request, res: Response, next: NextFun
       return;
     }
 
-    await prisma.candidate.delete({ where: { id: req.params.id } });
+    await prisma.candidate.delete({ where: { id: existing.id } });
 
     await logAudit({
       req,
       action: 'DELETE_CANDIDATE',
       module: 'CANDIDATES',
       entity: 'Candidate',
-      entityId: req.params.id,
+      entityId: existing.id,
       oldValue: existing,
       newValue: null,
     });
 
-    sendSuccess(res, { candidateId: req.params.id, candidateCode: existing.candidateCode }, 'Candidate deleted successfully');
+    sendSuccess(res, { candidateId: existing.id, candidateCode: existing.candidateCode }, 'Candidate deleted successfully');
   } catch (err) {
     next(err);
   }
@@ -696,10 +1135,18 @@ export const deleteCandidate = async (req: Request, res: Response, next: NextFun
 
 export const updateCandidate = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
+    const identifier = req.params.id;
     const data = updateCandidateSchema.parse(req.body);
-    const existing = await prisma.candidate.findUnique({ where: { id: req.params.id } });
+    const existing = await prisma.candidate.findFirst({
+      where: {
+        OR: [
+          { id: identifier },
+          { candidateCode: identifier },
+        ],
+      },
+    });
 
-    if (!existing || !(await canAccessCandidate(req, req.params.id))) {
+    if (!existing || !(await canAccessCandidate(req, identifier))) {
       sendError(res, 'Candidate not found', 404);
       return;
     }
@@ -724,7 +1171,7 @@ export const updateCandidate = async (req: Request, res: Response, next: NextFun
     }
     const updated = await prisma.$transaction(async (tx) => {
       const candidate = await tx.candidate.update({
-        where: { id: req.params.id },
+        where: { id: existing.id },
         data: {
           ...candidateData,
           email: data.email ? data.email.toLowerCase() : undefined,
@@ -735,7 +1182,7 @@ export const updateCandidate = async (req: Request, res: Response, next: NextFun
       if (walkInWasRescheduled) {
         await tx.candidateActivity.create({
           data: {
-            candidateId: req.params.id,
+            candidateId: existing.id,
             userId: req.user?.userId || null,
             recruiterId: existing.ownerRecruiterId || (req.user?.role === 'RECRUITER' ? req.user.userId : null),
             action: 'WALK_IN_RESCHEDULED',
@@ -757,7 +1204,7 @@ export const updateCandidate = async (req: Request, res: Response, next: NextFun
       if (walkInChanged && !walkInWasRescheduled) {
         await tx.candidateActivity.create({
           data: {
-            candidateId: req.params.id,
+            candidateId: existing.id,
             userId: req.user?.userId || null,
             recruiterId: existing.ownerRecruiterId || (req.user?.role === 'RECRUITER' ? req.user.userId : null),
             action: 'WALK_IN_UPDATED',
@@ -774,7 +1221,7 @@ export const updateCandidate = async (req: Request, res: Response, next: NextFun
       if (data.followUpAt !== undefined && data.followUpAt?.getTime() !== existing.followUpAt?.getTime()) {
         await tx.candidateActivity.create({
           data: {
-            candidateId: req.params.id,
+            candidateId: existing.id,
             userId: req.user?.userId || null,
             recruiterId: existing.ownerRecruiterId || (req.user?.role === 'RECRUITER' ? req.user.userId : null),
             action: 'FOLLOW_UP_SCHEDULED',
@@ -786,7 +1233,7 @@ export const updateCandidate = async (req: Request, res: Response, next: NextFun
       if (data.followUpCompletedAt && !existing.followUpCompletedAt) {
         await tx.candidateActivity.create({
           data: {
-            candidateId: req.params.id,
+            candidateId: existing.id,
             userId: req.user?.userId || null,
             recruiterId: existing.ownerRecruiterId || (req.user?.role === 'RECRUITER' ? req.user.userId : null),
             action: 'FOLLOW_UP_COMPLETED',
@@ -799,9 +1246,20 @@ export const updateCandidate = async (req: Request, res: Response, next: NextFun
     });
 
     if (data.status && data.status !== existing.status) {
+      await logCandidateTimeline({
+        candidateId: existing.id,
+        userId: req.user?.userId || null,
+        userName: req.user?.email,
+        userRole: req.user?.role,
+        action: 'Status Changed',
+        previousStatus: existing.status,
+        newStatus: data.status,
+        remarks: `Candidate status updated from ${existing.status} to ${data.status} by ${req.user?.email || 'User'}`,
+      });
+
       await prisma.candidateActivity.create({
         data: {
-          candidateId: req.params.id,
+          candidateId: existing.id,
           userId: req.user?.userId || null,
           recruiterId: existing.ownerRecruiterId || (req.user?.role === 'RECRUITER' ? req.user.userId : null),
           action: data.status === 'SELECTED' ? 'SELECTED' : data.status === 'JOINED' ? 'JOINED' : data.status === 'REJECTED' ? 'REJECTED' : 'STATUS_UPDATED',
@@ -815,7 +1273,7 @@ export const updateCandidate = async (req: Request, res: Response, next: NextFun
       action: 'UPDATE_CANDIDATE',
       module: 'CANDIDATES',
       entity: 'Candidate',
-      entityId: req.params.id,
+      entityId: existing.id,
       oldValue: { status: existing.status, ownerRecruiterId: existing.ownerRecruiterId },
       newValue: { status: updated.status, ownerRecruiterId: updated.ownerRecruiterId },
     });
@@ -830,14 +1288,22 @@ export const updateCandidate = async (req: Request, res: Response, next: NextFun
 export const recruiterSubmitCandidate = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const userId = req.user?.userId;
-    if (!userId || req.user?.role !== 'RECRUITER') {
+    const allowedRoles = ['RECRUITER', 'FREELANCE_RECRUITER', 'TEAM_LEADER', 'ADMIN', 'SUPER_ADMIN'];
+    if (!userId || !allowedRoles.includes(req.user?.role || '')) {
       sendError(res, 'Recruiter authentication is required.', 403);
       return;
     }
 
     const recruiter = await prisma.user.findUnique({
       where: { id: userId },
-      select: { id: true, fullName: true, recruiterId: true, recruiterType: true, isActive: true },
+      select: {
+        id: true,
+        fullName: true,
+        recruiterId: true,
+        recruiterType: true,
+        teamLeaderId: true,
+        isActive: true,
+      },
     });
 
     if (!recruiter || !recruiter.isActive) {
@@ -846,10 +1312,10 @@ export const recruiterSubmitCandidate = async (req: Request, res: Response, next
     }
 
     const body = req.body || {};
-    const fullName = String(body.fullName || '').trim();
+    const fullName = String(body.fullName || body.name || '').trim();
     const email = String(body.email || '').trim().toLowerCase();
     const phone = String(body.phone || '').trim();
-    const location = String(body.location || '').trim();
+    const location = String(body.currentLocation || body.location || '').trim();
     const jobId = String(body.jobId || '').trim();
 
     if (fullName.length < 2 || !email || !phone || !location || !jobId) {
@@ -882,11 +1348,12 @@ export const recruiterSubmitCandidate = async (req: Request, res: Response, next
       return;
     }
 
-    const experienceYears = Number(body.experienceYears || 0);
+    const experienceYears = Number(body.experienceYears || body.totalExperience || 0);
     const relevantExperience = Number(body.relevantExperience || 0);
-    const currentCtc = Number(body.currentCtc || 0);
-    const expectedCtc = Number(body.expectedCtc || 0);
+    const currentCtc = Number(body.currentSalary || body.currentCtc || 0);
+    const expectedCtc = Number(body.expectedSalary || body.expectedCtc || 0);
     const noticePeriodDays = Number(body.noticePeriodDays || 0);
+    const noticePeriod = body.noticePeriod ? String(body.noticePeriod) : (noticePeriodDays ? `${noticePeriodDays} Days` : null);
 
     const parseList = (value: unknown): string[] => {
       if (Array.isArray(value)) return value.map(String).map(v => v.trim()).filter(Boolean);
@@ -913,11 +1380,18 @@ export const recruiterSubmitCandidate = async (req: Request, res: Response, next
         email: true,
         phone: true,
         ownerRecruiterId: true,
+        sourcingRecruiterId: true,
+        teamLeaderId: true,
         resumeUrl: true,
       },
     });
 
-    if (existingCandidate?.ownerRecruiterId && existingCandidate.ownerRecruiterId !== recruiter.id) {
+    if (
+      existingCandidate?.ownerRecruiterId &&
+      existingCandidate.ownerRecruiterId !== recruiter.id &&
+      req.user?.role !== 'ADMIN' &&
+      req.user?.role !== 'SUPER_ADMIN'
+    ) {
       sendError(res, 'This candidate is owned by another recruiter. Ask an admin to reassign them.', 409);
       return;
     }
@@ -930,7 +1404,7 @@ export const recruiterSubmitCandidate = async (req: Request, res: Response, next
             candidateId: existingCandidate.id,
           },
         },
-        select: { id: true, stage: true },
+        select: { id: true, stage: true, status: true },
       });
 
       if (existingApplication) {
@@ -940,6 +1414,7 @@ export const recruiterSubmitCandidate = async (req: Request, res: Response, next
     }
 
     const uploaded = req.file ? await uploadResumeFile(req.file, fullName) : null;
+    const teamLeaderId = recruiter.teamLeaderId || (req.user?.role === 'TEAM_LEADER' ? recruiter.id : null);
 
     const result = await prisma.$transaction(async (tx) => {
       let candidate;
@@ -948,76 +1423,113 @@ export const recruiterSubmitCandidate = async (req: Request, res: Response, next
         candidate = await tx.candidate.update({
           where: { id: existingCandidate.id },
           data: {
+            name: fullName,
+            fullName,
+            currentLocation: location,
             location,
-            education: body.education ? String(body.education) : undefined,
+            education: body.highestQualification || (body.education ? String(body.education) : undefined),
+            highestQualification: body.highestQualification || (body.education ? String(body.education) : undefined),
+            totalExperience: experienceYears,
+            relevantExperience,
             experienceYears: Number.isFinite(experienceYears) ? experienceYears : 0,
             currentCompany: body.currentCompany ? String(body.currentCompany) : undefined,
             currentDesignation: body.currentDesignation ? String(body.currentDesignation) : undefined,
+            previousCompany: body.previousCompany ? String(body.previousCompany) : undefined,
+            noticePeriod,
+            noticePeriodDays: Number.isFinite(noticePeriodDays) ? noticePeriodDays : undefined,
+            currentSalary: currentCtc,
+            expectedSalary: expectedCtc,
             currentCtc: Number.isFinite(currentCtc) ? currentCtc : undefined,
             expectedCtc: Number.isFinite(expectedCtc) ? expectedCtc : undefined,
-            noticePeriodDays: Number.isFinite(noticePeriodDays) ? noticePeriodDays : undefined,
             skills,
-            languages: languages.length ? languages : ['English'],
+            languages: languages.length ? languages : ['English', 'Hindi'],
             ...(uploaded ? { resumeUrl: uploaded.fileUrl } : {}),
             source: 'Recruiter Submission',
             tags: { push: 'Recruiter Submission' },
             notes: recruiterRemarks || undefined,
             feedback,
             dateOfJoin,
+            status: 'Submitted',
+            teamLeaderId: existingCandidate.teamLeaderId || teamLeaderId,
             ownerRecruiterId: recruiter.id,
+            sourcingRecruiterId: existingCandidate.sourcingRecruiterId || recruiter.id,
             createdById: existingCandidate.ownerRecruiterId || recruiter.id,
           },
         });
       } else {
-        const last = await tx.candidate.findFirst({
-          select: { candidateCode: true },
-          orderBy: { candidateCode: 'desc' },
-        });
-        const currentCode = last?.candidateCode
-          ? Number(last.candidateCode.replace('OE-CAND-', ''))
-          : 0;
-        const candidateCode = `OE-CAND-${String(
-          (Number.isFinite(currentCode) ? currentCode : 0) + 1
-        ).padStart(4, '0')}`;
+        // Auto-generated Candidate Code CND-XXXXXX
+        const candidateCode = await generateCandidateCode(tx);
 
         candidate = await tx.candidate.create({
           data: {
             candidateCode,
+            name: fullName,
             fullName,
             email,
             phone,
+            currentLocation: location,
             location,
-            education: body.education ? String(body.education) : undefined,
+            education: body.highestQualification || (body.education ? String(body.education) : undefined),
+            highestQualification: body.highestQualification || (body.education ? String(body.education) : undefined),
+            totalExperience: experienceYears,
+            relevantExperience,
             experienceYears: Number.isFinite(experienceYears) ? experienceYears : 0,
             currentCompany: body.currentCompany ? String(body.currentCompany) : undefined,
             currentDesignation: body.currentDesignation ? String(body.currentDesignation) : undefined,
+            previousCompany: body.previousCompany ? String(body.previousCompany) : undefined,
+            noticePeriod,
+            noticePeriodDays: Number.isFinite(noticePeriodDays) ? noticePeriodDays : undefined,
+            currentSalary: currentCtc,
+            expectedSalary: expectedCtc,
             currentCtc: Number.isFinite(currentCtc) ? currentCtc : undefined,
             expectedCtc: Number.isFinite(expectedCtc) ? expectedCtc : undefined,
-            noticePeriodDays: Number.isFinite(noticePeriodDays) ? noticePeriodDays : undefined,
             skills,
-            languages: languages.length ? languages : ['English'],
+            languages: languages.length ? languages : ['English', 'Hindi'],
             resumeUrl: uploaded?.fileUrl || '',
             source: 'Recruiter Submission',
             tags: ['Recruiter Submission'],
             notes: recruiterRemarks || undefined,
             feedback,
             dateOfJoin,
+            status: 'Submitted',
+            sourcingRecruiterId: recruiter.id,
+            teamLeaderId,
             ownerRecruiterId: recruiter.id,
             createdById: recruiter.id,
-            status: 'SCREENING',
           },
         });
       }
 
+      // Auto-generated Application Code APP-XXXXXX
+      const applicationCode = await generateApplicationCode(tx);
+
       const application = await tx.application.create({
         data: {
+          applicationCode,
           candidateId: candidate.id,
           jobId,
           recruiterId: recruiter.id,
+          teamLeaderId,
+          status: 'Submitted',
           stage: 'APPLIED',
+          reviewStatus: 'PENDING_TL_REVIEW',
           internalNotes: recruiterRemarks ? { recruiterRemarks } : undefined,
-          timeline: [{ stage: 'APPLIED', at: new Date().toISOString(), by: recruiter.id }],
+          timeline: [{ stage: 'Submitted', at: new Date().toISOString(), by: recruiter.id }],
         },
+      });
+
+      // 1.D Audit Timeline record
+      await logCandidateTimeline({
+        candidateId: candidate.id,
+        applicationId: application.id,
+        userId: recruiter.id,
+        userName: recruiter.fullName,
+        userRole: req.user?.role,
+        action: 'Application Submitted',
+        previousStatus: candidate.status,
+        newStatus: 'Submitted',
+        remarks: recruiterRemarks || `Candidate submitted for job ${job.title}`,
+        client: tx,
       });
 
       await tx.candidateActivity.create({
@@ -1032,6 +1544,8 @@ export const recruiterSubmitCandidate = async (req: Request, res: Response, next
           metadata: {
             source: 'RECRUITER_SUBMISSION',
             candidateCode: candidate.candidateCode,
+            applicationCode: application.applicationCode,
+            reviewStatus: 'PENDING_TL_REVIEW',
             ...(uploaded ? { fileUrl: uploaded.fileUrl } : {}),
           },
         },
@@ -1043,10 +1557,20 @@ export const recruiterSubmitCandidate = async (req: Request, res: Response, next
     await createNotification({
       userId: recruiter.id,
       title: 'Candidate submitted successfully',
-      message: `${result.candidate.fullName} has been added to your candidate bucket for ${job.title}.`,
+      message: `${result.candidate.fullName} has been submitted for ${job.title}. Awaiting Team Leader review.`,
       type: 'CANDIDATE_ADDED',
       link: '/recruiter/candidates',
     });
+
+    if (teamLeaderId && teamLeaderId !== recruiter.id) {
+      await createNotification({
+        userId: teamLeaderId,
+        title: 'New Candidate Pending Review',
+        message: `${recruiter.fullName} submitted ${result.candidate.fullName} for ${job.title}.`,
+        type: 'TL_REVIEW_REQUIRED',
+        link: '/team-leader/pending-approvals',
+      });
+    }
 
     await logAudit({
       req,
@@ -1056,7 +1580,9 @@ export const recruiterSubmitCandidate = async (req: Request, res: Response, next
       entityId: result.candidate.id,
       newValue: {
         candidateCode: result.candidate.candidateCode,
+        applicationCode: result.application.applicationCode,
         recruiterId: recruiter.recruiterId,
+        teamLeaderId,
         jobId,
         applicationId: result.application.id,
       },
