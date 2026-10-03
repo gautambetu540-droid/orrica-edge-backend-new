@@ -142,71 +142,90 @@ const repairLegacyClientNames = async () => {
 
 // Ensure critical PostgreSQL columns exist to prevent any "column does not exist" errors
 const ensureDatabaseSchema = async () => {
-  try {
-    await prisma.$executeRawUnsafe(`
-      DO $$ BEGIN
-        CREATE TYPE "ReviewStatus" AS ENUM ('PENDING_TL_REVIEW', 'TL_APPROVED', 'TL_SENT_BACK', 'TL_REJECTED');
-      EXCEPTION
-        WHEN duplicate_object THEN null;
-      END $$;
-    `);
+  const executeSafe = async (query: string, label: string) => {
+    try {
+      await prisma.$executeRawUnsafe(query);
+    } catch (err: any) {
+      console.warn(`[SCHEMA] ${label} warning:`, err?.message || err);
+    }
+  };
 
-    await prisma.$executeRawUnsafe(`ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "teamLeaderId" TEXT;`);
-    await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "users_teamLeaderId_idx" ON "users"("teamLeaderId");`);
+  await executeSafe(`
+    DO $$ BEGIN
+      CREATE TYPE "Gender" AS ENUM ('MALE', 'FEMALE', 'OTHER');
+    EXCEPTION
+      WHEN duplicate_object THEN null;
+    END $$;
+  `, 'Create Gender enum');
 
-    await prisma.$executeRawUnsafe(`
-      ALTER TABLE "candidates" 
-        ADD COLUMN IF NOT EXISTS "name" TEXT,
-        ADD COLUMN IF NOT EXISTS "fatherName" TEXT,
-        ADD COLUMN IF NOT EXISTS "dateOfBirth" TIMESTAMP(3),
-        ADD COLUMN IF NOT EXISTS "gender" "Gender",
-        ADD COLUMN IF NOT EXISTS "currentLocation" TEXT,
-        ADD COLUMN IF NOT EXISTS "preferredLocation" TEXT,
-        ADD COLUMN IF NOT EXISTS "totalExperience" DECIMAL(4, 1) DEFAULT 0,
-        ADD COLUMN IF NOT EXISTS "relevantExperience" DECIMAL(4, 1) DEFAULT 0,
-        ADD COLUMN IF NOT EXISTS "highestQualification" TEXT,
-        ADD COLUMN IF NOT EXISTS "previousCompany" TEXT,
-        ADD COLUMN IF NOT EXISTS "noticePeriod" TEXT,
-        ADD COLUMN IF NOT EXISTS "currentSalary" DECIMAL(10, 2),
-        ADD COLUMN IF NOT EXISTS "expectedSalary" DECIMAL(10, 2),
-        ADD COLUMN IF NOT EXISTS "nextActionDate" TIMESTAMP(3),
-        ADD COLUMN IF NOT EXISTS "nextActionType" TEXT,
-        ADD COLUMN IF NOT EXISTS "nextActionRemarks" TEXT,
-        ADD COLUMN IF NOT EXISTS "sourcingRecruiterId" TEXT,
-        ADD COLUMN IF NOT EXISTS "teamLeaderId" TEXT;
-    `);
+  await executeSafe(`
+    DO $$ BEGIN
+      CREATE TYPE "ReviewStatus" AS ENUM ('PENDING_TL_REVIEW', 'TL_APPROVED', 'TL_SENT_BACK', 'TL_REJECTED');
+    EXCEPTION
+      WHEN duplicate_object THEN null;
+    END $$;
+  `, 'Create ReviewStatus enum');
 
-    await prisma.$executeRawUnsafe(`
-      ALTER TABLE "applications" 
-        ADD COLUMN IF NOT EXISTS "applicationCode" TEXT,
-        ADD COLUMN IF NOT EXISTS "teamLeaderId" TEXT,
-        ADD COLUMN IF NOT EXISTS "appliedDate" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        ADD COLUMN IF NOT EXISTS "status" TEXT NOT NULL DEFAULT 'Submitted',
-        ADD COLUMN IF NOT EXISTS "reviewStatus" "ReviewStatus" DEFAULT 'PENDING_TL_REVIEW',
-        ADD COLUMN IF NOT EXISTS "sendBackReason" TEXT,
-        ADD COLUMN IF NOT EXISTS "sendBackRemarks" TEXT;
-    `);
+  await executeSafe(`
+    DELETE FROM "_prisma_migrations" 
+    WHERE "migration_name" = '20261003203500_add_recruitment_os_team_leader_and_timelines' 
+      AND "finished_at" IS NULL;
+  `, 'Clear failed migration lock');
 
-    await prisma.$executeRawUnsafe(`
-      CREATE TABLE IF NOT EXISTS "candidate_timelines" (
-        "id" TEXT NOT NULL,
-        "candidateId" TEXT NOT NULL,
-        "applicationId" TEXT,
-        "userId" TEXT,
-        "userName" TEXT,
-        "userRole" TEXT,
-        "action" TEXT NOT NULL,
-        "previousStatus" TEXT,
-        "newStatus" TEXT,
-        "remarks" TEXT,
-        "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        CONSTRAINT "candidate_timelines_pkey" PRIMARY KEY ("id")
-      );
-    `);
-    console.log('[SCHEMA] Verified and ensured all PostgreSQL tables and columns exist.');
-  } catch (err: any) {
-    console.warn('[SCHEMA] Automatic column check warning:', err?.message || err);
-  }
+  await executeSafe(`ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "teamLeaderId" TEXT;`, 'Add users.teamLeaderId');
+  await executeSafe(`CREATE INDEX IF NOT EXISTS "users_teamLeaderId_idx" ON "users"("teamLeaderId");`, 'Index users.teamLeaderId');
+
+  await executeSafe(`
+    ALTER TABLE "candidates" 
+      ADD COLUMN IF NOT EXISTS "name" TEXT,
+      ADD COLUMN IF NOT EXISTS "fatherName" TEXT,
+      ADD COLUMN IF NOT EXISTS "dateOfBirth" TIMESTAMP(3),
+      ADD COLUMN IF NOT EXISTS "gender" "Gender",
+      ADD COLUMN IF NOT EXISTS "currentLocation" TEXT,
+      ADD COLUMN IF NOT EXISTS "preferredLocation" TEXT,
+      ADD COLUMN IF NOT EXISTS "totalExperience" DECIMAL(4, 1) DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS "relevantExperience" DECIMAL(4, 1) DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS "highestQualification" TEXT,
+      ADD COLUMN IF NOT EXISTS "previousCompany" TEXT,
+      ADD COLUMN IF NOT EXISTS "noticePeriod" TEXT,
+      ADD COLUMN IF NOT EXISTS "currentSalary" DECIMAL(10, 2),
+      ADD COLUMN IF NOT EXISTS "expectedSalary" DECIMAL(10, 2),
+      ADD COLUMN IF NOT EXISTS "nextActionDate" TIMESTAMP(3),
+      ADD COLUMN IF NOT EXISTS "nextActionType" TEXT,
+      ADD COLUMN IF NOT EXISTS "nextActionRemarks" TEXT,
+      ADD COLUMN IF NOT EXISTS "sourcingRecruiterId" TEXT,
+      ADD COLUMN IF NOT EXISTS "teamLeaderId" TEXT;
+  `, 'Add candidate columns');
+
+  await executeSafe(`
+    ALTER TABLE "applications" 
+      ADD COLUMN IF NOT EXISTS "applicationCode" TEXT,
+      ADD COLUMN IF NOT EXISTS "teamLeaderId" TEXT,
+      ADD COLUMN IF NOT EXISTS "appliedDate" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      ADD COLUMN IF NOT EXISTS "status" TEXT NOT NULL DEFAULT 'Submitted',
+      ADD COLUMN IF NOT EXISTS "reviewStatus" "ReviewStatus" DEFAULT 'PENDING_TL_REVIEW',
+      ADD COLUMN IF NOT EXISTS "sendBackReason" TEXT,
+      ADD COLUMN IF NOT EXISTS "sendBackRemarks" TEXT;
+  `, 'Add application columns');
+
+  await executeSafe(`
+    CREATE TABLE IF NOT EXISTS "candidate_timelines" (
+      "id" TEXT NOT NULL,
+      "candidateId" TEXT NOT NULL,
+      "applicationId" TEXT,
+      "userId" TEXT,
+      "userName" TEXT,
+      "userRole" TEXT,
+      "action" TEXT NOT NULL,
+      "previousStatus" TEXT,
+      "newStatus" TEXT,
+      "remarks" TEXT,
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "candidate_timelines_pkey" PRIMARY KEY ("id")
+    );
+  `, 'Create candidate_timelines table');
+
+  console.log('[SCHEMA] Verified and ensured all PostgreSQL tables and columns exist.');
 };
 
 void ensureDatabaseSchema();
