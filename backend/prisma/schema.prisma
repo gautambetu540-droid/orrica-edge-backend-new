@@ -42,17 +42,6 @@ enum JobStatus {
   ARCHIVED
 }
 
-enum CandidateStatus {
-  NEW
-  SCREENING
-  SHORTLISTED
-  INTERVIEW
-  SELECTED
-  REJECTED
-  ON_HOLD
-  JOINED
-  DROPPED
-}
 
 enum ApplicationStage {
   APPLIED

@@ -29,6 +29,7 @@ import teamLeaderRoutes from './routes/team-leader.routes';
 import searchRoutes from './routes/search.routes';
 import { ensureDefaultUniversalForm } from './controllers/universal-form.controller';
 import { ensureDatabaseSchema } from './scripts/bootstrap-db';
+import userRoutes from './routes/user.routes';
 import swaggerRouter from './swagger/swagger';
 
 const app = express();
@@ -89,6 +90,10 @@ app.use('/api/docs', swaggerRouter);
 // Register API Routes for both /api/v1 and /api (Recruitment OS architecture)
 const registerApiRoutes = (prefix: string) => {
   app.use(`${prefix}/auth`, authRoutes);
+  app.use(`${prefix}/user`, userRoutes);
+  app.use(`${prefix}/users`, userRoutes);
+  app.use(`${prefix}/profile`, userRoutes);
+  app.use(`${prefix}/settings`, userRoutes);
   app.use(`${prefix}/jobs`, jobRoutes);
   app.use(`${prefix}/applications`, applicationRoutes);
   app.use(`${prefix}/blogs`, blogRoutes);
@@ -96,6 +101,7 @@ const registerApiRoutes = (prefix: string) => {
   app.use(`${prefix}/candidates`, candidateRoutes);
   app.use(`${prefix}/team-leader`, teamLeaderRoutes);
   app.use(`${prefix}/tl`, teamLeaderRoutes);
+  app.use(`${prefix}/approvals`, teamLeaderRoutes);
   app.use(`${prefix}/search`, searchRoutes);
   app.use(`${prefix}/recruiters`, recruiterRoutes);
   app.use(`${prefix}/recruiter`, recruiterRoutes);

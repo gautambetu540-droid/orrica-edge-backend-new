@@ -2,6 +2,9 @@ import { Router, Request, Response, NextFunction } from 'express';
 import {
   createRecruiter,
   getRecruiters,
+  getRecruiterById,
+  updateRecruiter,
+  deleteRecruiter,
   getMyRecruiterProfile,
   updateMyRecruiterProfile,
   updateRecruiterStatus,
@@ -92,6 +95,62 @@ router.get(
   getRecruiters
 );
 
+router.get(
+  '/me/profile',
+  authenticateJwt,
+  requireRoles('RECRUITER', 'FREELANCE_RECRUITER'),
+  getMyRecruiterProfile
+);
+
+router.put(
+  '/me/profile',
+  authenticateJwt,
+  requireRoles('RECRUITER', 'FREELANCE_RECRUITER'),
+  updateMyRecruiterProfile
+);
+
+router.patch(
+  '/me/profile',
+  authenticateJwt,
+  requireRoles('RECRUITER', 'FREELANCE_RECRUITER'),
+  updateMyRecruiterProfile
+);
+
+router.get(
+  '/me/permissions',
+  authenticateJwt,
+  requireRoles('RECRUITER', 'FREELANCE_RECRUITER'),
+  getMyRecruiterPermissions
+);
+
+router.get(
+  '/:id',
+  authenticateJwt,
+  requireRecruiterSelfOrAdmin,
+  getRecruiterById
+);
+
+router.put(
+  '/:id',
+  authenticateJwt,
+  requireRoles('SUPER_ADMIN', 'ADMIN'),
+  updateRecruiter
+);
+
+router.patch(
+  '/:id',
+  authenticateJwt,
+  requireRoles('SUPER_ADMIN', 'ADMIN'),
+  updateRecruiter
+);
+
+router.delete(
+  '/:id',
+  authenticateJwt,
+  requireRoles('SUPER_ADMIN', 'ADMIN'),
+  deleteRecruiter
+);
+
 router.patch(
   '/:id/status',
   authenticateJwt,
@@ -131,29 +190,6 @@ router.put(
 );
 
 router.get(
-  '/me/profile',
-  authenticateJwt,
-  requireRoles('RECRUITER'),
-  requireRecruiterPermission('settings'),
-  getMyRecruiterProfile
-);
-
-router.put(
-  '/me/profile',
-  authenticateJwt,
-  requireRoles('RECRUITER'),
-  requireRecruiterPermission('settings'),
-  updateMyRecruiterProfile
-);
-
-router.get(
-  '/me/permissions',
-  authenticateJwt,
-  requireRoles('RECRUITER'),
-  getMyRecruiterPermissions
-);
-
-router.get(
   '/:id/permissions',
   authenticateJwt,
   requireRoles('SUPER_ADMIN', 'ADMIN'),
@@ -168,3 +204,4 @@ router.put(
 );
 
 export default router;
+

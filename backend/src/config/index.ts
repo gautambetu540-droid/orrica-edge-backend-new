@@ -21,7 +21,8 @@ export const config = {
 
   corsOrigin: process.env.CORS_ORIGIN
     ? process.env.CORS_ORIGIN.split(',').map((origin) => origin.trim()).filter(Boolean)
-    : ['http://localhost:3000', 'https://orricaedge.com', 'https://www.orricaedge.com'],
+    : ['http://localhost:3000', 'http://localhost:5173', 'http://127.0.0.1:3000', 'https://orricaedge.com', 'https://www.orricaedge.com'],
+
 
   recruiter: {
     passwordSetupUrl:

@@ -14,7 +14,19 @@ const createRecruiterSchema = z.object({
   phone: z.string().trim().max(30).optional(),
   avatarUrl: z.string().url().max(1000).optional(),
   recruiterType: z.enum(['INTERNAL', 'FREELANCER']).default('INTERNAL'),
+  role: z.enum(['RECRUITER', 'FREELANCE_RECRUITER']).default('RECRUITER'),
 });
+
+const updateRecruiterSchema = z.object({
+  fullName: z.string().trim().min(2).max(120).optional(),
+  name: z.string().trim().min(2).max(120).optional(),
+  phone: z.string().trim().max(30).nullable().optional(),
+  avatarUrl: z.union([z.string().url().max(1000), z.literal('')]).nullable().optional(),
+  recruiterType: z.enum(['INTERNAL', 'FREELANCER']).optional(),
+  teamLeaderId: z.string().nullable().optional().or(z.literal('')),
+  isActive: z.boolean().optional(),
+});
+
 
 const generateRecruiterId = async (): Promise<string> => {
   const recruiters = await prisma.user.findMany({
@@ -61,23 +73,29 @@ export const createRecruiter = async (
 
     const recruiterId = await generateRecruiterId();
 
-    // Generate a temporary password for first login. Only its bcrypt hash is stored.
-    const temporaryPassword = crypto.randomBytes(9).toString('base64url').slice(0, 12);
-    const temporaryPasswordHash = await bcrypt.hash(temporaryPassword, 12);
+    // Generate secure one-time password setup token (valid for 24h)
+    const rawSetupToken = crypto.randomBytes(32).toString('hex');
+    const tokenHash = crypto.createHash('sha256').update(rawSetupToken).digest('hex');
+    const tokenExpiry = new Date(Date.now() + config.recruiter.passwordSetupExpiryHours * 60 * 60 * 1000);
+
+    // Initial password hash is an unguessable placeholder
+    const placeholderPasswordHash = await bcrypt.hash(crypto.randomBytes(32).toString('hex'), 12);
 
     // Create the recruiter and their default permissions atomically.
     const recruiter = await prisma.$transaction(async (tx) => {
       const createdRecruiter = await tx.user.create({
         data: {
           email,
-          passwordHash: temporaryPasswordHash,
+          passwordHash: placeholderPasswordHash,
           fullName: data.fullName.trim(),
-          role: 'RECRUITER',
+          role: data.role || (data.recruiterType === 'FREELANCER' ? 'FREELANCE_RECRUITER' : 'RECRUITER'),
           phone: data.phone?.trim() || undefined,
           avatarUrl: data.avatarUrl,
           recruiterId,
           recruiterType: data.recruiterType,
           mustSetPassword: true,
+          resetPasswordToken: tokenHash,
+          resetPasswordExpires: tokenExpiry,
         },
         select: {
           id: true,
@@ -125,11 +143,13 @@ export const createRecruiter = async (
       },
     });
 
+    const setupUrl = `${config.recruiter.passwordSetupUrl}?token=${rawSetupToken}&email=${encodeURIComponent(email)}`;
+
     dispatchEmail('RECRUITER_WELCOME', recruiter.email, {
       recruiter_id: recruiter.recruiterId || '',
       recruiter_name: recruiter.fullName,
       recruiter_email: recruiter.email,
-      temporary_password: temporaryPassword,
+      setup_url: setupUrl,
       login_url: config.recruiter.loginUrl,
     });
 
@@ -150,12 +170,13 @@ export const createRecruiter = async (
           createdAt: recruiter.createdAt,
         },
       },
-      'Recruiter created successfully and temporary password sent by email.'
+      'Recruiter created successfully and invitation email sent with secure password setup link.'
     );
   } catch (err) {
     next(err);
   }
 };
+
 
 
 export const updateRecruiterStatus = async (
@@ -412,7 +433,7 @@ export const getMyRecruiterProfile = async (
     const recruiter = await prisma.user.findFirst({
       where: {
         id: userId,
-        role: 'RECRUITER',
+        role: { in: ['RECRUITER', 'FREELANCE_RECRUITER'] },
       },
       select: {
         id: true,
@@ -472,7 +493,7 @@ export const updateMyRecruiterProfile = async (
     const existingRecruiter = await prisma.user.findFirst({
       where: {
         id: userId,
-        role: 'RECRUITER',
+        role: { in: ['RECRUITER', 'FREELANCE_RECRUITER'] },
       },
       select: {
         id: true,
@@ -778,39 +799,11 @@ export const getRecruiters = async (
       },
     };
 
-    let recruiters;
-    try {
-      recruiters = await prisma.user.findMany({
-        where,
-        orderBy: { createdAt: 'asc' },
-        select: selectFields,
-      });
-    } catch (queryErr: any) {
-      if (
-        queryErr?.message?.includes('FREELANCE_RECRUITER') ||
-        queryErr?.message?.includes('22P02')
-      ) {
-        console.warn(
-          '[RECRUITER] PostgreSQL Role enum missing FREELANCE_RECRUITER. Triggering auto-heal...'
-        );
-        try {
-          await prisma.$executeRawUnsafe(
-            `ALTER TYPE "Role" ADD VALUE IF NOT EXISTS 'FREELANCE_RECRUITER';`
-          );
-        } catch (healErr) {
-          console.warn('[RECRUITER] Auto-heal warning:', healErr);
-        }
-
-        // Retry with RECRUITER only if FREELANCE_RECRUITER is not immediately available
-        recruiters = await prisma.user.findMany({
-          where: { ...where, role: 'RECRUITER' },
-          orderBy: { createdAt: 'asc' },
-          select: selectFields,
-        });
-      } else {
-        throw queryErr;
-      }
-    }
+    const recruiters = await prisma.user.findMany({
+      where,
+      orderBy: { createdAt: 'asc' },
+      select: selectFields,
+    });
 
     const recruiterRecords = await Promise.all(recruiters.map(async (recruiter) => {
       const [
@@ -873,3 +866,311 @@ export const getRecruiters = async (
     next(err);
   }
 };
+
+/**
+ * GET Recruiter by ID: GET /api/recruiters/:id
+ */
+export const getRecruiterById = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const recruiterId = req.params.id;
+    if (!recruiterId) {
+      sendError(res, 'Recruiter ID is required', 400);
+      return;
+    }
+
+    const recruiter = await prisma.user.findFirst({
+      where: {
+        id: recruiterId,
+        role: { in: ['RECRUITER', 'FREELANCE_RECRUITER'] },
+      },
+      select: {
+        id: true,
+        recruiterId: true,
+        email: true,
+        fullName: true,
+        phone: true,
+        avatarUrl: true,
+        role: true,
+        recruiterType: true,
+        isActive: true,
+        mustSetPassword: true,
+        mfaEnabled: true,
+        lastLoginAt: true,
+        createdAt: true,
+        teamLeaderId: true,
+        teamLeader: {
+          select: {
+            id: true,
+            fullName: true,
+            email: true,
+          },
+        },
+        recruiterPermissions: true,
+        assignedJobs: {
+          select: {
+            id: true,
+            jobCode: true,
+            title: true,
+            department: true,
+            status: true,
+            location: true,
+          },
+        },
+      },
+    });
+
+    if (!recruiter) {
+      sendError(res, 'Recruiter not found', 404);
+      return;
+    }
+
+    const metrics = await getRecruiterMetricSnapshot(recruiter.id);
+
+    sendSuccess(res, {
+      recruiter: {
+        ...recruiter,
+        name: recruiter.fullName,
+        avatar: recruiter.avatarUrl,
+        metrics,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * UPDATE Recruiter: PUT /api/recruiters/:id or PATCH /api/recruiters/:id
+ */
+export const updateRecruiter = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const recruiterId = req.params.id;
+    if (!recruiterId) {
+      sendError(res, 'Recruiter ID is required', 400);
+      return;
+    }
+
+    const data = updateRecruiterSchema.parse(req.body);
+
+    const recruiter = await prisma.user.findFirst({
+      where: {
+        id: recruiterId,
+        role: { in: ['RECRUITER', 'FREELANCE_RECRUITER'] },
+      },
+    });
+
+    if (!recruiter) {
+      sendError(res, 'Recruiter not found', 404);
+      return;
+    }
+
+    const nextFullName = (data.fullName || data.name)?.trim() || recruiter.fullName;
+    const nextPhone =
+      data.phone !== undefined ? (data.phone ? data.phone.trim() : null) : recruiter.phone;
+    const nextAvatarUrl =
+      data.avatarUrl !== undefined ? (data.avatarUrl ? data.avatarUrl : null) : recruiter.avatarUrl;
+    const nextRecruiterType = data.recruiterType || recruiter.recruiterType;
+    const nextIsActive = data.isActive !== undefined ? data.isActive : recruiter.isActive;
+    const nextTeamLeaderId =
+      data.teamLeaderId !== undefined
+        ? data.teamLeaderId
+          ? data.teamLeaderId
+          : null
+        : recruiter.teamLeaderId;
+
+    const updated = await prisma.user.update({
+      where: { id: recruiter.id },
+      data: {
+        fullName: nextFullName,
+        phone: nextPhone,
+        avatarUrl: nextAvatarUrl,
+        recruiterType: nextRecruiterType,
+        isActive: nextIsActive,
+        teamLeaderId: nextTeamLeaderId,
+      },
+      select: {
+        id: true,
+        recruiterId: true,
+        email: true,
+        fullName: true,
+        phone: true,
+        avatarUrl: true,
+        role: true,
+        recruiterType: true,
+        isActive: true,
+        teamLeaderId: true,
+        updatedAt: true,
+      },
+    });
+
+    await logAudit({
+      req,
+      action: 'UPDATE_RECRUITER',
+      module: 'RECRUITERS',
+      entity: 'User',
+      entityId: recruiter.id,
+      oldValue: {
+        fullName: recruiter.fullName,
+        phone: recruiter.phone,
+        recruiterType: recruiter.recruiterType,
+        isActive: recruiter.isActive,
+      },
+      newValue: {
+        fullName: updated.fullName,
+        phone: updated.phone,
+        recruiterType: updated.recruiterType,
+        isActive: updated.isActive,
+      },
+    });
+
+    sendSuccess(res, { recruiter: updated }, 'Recruiter updated successfully.');
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * DELETE Recruiter: DELETE /api/recruiters/:id
+ * Safeguarded deletion:
+ * 1. Checks active mandates and non-terminal applications. If present, returns RECRUITER_HAS_ACTIVE_ASSIGNMENTS.
+ * 2. If historical records exist, deactivates instead of deleting to preserve database integrity.
+ * 3. If completely fresh with zero records, permanently deletes.
+ */
+export const deleteRecruiter = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const recruiterId = req.params.id;
+    if (!recruiterId) {
+      sendError(res, 'Recruiter ID is required', 400);
+      return;
+    }
+
+    const recruiter = await prisma.user.findFirst({
+      where: {
+        id: recruiterId,
+        role: { in: ['RECRUITER', 'FREELANCE_RECRUITER'] },
+      },
+      select: {
+        id: true,
+        fullName: true,
+        email: true,
+        recruiterId: true,
+        isActive: true,
+      },
+    });
+
+    if (!recruiter) {
+      sendError(res, 'Recruiter not found', 404);
+      return;
+    }
+
+    // 1. Check active job assignments
+    const activeJobsCount = await prisma.job.count({
+      where: {
+        assignedRecruiters: { some: { id: recruiter.id } },
+        status: 'PUBLISHED',
+      },
+    });
+
+    // 2. Check active candidate applications (non-terminal)
+    const activeAppsCount = await prisma.application.count({
+      where: {
+        recruiterId: recruiter.id,
+        stage: { notIn: ['REJECTED', 'JOINED'] },
+      },
+    });
+
+    if (activeJobsCount > 0 || activeAppsCount > 0) {
+      sendError(
+        res,
+        `Cannot delete recruiter with active mandates (${activeJobsCount}) or in-progress candidate applications (${activeAppsCount}). Reassign them before deleting.`,
+        409,
+        'RECRUITER_HAS_ACTIVE_ASSIGNMENTS'
+      );
+      return;
+    }
+
+    // 3. Check historical records
+    const [historicalCandidates, historicalApps, historicalTimelines] = await Promise.all([
+      prisma.candidate.count({
+        where: {
+          OR: [
+            { sourcingRecruiterId: recruiter.id },
+            { ownerRecruiterId: recruiter.id },
+            { createdById: recruiter.id },
+          ],
+        },
+      }),
+      prisma.application.count({ where: { recruiterId: recruiter.id } }),
+      prisma.candidateTimeline.count({ where: { userId: recruiter.id } }),
+    ]);
+
+    const totalHistorical = historicalCandidates + historicalApps + historicalTimelines;
+
+    if (totalHistorical > 0) {
+      // Historical references exist: soft-delete to preserve data integrity and audit trail
+      await prisma.user.update({
+        where: { id: recruiter.id },
+        data: { isActive: false },
+      });
+
+      await logAudit({
+        req,
+        action: 'DEACTIVATE_RECRUITER',
+        module: 'RECRUITERS',
+        entity: 'User',
+        entityId: recruiter.id,
+        oldValue: { isActive: recruiter.isActive },
+        newValue: { isActive: false, reason: 'Archived due to historical records' },
+      });
+
+      sendSuccess(
+        res,
+        {
+          deleted: false,
+          deactivated: true,
+          message:
+            'Recruiter account was deactivated rather than permanently removed because historical hiring activities are attached to this account.',
+        },
+        'Recruiter deactivated successfully.'
+      );
+      return;
+    }
+
+    // 4. No historical records: safe permanent hard delete in transaction
+    await prisma.$transaction(async (tx) => {
+      await tx.recruiterPermission.deleteMany({ where: { recruiterId: recruiter.id } });
+      await tx.refreshToken.deleteMany({ where: { userId: recruiter.id } });
+      await tx.user.delete({ where: { id: recruiter.id } });
+    });
+
+    await logAudit({
+      req,
+      action: 'DELETE_RECRUITER',
+      module: 'RECRUITERS',
+      entity: 'User',
+      entityId: recruiter.id,
+      oldValue: {
+        recruiterId: recruiter.recruiterId,
+        email: recruiter.email,
+        fullName: recruiter.fullName,
+      },
+    });
+
+    sendSuccess(res, { deleted: true }, 'Recruiter permanently deleted.');
+  } catch (err) {
+    next(err);
+  }
+};
+

@@ -90,6 +90,32 @@ export const ensureDatabaseSchema = async () => {
       ADD COLUMN IF NOT EXISTS "teamLeaderId" TEXT;
   `, 'Add candidate columns');
 
+  // Safely migrate candidates.status to TEXT if it is still CandidateStatus enum
+  await executeSafe(`
+    DO $$ BEGIN
+      IF EXISTS (
+        SELECT 1 FROM information_schema.columns 
+        WHERE table_name = 'candidates' 
+          AND column_name = 'status' 
+          AND udt_name = 'CandidateStatus'
+      ) THEN
+        ALTER TABLE "candidates" ALTER COLUMN "status" DROP DEFAULT;
+        ALTER TABLE "candidates" ALTER COLUMN "status" TYPE TEXT USING "status"::TEXT;
+        ALTER TABLE "candidates" ALTER COLUMN "status" SET DEFAULT 'New';
+
+        UPDATE "candidates" SET "status" = 'New' WHERE "status" = 'NEW';
+        UPDATE "candidates" SET "status" = 'Screening' WHERE "status" = 'SCREENING';
+        UPDATE "candidates" SET "status" = 'Shortlisted' WHERE "status" = 'SHORTLISTED';
+        UPDATE "candidates" SET "status" = 'Interview Scheduled' WHERE "status" = 'INTERVIEW';
+        UPDATE "candidates" SET "status" = 'Selected' WHERE "status" = 'SELECTED';
+        UPDATE "candidates" SET "status" = 'Rejected' WHERE "status" = 'REJECTED';
+        UPDATE "candidates" SET "status" = 'On Hold' WHERE "status" = 'ON_HOLD';
+        UPDATE "candidates" SET "status" = 'Joined' WHERE "status" = 'JOINED';
+        UPDATE "candidates" SET "status" = 'Not Interested' WHERE "status" = 'DROPPED';
+      END IF;
+    END $$;
+  `, 'Migrate candidates.status to TEXT and normalize legacy values');
+
   // 5. Application table columns
   await executeSafe(`
     ALTER TABLE "applications" 
@@ -124,7 +150,34 @@ export const ensureDatabaseSchema = async () => {
   await executeSafe(`CREATE INDEX IF NOT EXISTS "candidate_timelines_applicationId_createdAt_idx" ON "candidate_timelines"("applicationId", "createdAt");`, 'Index timelines applicationId');
   await executeSafe(`CREATE INDEX IF NOT EXISTS "candidate_timelines_userId_createdAt_idx" ON "candidate_timelines"("userId", "createdAt");`, 'Index timelines userId');
 
+  // 7. Recruiter applications table
+  await executeSafe(`
+    CREATE TABLE IF NOT EXISTS "recruiter_applications" (
+      "id" TEXT NOT NULL,
+      "fullName" TEXT NOT NULL,
+      "email" TEXT NOT NULL,
+      "phone" TEXT NOT NULL,
+      "location" TEXT NOT NULL,
+      "experienceYears" DECIMAL(4, 1) NOT NULL DEFAULT 0,
+      "primaryDomain" TEXT,
+      "currentCompany" TEXT,
+      "linkedinUrl" TEXT,
+      "message" TEXT,
+      "resumeUrl" TEXT,
+      "resumeFileName" TEXT,
+      "status" "RecruiterApplicationStatus" NOT NULL DEFAULT 'NEW',
+      "adminNotes" TEXT,
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "recruiter_applications_pkey" PRIMARY KEY ("id")
+    );
+  `, 'Create recruiter_applications table');
+  await executeSafe(`CREATE INDEX IF NOT EXISTS "recruiter_applications_email_idx" ON "recruiter_applications"("email");`, 'Index recruiter_applications.email');
+  await executeSafe(`CREATE INDEX IF NOT EXISTS "recruiter_applications_status_idx" ON "recruiter_applications"("status");`, 'Index recruiter_applications.status');
+  await executeSafe(`CREATE INDEX IF NOT EXISTS "recruiter_applications_createdAt_idx" ON "recruiter_applications"("createdAt");`, 'Index recruiter_applications.createdAt');
+
   console.log('[SCHEMA] Verified and ensured all PostgreSQL enums, tables, and columns exist.');
+
 };
 
 // If run directly via CLI

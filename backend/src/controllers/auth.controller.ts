@@ -193,7 +193,7 @@ export const login = async (req: Request, res: Response, next: NextFunction): Pr
           mfaSetupToken,
           requiresMfaSetup: true,
           requiresMfa: true,
-          requiresPasswordChange: user.role === 'RECRUITER' && user.mustSetPassword,
+          requiresPasswordChange: (user.role === 'RECRUITER' || user.role === 'FREELANCE_RECRUITER') && user.mustSetPassword,
           user: userData,
         },
       });
@@ -210,7 +210,7 @@ export const login = async (req: Request, res: Response, next: NextFunction): Pr
         mfaChallengeToken,
         requiresMfaSetup: false,
         requiresMfa: true,
-        requiresPasswordChange: user.role === 'RECRUITER' && user.mustSetPassword,
+        requiresPasswordChange: (user.role === 'RECRUITER' || user.role === 'FREELANCE_RECRUITER') && user.mustSetPassword,
         user: userData,
       },
     });
@@ -250,13 +250,14 @@ export const setPassword = async (
       return;
     }
 
-    if (user.role !== 'RECRUITER') {
+    if (user.role !== 'RECRUITER' && user.role !== 'FREELANCE_RECRUITER') {
       res.status(400).json({
         success: false,
         message: 'Password setup is only available for recruiter accounts',
       });
       return;
     }
+
 
     if (!user.mustSetPassword) {
       res.status(400).json({

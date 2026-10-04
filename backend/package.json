@@ -14,6 +14,7 @@
     "prisma:studio": "prisma studio",
     "lint": "tsc --noEmit",
     "db:bootstrap": "tsx src/scripts/bootstrap-db.ts",
+    "test": "tsx src/scripts/test-recruitment-os.ts && tsx src/scripts/test-backend-suite.ts",
     "test:recruitment-os": "tsx src/scripts/test-recruitment-os.ts",
     "migrate:dynamodb": "tsx src/scripts/migrate-dynamodb.ts"
   },

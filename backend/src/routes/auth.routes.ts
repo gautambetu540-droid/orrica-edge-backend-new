@@ -9,6 +9,12 @@ import {
   changeMyPassword,
 } from '../controllers/auth.controller';
 import {
+  getMyProfile,
+  updateMyProfile,
+  changePassword,
+  logout,
+} from '../controllers/user.controller';
+import {
   setupMfa,
   verifyMfaSetup,
   verifyMfaChallenge,
@@ -40,8 +46,11 @@ router.post('/login', login);
 // one-time token sent in the recruiter welcome email.
 router.post('/set-password', setPassword);
 
+// Password change endpoints (supporting both PUT /me/password and POST /change-password)
 router.put('/me/password', authenticateJwt, changeMyPassword);
+router.post('/change-password', authenticateJwt, changePassword);
 
+// MFA endpoints
 router.get('/mfa/status', authenticateJwt, getMfaStatus);
 router.post('/mfa/setup', authenticateJwt, setupMfa);
 router.post('/mfa/verify-setup', authenticateJwt, mfaVerificationLimiter, verifyMfaSetup);
@@ -49,6 +58,11 @@ router.post('/mfa/verify', authenticateJwt, mfaVerificationLimiter, verifyMfaCha
 
 // Authenticated user endpoints
 router.get('/me', authenticateJwt, getMe);
+router.get('/profile', authenticateJwt, getMyProfile);
+router.patch('/profile', authenticateJwt, updateMyProfile);
+router.put('/profile', authenticateJwt, updateMyProfile);
+router.post('/logout', authenticateJwt, logout);
 router.post('/keepalive', authenticateJwt, keepAlive);
 
 export default router;
+

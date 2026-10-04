@@ -555,27 +555,12 @@ export const getTeamMembers = async (
       },
     };
 
-    let recruiters;
-    try {
-      recruiters = await prisma.user.findMany({
-        where,
-        select,
-        orderBy: { fullName: 'asc' },
-      });
-    } catch (queryErr: any) {
-      if (queryErr?.message?.includes('FREELANCE_RECRUITER') || queryErr?.message?.includes('22P02')) {
-        try {
-          await prisma.$executeRawUnsafe(`ALTER TYPE "Role" ADD VALUE IF NOT EXISTS 'FREELANCE_RECRUITER';`);
-        } catch (_) {}
-        recruiters = await prisma.user.findMany({
-          where: { ...where, role: 'RECRUITER' },
-          select,
-          orderBy: { fullName: 'asc' },
-        });
-      } else {
-        throw queryErr;
-      }
-    }
+    const recruiters = await prisma.user.findMany({
+      where,
+      select,
+      orderBy: { fullName: 'asc' },
+    });
+
 
     sendSuccess(res, { teamMembers: recruiters });
   } catch (err) {

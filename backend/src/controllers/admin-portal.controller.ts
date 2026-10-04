@@ -52,8 +52,9 @@ export const getAdminPortalData = async (req: Request, res: Response, next: Next
         },
       }),
       prisma.job.findMany({ include: { client: true, createdBy: { select: { id: true, fullName: true, email: true, role: true } } }, orderBy: { createdAt: 'desc' }, take: 1000 }),
-      (async () => {
-        const select = {
+      prisma.user.findMany({
+        where: { role: { in: ['RECRUITER', 'FREELANCE_RECRUITER', 'TEAM_LEADER', 'ADMIN', 'SUPER_ADMIN'] } },
+        select: {
           id: true,
           email: true,
           fullName: true,
@@ -65,28 +66,10 @@ export const getAdminPortalData = async (req: Request, res: Response, next: Next
           recruiterType: true,
           teamLeaderId: true,
           teamLeader: { select: { id: true, fullName: true, email: true } },
-        };
-        try {
-          return await prisma.user.findMany({
-            where: { role: { in: ['RECRUITER', 'FREELANCE_RECRUITER', 'TEAM_LEADER', 'ADMIN', 'SUPER_ADMIN'] } },
-            select,
-            orderBy: { createdAt: 'desc' },
-          });
-        } catch (err: any) {
-          if (err?.message?.includes('FREELANCE_RECRUITER') || err?.message?.includes('22P02')) {
-            try {
-              await prisma.$executeRawUnsafe(`ALTER TYPE "Role" ADD VALUE IF NOT EXISTS 'FREELANCE_RECRUITER';`);
-              await prisma.$executeRawUnsafe(`ALTER TYPE "Role" ADD VALUE IF NOT EXISTS 'TEAM_LEADER';`);
-            } catch (_) {}
-            return await prisma.user.findMany({
-              where: { role: { in: ['RECRUITER', 'ADMIN', 'SUPER_ADMIN'] } },
-              select,
-              orderBy: { createdAt: 'desc' },
-            });
-          }
-          throw err;
-        }
-      })(),
+        },
+        orderBy: { createdAt: 'desc' },
+      }),
+
       prisma.interview.findMany({ orderBy: { scheduledAt: 'desc' }, take: 500 }),
       prisma.assessment.findMany({ orderBy: { createdAt: 'desc' } }),
       prisma.assessmentAttempt.findMany({ orderBy: { submittedAt: 'desc' }, take: 500 }),

@@ -40,9 +40,10 @@ export const getDashboardStats = async (req: Request, res: Response, next: NextF
       noticeRows,
     ] = await Promise.all([
       prisma.candidate.count(),
-      prisma.candidate.count({ where: { status: { in: ['NEW', 'SCREENING', 'SHORTLISTED', 'INTERVIEW', 'SELECTED', 'ON_HOLD'] } } }),
-      prisma.candidate.count({ where: { status: 'NEW' } }),
-      prisma.candidate.count({ where: { status: 'REJECTED' } }),
+      prisma.candidate.count({ where: { status: { notIn: ['REJECTED', 'DROPPED', 'Rejected', 'Not Interested', 'Not Eligible', 'Withdrawn'] } } }),
+      prisma.candidate.count({ where: { status: { in: ['NEW', 'New'] } } }),
+      prisma.candidate.count({ where: { status: { in: ['REJECTED', 'Rejected'] } } }),
+
       prisma.job.count({ where: { status: 'PUBLISHED' } }),
       prisma.job.count({ where: { status: { in: ['CLOSED', 'ARCHIVED'] } } }),
       prisma.application.count({ where: appliedFilter }),
@@ -138,8 +139,8 @@ export const getAdminDashboard = async (req: Request, res: Response, next: NextF
       noticeRows,
     ] = await Promise.all([
       prisma.candidate.count(),
-      prisma.candidate.count({ where: { status: { notIn: ['REJECTED', 'DROPPED'] } } }),
-      prisma.candidate.count({ where: { status: 'NEW' } }),
+      prisma.candidate.count({ where: { status: { notIn: ['REJECTED', 'DROPPED', 'Rejected', 'Not Interested', 'Not Eligible', 'Withdrawn'] } } }),
+      prisma.candidate.count({ where: { status: { in: ['NEW', 'New'] } } }),
       prisma.job.count({ where: { status: 'PUBLISHED' } }),
       prisma.job.count({ where: { status: { in: ['CLOSED', 'ARCHIVED'] } } }),
       prisma.application.count(),
@@ -149,31 +150,9 @@ export const getAdminDashboard = async (req: Request, res: Response, next: NextF
       prisma.application.count({ where: { stage: 'SELECTED' } }),
       prisma.application.count({ where: { stage: 'JOINED' } }),
       prisma.application.count({ where: { stage: 'REJECTED' } }),
-      (async () => {
-        try {
-          return await prisma.user.count({ where: { role: { in: ['RECRUITER', 'FREELANCE_RECRUITER'] }, isActive: true } });
-        } catch (err: any) {
-          if (err?.message?.includes('FREELANCE_RECRUITER') || err?.message?.includes('22P02')) {
-            try {
-              await prisma.$executeRawUnsafe(`ALTER TYPE "Role" ADD VALUE IF NOT EXISTS 'FREELANCE_RECRUITER';`);
-            } catch (_) {}
-            return await prisma.user.count({ where: { role: 'RECRUITER', isActive: true } });
-          }
-          return 0;
-        }
-      })(),
-      (async () => {
-        try {
-          return await prisma.user.count({ where: { role: 'TEAM_LEADER', isActive: true } });
-        } catch (err: any) {
-          if (err?.message?.includes('TEAM_LEADER') || err?.message?.includes('22P02')) {
-            try {
-              await prisma.$executeRawUnsafe(`ALTER TYPE "Role" ADD VALUE IF NOT EXISTS 'TEAM_LEADER';`);
-            } catch (_) {}
-          }
-          return 0;
-        }
-      })(),
+      prisma.user.count({ where: { role: { in: ['RECRUITER', 'FREELANCE_RECRUITER'] }, isActive: true } }),
+      prisma.user.count({ where: { role: 'TEAM_LEADER', isActive: true } }),
+
       prisma.interview.count({ where: { scheduledAt: { gte: todayStart, lte: todayEnd } } }),
       prisma.interview.count(),
       prisma.application.findMany({
@@ -208,24 +187,32 @@ export const getAdminDashboard = async (req: Request, res: Response, next: NextF
     sendSuccess(res, {
       metrics: {
         totalCandidates,
+        candidateTalentPool: totalCandidates,
         activeCandidates,
         newCandidates,
         activeJobs,
+        activeMandates: activeJobs,
         closedJobs,
         totalApplications,
         pendingTLReviews,
         shortlistedCount,
         interviewCount,
         selectedCount,
+        offersInPlay: selectedCount,
         joinedCount,
+        confirmedPlacements: joinedCount,
         rejectedCount,
         activeRecruiters,
+        recruitersCount: activeRecruiters,
         activeTeamLeaders,
+        teamLeadersCount: activeTeamLeaders,
         todayInterviewsCount,
+        interviewsToday: todayInterviewsCount,
         totalInterviews,
         interviewConversionRate: `${interviewConversion}%`,
         joiningConversionRate: `${joiningConversion}%`,
       },
+
       pipelineBreakdown: {
         totalApplications,
         pendingReview: pendingTLReviews,
@@ -277,35 +264,16 @@ export const getTLDashboard = async (req: Request, res: Response, next: NextFunc
       },
     };
 
-    let podRecruiters;
-    try {
-      podRecruiters = await prisma.user.findMany({
-        where: {
-          teamLeaderId: tlId,
-          role: { in: ['RECRUITER', 'FREELANCE_RECRUITER'] },
-          isActive: true,
-        },
-        select,
-        orderBy: { fullName: 'asc' },
-      });
-    } catch (err: any) {
-      if (err?.message?.includes('FREELANCE_RECRUITER') || err?.message?.includes('22P02')) {
-        try {
-          await prisma.$executeRawUnsafe(`ALTER TYPE "Role" ADD VALUE IF NOT EXISTS 'FREELANCE_RECRUITER';`);
-        } catch (_) {}
-        podRecruiters = await prisma.user.findMany({
-          where: {
-            teamLeaderId: tlId,
-            role: 'RECRUITER',
-            isActive: true,
-          },
-          select,
-          orderBy: { fullName: 'asc' },
-        });
-      } else {
-        throw err;
-      }
-    }
+    const podRecruiters = await prisma.user.findMany({
+      where: {
+        teamLeaderId: tlId,
+        role: { in: ['RECRUITER', 'FREELANCE_RECRUITER'] },
+        isActive: true,
+      },
+      select,
+      orderBy: { fullName: 'asc' },
+    });
+
 
     const recruiterIds = [tlId, ...podRecruiters.map((r) => r.id)];
 
