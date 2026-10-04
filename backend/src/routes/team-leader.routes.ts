@@ -15,10 +15,16 @@ const router = Router();
 router.use(authenticateJwt, requireRoles('TEAM_LEADER', 'ADMIN', 'SUPER_ADMIN'));
 
 router.get('/dashboard', getTLDashboard);
+router.get('/', getPendingApprovals);
+router.get('/pending', getPendingApprovals);
+router.get('/queue', getPendingApprovals);
 router.get('/pending-approvals', getPendingApprovals);
+router.get('/candidates', getPendingApprovals);
 router.post('/applications/:id/approve', approveApplication);
 router.post('/applications/:id/send-back', sendBackApplication);
 router.post('/applications/:id/reject', rejectApplication);
 router.get('/team-members', getTeamMembers);
+router.get('/members', getTeamMembers);
 
 export default router;
+

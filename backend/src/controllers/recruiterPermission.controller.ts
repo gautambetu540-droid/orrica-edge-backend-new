@@ -48,7 +48,7 @@ export const getRecruiterPermissions = async (
     const recruiter = await prisma.user.findFirst({
       where: {
         id: recruiterId,
-        role: 'RECRUITER',
+        role: { in: ['RECRUITER', 'FREELANCE_RECRUITER'] },
       },
       select: {
         id: true,
@@ -102,7 +102,7 @@ export const getMyRecruiterPermissions = async (
     const recruiter = await prisma.user.findFirst({
       where: {
         id: userId,
-        role: 'RECRUITER',
+        role: { in: ['RECRUITER', 'FREELANCE_RECRUITER'] },
       },
       select: {
         id: true,
@@ -152,7 +152,7 @@ export const updateRecruiterPermissions = async (
     const recruiter = await prisma.user.findFirst({
       where: {
         id: recruiterId,
-        role: 'RECRUITER',
+        role: { in: ['RECRUITER', 'FREELANCE_RECRUITER'] },
       },
       select: {
         id: true,

@@ -31,7 +31,7 @@ const updateRecruiterSchema = z.object({
 const generateRecruiterId = async (): Promise<string> => {
   const recruiters = await prisma.user.findMany({
     where: {
-      role: 'RECRUITER',
+      role: { in: ['RECRUITER', 'FREELANCE_RECRUITER'] },
       recruiterId: { not: null },
     },
     select: { recruiterId: true },
@@ -195,7 +195,7 @@ export const updateRecruiterStatus = async (
     const recruiter = await prisma.user.findFirst({
       where: {
         id: recruiterId,
-        role: 'RECRUITER',
+        role: { in: ['RECRUITER', 'FREELANCE_RECRUITER'] },
       },
       select: {
         id: true,
@@ -288,7 +288,7 @@ export const getRecruiterJobs = async (
 ): Promise<void> => {
   try {
     const recruiter = await prisma.user.findFirst({
-      where: { id: req.params.id, role: 'RECRUITER' },
+      where: { id: req.params.id, role: { in: ['RECRUITER', 'FREELANCE_RECRUITER'] } },
       select: {
         id: true,
         recruiterId: true,
@@ -332,11 +332,12 @@ export const updateRecruiterJobs = async (
     const data = updateRecruiterJobsSchema.parse(req.body);
 
     const recruiter = await prisma.user.findFirst({
-      where: { id: recruiterId, role: 'RECRUITER' },
+      where: { id: recruiterId, role: { in: ['RECRUITER', 'FREELANCE_RECRUITER'] } },
       select: {
         id: true,
         recruiterId: true,
         fullName: true,
+        isActive: true,
         assignedJobs: {
           select: { id: true },
         },
@@ -348,15 +349,26 @@ export const updateRecruiterJobs = async (
       return;
     }
 
+    if (!recruiter.isActive) {
+      sendError(res, 'Cannot assign jobs to an inactive recruiter.', 400);
+      return;
+    }
+
     const uniqueJobIds = [...new Set(data.jobIds)];
 
     const jobs = await prisma.job.findMany({
       where: { id: { in: uniqueJobIds } },
-      select: { id: true, jobCode: true, title: true },
+      select: { id: true, jobCode: true, title: true, status: true },
     });
 
     if (jobs.length !== uniqueJobIds.length) {
       sendError(res, 'One or more selected jobs were not found', 404);
+      return;
+    }
+
+    const inactiveJobs = jobs.filter((job) => job.status === 'ARCHIVED' || job.status === 'CLOSED');
+    if (inactiveJobs.length > 0) {
+      sendError(res, `Cannot assign inactive jobs: ${inactiveJobs.map((j) => j.title).join(', ')}`, 400);
       return;
     }
 
@@ -652,7 +664,7 @@ export const getRecruiterAnalytics = async (
   try {
     const recruiterId = req.params.id;
     const recruiter = await prisma.user.findFirst({
-      where: { id: recruiterId, role: 'RECRUITER' },
+      where: { id: recruiterId, role: { in: ['RECRUITER', 'FREELANCE_RECRUITER'] } },
       select: {
         id: true,
         recruiterId: true,
@@ -686,7 +698,7 @@ export const getRecruiterProductivity = async (
   try {
     const recruiterId = req.params.id;
     const recruiter = await prisma.user.findFirst({
-      where: { id: recruiterId, role: 'RECRUITER' },
+      where: { id: recruiterId, role: { in: ['RECRUITER', 'FREELANCE_RECRUITER'] } },
       select: { id: true, recruiterId: true, fullName: true, recruiterType: true },
     });
 

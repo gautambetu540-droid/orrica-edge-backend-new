@@ -206,12 +206,18 @@ export const getPendingApprovals = async (
     ]);
 
     sendSuccess(res, {
+      items: applications,
       applications,
+      total,
       pagination: {
         total,
         page: pageNum,
         limit: limitNum,
-        totalPages: Math.ceil(total / limitNum),
+        totalPages: Math.ceil(total / limitNum) || 1,
+      },
+      filters: {
+        jobId: jobId ? String(jobId) : null,
+        search: search ? String(search) : null,
       },
     });
   } catch (err) {
@@ -562,7 +568,12 @@ export const getTeamMembers = async (
     });
 
 
-    sendSuccess(res, { teamMembers: recruiters });
+    sendSuccess(res, {
+      teamMembers: recruiters,
+      members: recruiters,
+      count: recruiters.length,
+      total: recruiters.length,
+    });
   } catch (err) {
     next(err);
   }

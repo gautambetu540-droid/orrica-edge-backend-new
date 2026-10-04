@@ -229,7 +229,7 @@ export const createEmployeeUser = async (req: Request, res: Response, next: Next
 
     if (data.role === 'RECRUITER' || data.role === 'FREELANCE_RECRUITER') {
       const recruiters = await prisma.user.findMany({
-        where: { role: 'RECRUITER', recruiterId: { not: null } },
+        where: { role: { in: ['RECRUITER', 'FREELANCE_RECRUITER'] }, recruiterId: { not: null } },
         select: { recruiterId: true },
       });
       let highest = 0;

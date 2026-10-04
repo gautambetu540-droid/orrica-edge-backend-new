@@ -94,7 +94,7 @@ const resolveRecruiterRef = async (value: unknown) => {
 
   const recruiter = await prisma.user.findFirst({
     where: {
-      role: 'RECRUITER',
+      role: { in: ['RECRUITER', 'FREELANCE_RECRUITER'] },
       isActive: true,
       OR: [
         { recruiterId: ref },

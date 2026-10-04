@@ -183,6 +183,9 @@ export const getAdminDashboard = async (req: Request, res: Response, next: NextF
     const totalForRate = Math.max(totalApplications, 1);
     const interviewConversion = Math.round((interviewCount / totalForRate) * 100);
     const joiningConversion = Math.round((joinedCount / totalForRate) * 100);
+    const screeningRatio = Math.round(((totalApplications - pendingTLReviews) / totalForRate) * 100);
+    const interviewToOfferRatio = Math.round((selectedCount / Math.max(interviewCount, 1)) * 100);
+    const joiningRatio = Math.round((joinedCount / Math.max(selectedCount, 1)) * 100);
 
     sendSuccess(res, {
       metrics: {
@@ -211,6 +214,11 @@ export const getAdminDashboard = async (req: Request, res: Response, next: NextF
         totalInterviews,
         interviewConversionRate: `${interviewConversion}%`,
         joiningConversionRate: `${joiningConversion}%`,
+        screeningRatio: `${screeningRatio}%`,
+        screeningPercentage: `${screeningRatio}%`,
+        interviewToOfferRatio: `${interviewToOfferRatio}%`,
+        interviewOfferRate: `${interviewToOfferRatio}%`,
+        joiningRatio: `${joiningRatio}%`,
       },
 
       pipelineBreakdown: {

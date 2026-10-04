@@ -10,6 +10,8 @@ import {
   getCandidateActivities,
   recruiterSubmitCandidate,
   checkDuplicateCandidate,
+  getCandidateTimeline,
+  updateCandidateStatus,
 } from '../controllers/candidate.controller';
 import { uploadResume } from '../middlewares/upload.middleware';
 import {
@@ -89,6 +91,46 @@ router.put(
   requireRoles('SUPER_ADMIN', 'ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
   requireRecruiterPermission('candidates'),
   updateCandidate
+);
+
+router.patch(
+  '/:id',
+  authenticateJwt,
+  requireRoles('SUPER_ADMIN', 'ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
+  requireRecruiterPermission('candidates'),
+  updateCandidate
+);
+
+router.patch(
+  '/:id/status',
+  authenticateJwt,
+  requireRoles('SUPER_ADMIN', 'ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
+  requireRecruiterPermission('candidates'),
+  updateCandidateStatus
+);
+
+router.put(
+  '/:id/status',
+  authenticateJwt,
+  requireRoles('SUPER_ADMIN', 'ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
+  requireRecruiterPermission('candidates'),
+  updateCandidateStatus
+);
+
+router.get(
+  '/:id/timeline',
+  authenticateJwt,
+  requireRoles('SUPER_ADMIN', 'ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
+  requireRecruiterPermission('candidates'),
+  getCandidateTimeline
+);
+
+router.get(
+  '/:id/history',
+  authenticateJwt,
+  requireRoles('SUPER_ADMIN', 'ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
+  requireRecruiterPermission('candidates'),
+  getCandidateTimeline
 );
 
 router.delete(

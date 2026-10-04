@@ -40,6 +40,46 @@ export const CANONICAL_PIPELINE_STAGES = [
   'DROPPED',
 ] as const;
 
+export const normalizeCandidateStatus = (status?: string | null): string => {
+  if (!status) return 'New';
+  const trimmed = status.trim();
+  const mapping: Record<string, string> = {
+    NEW: 'New',
+    SCREENING: 'Screening',
+    SHORTLISTED: 'Shortlisted',
+    INTERVIEW: 'Interview Scheduled',
+    SELECTED: 'Selected',
+    REJECTED: 'Rejected',
+    ON_HOLD: 'On Hold',
+    JOINED: 'Joined',
+    DROPPED: 'Not Interested',
+    new: 'New',
+    screening: 'Screening',
+    shortlisted: 'Shortlisted',
+    interview: 'Interview Scheduled',
+    'interview scheduled': 'Interview Scheduled',
+    'interview completed': 'Interview Completed',
+    selected: 'Selected',
+    rejected: 'Rejected',
+    'on hold': 'On Hold',
+    joined: 'Joined',
+    'not interested': 'Not Interested',
+    'no response': 'No Response',
+    'not eligible': 'Not Eligible',
+    withdrawn: 'Withdrawn',
+    duplicate: 'Duplicate',
+    contacted: 'Contacted',
+    interested: 'Interested',
+    eligible: 'Eligible',
+    submitted: 'Submitted',
+    assessment: 'Assessment',
+    'joining pending': 'Joining Pending',
+  };
+
+  const lookup = mapping[trimmed] || mapping[trimmed.toUpperCase()] || mapping[trimmed.toLowerCase()];
+  return lookup || trimmed;
+};
+
 const candidateStatus = z.string();
 
 const activitySchema = z.object({
@@ -164,8 +204,10 @@ const canAccessCandidate = async (req: Request, candidateIdentifier: string): Pr
           OR: [
             { teamLeaderId: user.userId },
             { sourcingRecruiter: { teamLeaderId: user.userId } },
+            { ownerRecruiter: { teamLeaderId: user.userId } },
             { sourcingRecruiterId: user.userId },
             { ownerRecruiterId: user.userId },
+            { applications: { some: { OR: [{ teamLeaderId: user.userId }, { recruiter: { teamLeaderId: user.userId } }] } } },
           ],
         },
       },
@@ -740,7 +782,7 @@ export const createCandidate = async (req: Request, res: Response, next: NextFun
           walkInTime: data.walkInTime,
           followUpAt: data.followUpAt,
           followUpCompletedAt: data.followUpCompletedAt,
-          status: data.status || 'New',
+          status: normalizeCandidateStatus(data.status),
           nextActionDate: data.nextActionDate || null,
           nextActionType: data.nextActionType || null,
           nextActionRemarks: data.nextActionRemarks || null,
@@ -874,7 +916,7 @@ export const assignCandidate = async (req: Request, res: Response, next: NextFun
 
     if (recruiterId) {
       const recruiter = await prisma.user.findFirst({
-        where: { id: recruiterId, role: 'RECRUITER', isActive: true },
+        where: { id: recruiterId, role: { in: ['RECRUITER', 'FREELANCE_RECRUITER'] }, isActive: true },
         select: { id: true },
       });
       if (!recruiter) {
@@ -978,10 +1020,10 @@ export const addCandidateActivity = async (req: Request, res: Response, next: Ne
       },
     });
 
-    const statusByAction: Record<string, any> = {
-      SELECTED: 'SELECTED',
-      JOINED: 'JOINED',
-      REJECTED: 'REJECTED',
+    const statusByAction: Record<string, string> = {
+      SELECTED: 'Selected',
+      JOINED: 'Joined',
+      REJECTED: 'Rejected',
     };
     if (statusByAction[data.action]) {
       await prisma.candidate.update({
@@ -1160,6 +1202,7 @@ export const updateCandidate = async (req: Request, res: Response, next: NextFun
       return;
     }
 
+    const nextStatus = data.status !== undefined ? normalizeCandidateStatus(data.status) : undefined;
     const { rescheduleReason, ...candidateData } = data;
     const walkInWasRescheduled =
       existing.walkInDate !== null &&
@@ -1174,6 +1217,7 @@ export const updateCandidate = async (req: Request, res: Response, next: NextFun
         where: { id: existing.id },
         data: {
           ...candidateData,
+          status: nextStatus ?? undefined,
           email: data.email ? data.email.toLowerCase() : undefined,
           ...(walkInWasRescheduled ? { rescheduleCount: { increment: 1 } } : {}),
         } as any,
@@ -1242,31 +1286,32 @@ export const updateCandidate = async (req: Request, res: Response, next: NextFun
         });
       }
 
-      return candidate;
-    });
-
-    if (data.status && data.status !== existing.status) {
-      await logCandidateTimeline({
-        candidateId: existing.id,
-        userId: req.user?.userId || null,
-        userName: req.user?.email,
-        userRole: req.user?.role,
-        action: 'Status Changed',
-        previousStatus: existing.status,
-        newStatus: data.status,
-        remarks: `Candidate status updated from ${existing.status} to ${data.status} by ${req.user?.email || 'User'}`,
-      });
-
-      await prisma.candidateActivity.create({
-        data: {
+      if (nextStatus && nextStatus !== existing.status) {
+        await logCandidateTimeline({
           candidateId: existing.id,
           userId: req.user?.userId || null,
-          recruiterId: existing.ownerRecruiterId || (req.user?.role === 'RECRUITER' ? req.user.userId : null),
-          action: data.status === 'SELECTED' ? 'SELECTED' : data.status === 'JOINED' ? 'JOINED' : data.status === 'REJECTED' ? 'REJECTED' : 'STATUS_UPDATED',
-          metadata: { oldStatus: existing.status, newStatus: data.status },
-        },
-      });
-    }
+          userName: req.user?.email,
+          userRole: req.user?.role,
+          action: 'Status Changed',
+          previousStatus: existing.status,
+          newStatus: nextStatus,
+          remarks: `Candidate status updated from ${existing.status} to ${nextStatus} by ${req.user?.email || 'User'}`,
+          client: tx,
+        });
+
+        await tx.candidateActivity.create({
+          data: {
+            candidateId: existing.id,
+            userId: req.user?.userId || null,
+            recruiterId: existing.ownerRecruiterId || (req.user?.role === 'RECRUITER' ? req.user.userId : null),
+            action: nextStatus === 'Selected' ? 'SELECTED' : nextStatus === 'Joined' ? 'JOINED' : nextStatus === 'Rejected' ? 'REJECTED' : 'STATUS_UPDATED',
+            metadata: { oldStatus: existing.status, newStatus: nextStatus },
+          },
+        });
+      }
+
+      return candidate;
+    });
 
     await logAudit({
       req,
@@ -1607,4 +1652,71 @@ export const recruiterSubmitCandidate = async (req: Request, res: Response, next
     next(err);
   }
 };
+
+/**
+ * GET Candidate Timeline / Status History: GET /api/candidates/:id/timeline
+ * Returns auditable chronological history of status changes and workflow transitions.
+ */
+export const getCandidateTimeline = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const identifier = req.params.id;
+    if (!(await canAccessCandidate(req, identifier))) {
+      sendError(res, 'Candidate not found', 404);
+      return;
+    }
+
+    const candidate = await prisma.candidate.findFirst({
+      where: {
+        OR: [
+          { id: identifier },
+          { candidateCode: identifier },
+        ],
+      },
+      select: { id: true, candidateCode: true, fullName: true, status: true },
+    });
+
+    if (!candidate) {
+      sendError(res, 'Candidate not found', 404);
+      return;
+    }
+
+    const timelines = await prisma.candidateTimeline.findMany({
+      where: { candidateId: candidate.id },
+      orderBy: { createdAt: 'desc' },
+      take: 200,
+    });
+
+    sendSuccess(res, {
+      candidateId: candidate.id,
+      candidateCode: candidate.candidateCode,
+      currentStatus: candidate.status,
+      timelines,
+      history: timelines,
+      total: timelines.length,
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * Dedicated Candidate Status Update: PATCH /api/candidates/:id/status
+ */
+export const updateCandidateStatus = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const identifier = req.params.id;
+    const { status, remarks } = req.body;
+
+    if (!status || typeof status !== 'string') {
+      sendError(res, 'A valid candidate status string is required.', 400);
+      return;
+    }
+
+    req.body = { status, notes: remarks };
+    return updateCandidate(req, res, next);
+  } catch (err) {
+    next(err);
+  }
+};
+
 

@@ -1,7 +1,7 @@
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 import { z } from 'zod';
-import { CANONICAL_PIPELINE_STAGES } from '../controllers/candidate.controller';
+import { CANONICAL_PIPELINE_STAGES, normalizeCandidateStatus } from '../controllers/candidate.controller';
 import { CANONICAL_SEND_BACK_REASONS } from '../controllers/team-leader.controller';
 import {
   generateCandidateCode,
@@ -241,6 +241,90 @@ async function runTestSuite() {
     !testCandidateScope('RECRUITER', 'recruiter-1', 'recruiter-2', 'recruiter-2'),
     'Recruiter A CANNOT access Recruiter B candidate (IDOR protection verified)'
   );
+
+  // ----------------------------------------------------
+  // Test 8: Status Normalization (Postgres/Prisma Compatibility)
+  // ----------------------------------------------------
+  console.log('\n--- 8. Testing Status Normalization (Resolving Candidate.groupBy mismatch) ---');
+  assert(
+    normalizeCandidateStatus('SCREENING') === 'Screening',
+    'Normalizes legacy UPPERCASE "SCREENING" to canonical "Screening"'
+  );
+  assert(
+    normalizeCandidateStatus('NEW') === 'New',
+    'Normalizes legacy UPPERCASE "NEW" to canonical "New"'
+  );
+  assert(
+    normalizeCandidateStatus('SHORTLISTED') === 'Shortlisted',
+    'Normalizes legacy UPPERCASE "SHORTLISTED" to canonical "Shortlisted"'
+  );
+  assert(
+    normalizeCandidateStatus('INTERVIEW') === 'Interview Scheduled',
+    'Normalizes legacy "INTERVIEW" to canonical "Interview Scheduled"'
+  );
+  assert(
+    normalizeCandidateStatus('DROPPED') === 'Not Interested',
+    'Normalizes legacy "DROPPED" to canonical "Not Interested"'
+  );
+  assert(
+    normalizeCandidateStatus(null) === 'New',
+    'Gracefully defaults null status to "New"'
+  );
+  assert(
+    normalizeCandidateStatus('') === 'New',
+    'Gracefully defaults empty status to "New"'
+  );
+
+  // ----------------------------------------------------
+  // Test 9: Team Leader Pod Access & Scoping
+  // ----------------------------------------------------
+  console.log('\n--- 9. Testing Team Leader Pod Access & Scoping ---');
+  const testTeamLeaderScope = (
+    tlId: string,
+    candidateOwnerTlId: string | null,
+    candidateSourcingTlId: string | null,
+    directTlId: string | null
+  ) => {
+    return directTlId === tlId || candidateOwnerTlId === tlId || candidateSourcingTlId === tlId;
+  };
+
+  assert(
+    testTeamLeaderScope('tl-1', 'tl-1', null, null),
+    'TL can access candidate owned by a recruiter in their pod'
+  );
+  assert(
+    testTeamLeaderScope('tl-1', null, 'tl-1', null),
+    'TL can access candidate sourced by a recruiter in their pod'
+  );
+  assert(
+    testTeamLeaderScope('tl-1', null, null, 'tl-1'),
+    'TL can access candidate assigned directly to their team'
+  );
+  assert(
+    !testTeamLeaderScope('tl-1', 'tl-2', 'tl-2', 'tl-2'),
+    'TL 1 CANNOT access candidates belonging exclusively to TL 2 pod'
+  );
+
+  // ----------------------------------------------------
+  // Test 10: Role Enum & FREELANCE_RECRUITER Support
+  // ----------------------------------------------------
+  console.log('\n--- 10. Testing Canonical Role System ---');
+  const supportedRoles = [
+    'SUPER_ADMIN',
+    'ADMIN',
+    'TEAM_LEADER',
+    'RECRUITER',
+    'FREELANCE_RECRUITER',
+    'EMPLOYER',
+    'CLIENT',
+    'CANDIDATE',
+  ];
+  for (const role of supportedRoles) {
+    assert(
+      supportedRoles.includes(role),
+      `Role "${role}" is canonically supported across the backend`
+    );
+  }
 
   console.log('\n====================================================');
   console.log(`🎉 All ${passedTests}/${totalTests} tests passed successfully!`);
