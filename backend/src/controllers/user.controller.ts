@@ -5,14 +5,18 @@ import { prisma } from '../prisma/client';
 import { sendSuccess, sendError } from '../utils/response';
 import { logAudit } from '../services/audit.service';
 
-const updateProfileSchema = z.object({
-  fullName: z.string().trim().min(2).max(120).optional(),
-  name: z.string().trim().min(2).max(120).optional(),
-  phone: z.string().trim().max(30).nullable().optional(),
-  avatarUrl: z.union([z.string().url().max(1000), z.literal('')]).nullable().optional(),
-  avatar: z.union([z.string().url().max(1000), z.literal('')]).nullable().optional(),
-  preferences: z.record(z.any()).optional(),
-});
+const updateProfileSchema = z
+  .object({
+    fullName: z.string().trim().min(2).max(120).optional(),
+    name: z.string().trim().min(2).max(120).optional(),
+    phone: z.string().trim().max(30).nullable().optional(),
+    avatarUrl: z.union([z.string().url().max(1000), z.literal('')]).nullable().optional(),
+    avatar: z.union([z.string().url().max(1000), z.literal('')]).nullable().optional(),
+    preferences: z.record(z.any()).optional(),
+    email: z.string().email().optional(),
+  })
+  .passthrough();
+
 
 const changePasswordSchema = z
   .object({
@@ -31,14 +35,18 @@ const changePasswordSchema = z
     }
   );
 
-const updateSettingsSchema = z.object({
-  theme: z.enum(['light', 'dark', 'system']).optional(),
-  emailNotifications: z.boolean().optional(),
-  candidateAlerts: z.boolean().optional(),
-  jobAlerts: z.boolean().optional(),
-  interviewReminders: z.boolean().optional(),
-  preferences: z.record(z.any()).optional(),
-});
+const updateSettingsSchema = z
+  .object({
+    theme: z.enum(['light', 'dark', 'system']).optional(),
+    emailNotifications: z.boolean().optional(),
+    candidateAlerts: z.boolean().optional(),
+    jobAlerts: z.boolean().optional(),
+    interviewReminders: z.boolean().optional(),
+    preferences: z.record(z.any()).optional(),
+    settings: z.record(z.any()).optional(),
+  })
+  .passthrough();
+
 
 /**
  * 1. GET Current User / Profile: GET /api/user/profile or GET /api/profile or GET /api/auth/me
@@ -387,8 +395,11 @@ export const updateMySettings = async (
         ? (user.preferences as Record<string, any>)
         : {};
 
+    const incomingData = data.settings || data.preferences || data;
+
     const nextPreferences = {
       ...currentPreferences,
+      ...incomingData,
       ...(data.theme ? { theme: data.theme } : {}),
       ...(typeof data.emailNotifications === 'boolean'
         ? { emailNotifications: data.emailNotifications }
@@ -400,7 +411,6 @@ export const updateMySettings = async (
       ...(typeof data.interviewReminders === 'boolean'
         ? { interviewReminders: data.interviewReminders }
         : {}),
-      ...(data.preferences ? data.preferences : {}),
     };
 
     const updatedUser = await prisma.user.update({
@@ -417,10 +427,12 @@ export const updateMySettings = async (
       res,
       {
         settings: updatedUser.preferences,
+        preferences: updatedUser.preferences,
         mfaEnabled: updatedUser.mfaEnabled,
       },
       'Settings updated successfully.'
     );
+
   } catch (err) {
     next(err);
   }
