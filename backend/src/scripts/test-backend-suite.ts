@@ -8,6 +8,7 @@ import {
   generateApplicationCode,
   generateJobCode,
 } from '../utils/codeGenerators';
+import { DEFAULT_TEMPLATES, interpolateVariables } from '../services/templateEngine.service';
 
 async function runTestSuite() {
   console.log('====================================================');
@@ -125,6 +126,63 @@ async function runTestSuite() {
   assert(
     tokenHash !== rawSetupToken,
     'Raw setup token is never stored in plain text'
+  );
+
+  // Check temporary password generation & format
+  const tempPw = `Orrica@${crypto.randomBytes(4).toString('hex')}`;
+  assert(
+    tempPw.startsWith('Orrica@') && tempPw.length === 15,
+    'Temporary password generator creates structured compliant passwords'
+  );
+  const tempHash = await bcrypt.hash(tempPw, 12);
+  assert(
+    await bcrypt.compare(tempPw, tempHash),
+    'Temporary password hashes and verifies with bcrypt'
+  );
+
+  // Check RECRUITER_WELCOME template variables & body interpolation
+  const recruiterWelcomeTpl = DEFAULT_TEMPLATES.RECRUITER_WELCOME;
+  assert(
+    recruiterWelcomeTpl.variables.includes('temporary_password'),
+    'RECRUITER_WELCOME template registers temporary_password variable'
+  );
+  assert(
+    recruiterWelcomeTpl.htmlBody.includes('{{temporary_password}}'),
+    'RECRUITER_WELCOME htmlBody contains {{temporary_password}} placeholder'
+  );
+  assert(
+    recruiterWelcomeTpl.plainText.includes('{{temporary_password}}'),
+    'RECRUITER_WELCOME plainText contains {{temporary_password}} placeholder'
+  );
+
+  const renderedHtml = interpolateVariables(recruiterWelcomeTpl.htmlBody, {
+    recruiter_id: 'REC-0099',
+    recruiter_name: 'Anita Sharma',
+    recruiter_email: 'anita@example.com',
+    temporary_password: tempPw,
+    setup_url: 'https://orricaedge.com/set-password?token=abc',
+    login_url: 'https://orricaedge.com/login',
+  });
+  assert(
+    renderedHtml.includes(tempPw),
+    'Rendered welcome email HTML body contains the actual temporary password'
+  );
+  assert(
+    renderedHtml.includes('REC-0099') && renderedHtml.includes('anita@example.com'),
+    'Rendered welcome email HTML body contains recruiter ID and registered email'
+  );
+
+  const renderedText = interpolateVariables(recruiterWelcomeTpl.plainText, {
+    recruiter_id: 'REC-0099',
+    recruiter_name: 'Anita Sharma',
+    recruiter_email: 'anita@example.com',
+    temporary_password: tempPw,
+    setup_url: 'https://orricaedge.com/set-password?token=abc',
+    login_url: 'https://orricaedge.com/login',
+  });
+  assert(
+    renderedText.includes(tempPw),
+    'Rendered welcome email plain text body contains the actual temporary password'
   );
 
   // ----------------------------------------------------

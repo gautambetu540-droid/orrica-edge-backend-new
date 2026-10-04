@@ -353,19 +353,21 @@ export const approveRecruiterApplication = async (
 
     const recruiterId = await generateRecruiterId();
 
+    // Generate compliant temporary password and password setup token
+    const temporaryPassword = `Orrica@${crypto.randomBytes(4).toString('hex')}`;
+    const passwordHash = await bcrypt.hash(temporaryPassword, 12);
+
     // Generate secure one-time password setup token (valid for 48h)
     const rawSetupToken = crypto.randomBytes(32).toString('hex');
     const tokenHash = crypto.createHash('sha256').update(rawSetupToken).digest('hex');
     const tokenExpiry = new Date(Date.now() + 48 * 60 * 60 * 1000);
-
-    const initialPlaceholderHash = await bcrypt.hash(crypto.randomBytes(32).toString('hex'), 12);
 
     // Atomic transaction: create user + permissions + mark application approved
     const { createdRecruiter, updatedApplication } = await prisma.$transaction(async (tx) => {
       const user = await tx.user.create({
         data: {
           email,
-          passwordHash: initialPlaceholderHash,
+          passwordHash,
           fullName: application.fullName.trim(),
           role: 'FREELANCE_RECRUITER',
           phone: application.phone.trim(),
@@ -430,6 +432,7 @@ export const approveRecruiterApplication = async (
       recruiter_id: createdRecruiter.recruiterId || '',
       recruiter_name: createdRecruiter.fullName,
       recruiter_email: createdRecruiter.email,
+      temporary_password: temporaryPassword,
       setup_url: setupUrl,
       login_url: config.recruiter.loginUrl,
     });
@@ -439,8 +442,9 @@ export const approveRecruiterApplication = async (
       {
         application: updatedApplication,
         recruiter: createdRecruiter,
+        temporaryPassword,
       },
-      'Recruiter application approved successfully. Welcome email dispatched with secure setup link.'
+      'Recruiter application approved successfully. Welcome email dispatched with login credentials.'
     );
   } catch (err) {
     next(err);

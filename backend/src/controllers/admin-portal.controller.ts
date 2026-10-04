@@ -3,8 +3,10 @@ import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import { z } from 'zod';
 import { prisma } from '../prisma/client';
+import { config } from '../config';
 import { sendSuccess, sendError } from '../utils/response';
 import { logAudit } from '../services/audit.service';
+import { dispatchEmail } from '../services/email.service';
 
 export const getAdminPortalData = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
@@ -221,11 +223,14 @@ export const createEmployeeUser = async (req: Request, res: Response, next: Next
       return;
     }
 
-    const temporaryPassword = crypto.randomBytes(9).toString('base64url').slice(0, 12);
+    const temporaryPassword = `Orrica@${crypto.randomBytes(4).toString('hex')}`;
     const passwordHash = await bcrypt.hash(temporaryPassword, 12);
 
     let recruiterId: string | null = null;
     let recruiterType: 'INTERNAL' | 'FREELANCER' | null = null;
+    let rawSetupToken: string | null = null;
+    let tokenHash: string | null = null;
+    let tokenExpiry: Date | null = null;
 
     if (data.role === 'RECRUITER' || data.role === 'FREELANCE_RECRUITER') {
       const recruiters = await prisma.user.findMany({
@@ -241,6 +246,11 @@ export const createEmployeeUser = async (req: Request, res: Response, next: Next
       }
       recruiterId = `REC-${String(highest + 1).padStart(4, '0')}`;
       recruiterType = data.role === 'FREELANCE_RECRUITER' ? 'FREELANCER' : 'INTERNAL';
+
+      rawSetupToken = crypto.randomBytes(32).toString('hex');
+      tokenHash = crypto.createHash('sha256').update(rawSetupToken).digest('hex');
+      const expiryHours = config.recruiter.passwordSetupExpiryHours || 24;
+      tokenExpiry = new Date(Date.now() + expiryHours * 60 * 60 * 1000);
     }
 
     const user = await prisma.user.create({
@@ -254,6 +264,8 @@ export const createEmployeeUser = async (req: Request, res: Response, next: Next
         recruiterType: recruiterType || undefined,
         teamLeaderId: data.teamLeaderId || null,
         mustSetPassword: true,
+        resetPasswordToken: tokenHash,
+        resetPasswordExpires: tokenExpiry,
         isActive: true,
       },
       select: {
@@ -284,6 +296,16 @@ export const createEmployeeUser = async (req: Request, res: Response, next: Next
           settings: false,
         },
       });
+
+      const setupUrl = `${config.recruiter.passwordSetupUrl}?token=${rawSetupToken}&email=${encodeURIComponent(user.email)}`;
+      dispatchEmail('RECRUITER_WELCOME', user.email, {
+        recruiter_id: user.recruiterId || '',
+        recruiter_name: user.fullName,
+        recruiter_email: user.email,
+        temporary_password: temporaryPassword,
+        setup_url: setupUrl,
+        login_url: config.recruiter.loginUrl,
+      });
     }
 
     await logAudit({
@@ -295,7 +317,7 @@ export const createEmployeeUser = async (req: Request, res: Response, next: Next
       newValue: { fullName: user.fullName, email: user.email, role: user.role },
     });
 
-    sendSuccess(res, { employee: user, temporaryPassword }, 'Employee account created successfully', 201);
+    sendSuccess(res, { employee: user, temporaryPassword }, 'Employee account created successfully and credentials dispatched', 201);
   } catch (err) {
     next(err);
   }

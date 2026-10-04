@@ -64,12 +64,44 @@ export const DEFAULT_TEMPLATES: Record<string, DefaultTemplateDefinition> = {
 
   RECRUITER_WELCOME: {
     templateKey: 'RECRUITER_WELCOME',
-    name: 'Recruiter Account Welcome & Setup',
+    name: 'Recruiter Account Welcome & Credentials',
     category: 'Recruiter',
-    subject: 'Welcome to Orrica Edge — Set Up Your Recruiter Account {{recruiter_id}}',
-    htmlBody: '<h2 style="margin-top:0;color:#0f172a;">Welcome to Orrica Edge</h2><p>Dear <strong>{{recruiter_name}}</strong>,</p><p>Your recruiter account has been approved and created on the Orrica Edge Recruitment Platform.</p><div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:18px 20px;margin:20px 0;"><p style="margin:5px 0;"><strong>Recruiter ID:</strong> {{recruiter_id}}</p><p style="margin:5px 0;"><strong>Registered Email:</strong> {{recruiter_email}}</p></div><p>To activate your account and access open mandates, candidate submissions, and recruitment workflows, click the secure button below to set your password:</p><p style="margin:26px 0;"><a href="{{setup_url}}" style="background:#f97316;color:#ffffff;padding:12px 24px;text-decoration:none;border-radius:7px;font-weight:700;display:inline-block;">Set Your Password &amp; Activate Account</a></p><p style="font-size:13px;color:#64748b;">This secure setup link is personalized for you. If you have already set your password, you can sign in directly at <a href="{{login_url}}">{{login_url}}</a>.</p><p style="margin-bottom:0;">Regards,<br><strong>Orrica Edge Talent Solutions</strong></p>',
-    plainText: 'Welcome {{recruiter_name}}! Your Orrica Edge recruiter account ({{recruiter_id}}) has been created. Set your password here: {{setup_url}} or log in at {{login_url}}',
-    variables: ['recruiter_id', 'recruiter_name', 'recruiter_email', 'setup_url', 'login_url', 'temporary_password', 'support_email'],
+    subject: 'Welcome to Orrica Edge — Your Recruiter Account Credentials ({{recruiter_id}})',
+    htmlBody:
+      '<div style="max-width:600px;margin:0 auto;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Roboto,sans-serif;color:#1e293b;line-height:1.6;">' +
+      '<h2 style="margin-top:0;color:#0f172a;font-size:22px;border-bottom:2px solid #f97316;padding-bottom:10px;">Welcome to Orrica Edge</h2>' +
+      '<p>Dear <strong>{{recruiter_name}}</strong>,</p>' +
+      '<p>Your recruiter account has been approved and activated on the Orrica Edge Recruitment Platform.</p>' +
+      '<div style="background:#f8fafc;border:1px solid #cbd5e1;border-radius:10px;padding:20px;margin:24px 0;">' +
+      '<h3 style="margin-top:0;margin-bottom:14px;color:#0f172a;font-size:16px;">Your Login Credentials</h3>' +
+      '<table style="width:100%;border-collapse:collapse;">' +
+      '<tr><td style="padding:6px 0;color:#64748b;width:160px;font-size:14px;"><strong>Recruiter ID:</strong></td><td style="padding:6px 0;font-family:monospace;font-size:14px;color:#0f172a;font-weight:600;">{{recruiter_id}}</td></tr>' +
+      '<tr><td style="padding:6px 0;color:#64748b;font-size:14px;"><strong>Registered Email:</strong></td><td style="padding:6px 0;font-size:14px;color:#0f172a;font-weight:600;">{{recruiter_email}}</td></tr>' +
+      '<tr><td style="padding:6px 0;color:#64748b;font-size:14px;"><strong>Temporary Password:</strong></td><td style="padding:6px 0;"><code style="background:#fee2e2;color:#991b1b;border:1px solid #fecaca;padding:4px 10px;border-radius:6px;font-size:15px;font-weight:bold;letter-spacing:0.5px;display:inline-block;">{{temporary_password}}</code></td></tr>' +
+      '</table>' +
+      '</div>' +
+      '<p>You can sign in immediately with your temporary password, or click below to set your permanent password:</p>' +
+      '<p style="margin:28px 0;text-align:center;">' +
+      '<a href="{{setup_url}}" style="background:#f97316;color:#ffffff;padding:12px 28px;text-decoration:none;border-radius:8px;font-weight:700;display:inline-block;font-size:15px;">Set Permanent Password &amp; Sign In</a>' +
+      '</p>' +
+      '<p style="font-size:13px;color:#64748b;line-height:1.5;">' +
+      'Direct Login URL: <a href="{{login_url}}" style="color:#f97316;text-decoration:none;font-weight:600;">{{login_url}}</a><br>' +
+      'For security purposes, you will be prompted to update your password upon first login.' +
+      '</p>' +
+      '<hr style="border:none;border-top:1px solid #e2e8f0;margin:24px 0;">' +
+      '<p style="margin-bottom:0;color:#475569;font-size:14px;">Regards,<br><strong>Orrica Edge Talent Solutions Team</strong></p>' +
+      '</div>',
+    plainText:
+      'Welcome {{recruiter_name}}!\n\n' +
+      'Your recruiter account on the Orrica Edge platform has been activated.\n\n' +
+      'ACCOUNT CREDENTIALS:\n' +
+      '- Recruiter ID: {{recruiter_id}}\n' +
+      '- Email: {{recruiter_email}}\n' +
+      '- Temporary Password: {{temporary_password}}\n\n' +
+      'Set your permanent password here:\n{{setup_url}}\n\n' +
+      'Or sign in directly at:\n{{login_url}}\n\n' +
+      'Regards,\nOrrica Edge Talent Solutions',
+    variables: ['recruiter_id', 'recruiter_name', 'recruiter_email', 'temporary_password', 'setup_url', 'login_url', 'support_email'],
   },
 
 
@@ -196,6 +228,26 @@ export const compileEmailTemplate = async (
         plainText: `Notification regarding ${templateKey}`,
       };
     }
+  } else if (templateKey === 'RECRUITER_WELCOME' && template.htmlBody && !template.htmlBody.includes('temporary_password')) {
+    // Stale template without password field found in database: auto-heal to canonical template
+    const defaultTpl = DEFAULT_TEMPLATES.RECRUITER_WELCOME;
+    template = {
+      ...template,
+      htmlBody: defaultTpl.htmlBody,
+      plainText: defaultTpl.plainText,
+      variables: defaultTpl.variables,
+    };
+    cache.set(cacheKey, template, 300);
+    prisma.emailTemplate
+      .update({
+        where: { templateKey: 'RECRUITER_WELCOME' },
+        data: {
+          htmlBody: defaultTpl.htmlBody,
+          plainText: defaultTpl.plainText,
+          variables: defaultTpl.variables,
+        },
+      })
+      .catch((err) => console.warn('[TEMPLATE ENGINE] Auto-heal sync error:', err.message));
   }
 
   const interpolatedSubject = interpolateVariables(template.subject, enrichedVars);

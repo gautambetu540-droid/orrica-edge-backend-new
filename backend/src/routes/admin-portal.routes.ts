@@ -14,6 +14,9 @@ import {
 } from '../controllers/user.controller';
 import { authenticateJwt, requireRoles } from '../middlewares/auth.middleware';
 
+import { sendRecruiterWelcomeEmail } from '../controllers/recruiter.controller';
+import recruiterRoutes from './recruiter.routes';
+
 const router = Router();
 
 router.use(authenticateJwt, requireRoles('SUPER_ADMIN', 'ADMIN'));
@@ -36,6 +39,13 @@ router.get('/portal-data', getAdminPortalData);
 router.get('/audit-logs', getAuditLogs);
 router.get('/employees', getEmployeeUsers);
 router.post('/employees', createEmployeeUser);
+
+// Explicit welcome email endpoints for recruiters under admin portal
+router.post('/recruiters/:id/send-welcome', sendRecruiterWelcomeEmail);
+router.post('/recruiters/:id/resend-welcome', sendRecruiterWelcomeEmail);
+
+// Mount all recruiter management subroutes under /admin/recruiters
+router.use('/recruiters', recruiterRoutes);
 
 export default router;
 

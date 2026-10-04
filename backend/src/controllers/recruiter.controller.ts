@@ -15,6 +15,8 @@ const createRecruiterSchema = z.object({
   avatarUrl: z.string().url().max(1000).optional(),
   recruiterType: z.enum(['INTERNAL', 'FREELANCER']).default('INTERNAL'),
   role: z.enum(['RECRUITER', 'FREELANCE_RECRUITER']).default('RECRUITER'),
+  password: z.string().min(6).max(100).optional(),
+  temporaryPassword: z.string().min(6).max(100).optional(),
 });
 
 const updateRecruiterSchema = z.object({
@@ -73,20 +75,24 @@ export const createRecruiter = async (
 
     const recruiterId = await generateRecruiterId();
 
+    // Determine temporary password: use provided password or generate a clean strong default
+    const rawPassword =
+      (typeof data.password === 'string' && data.password.trim()) ||
+      (typeof data.temporaryPassword === 'string' && data.temporaryPassword.trim());
+    const temporaryPassword = rawPassword || `Orrica@${crypto.randomBytes(4).toString('hex')}`;
+    const passwordHash = await bcrypt.hash(temporaryPassword, 12);
+
     // Generate secure one-time password setup token (valid for 24h)
     const rawSetupToken = crypto.randomBytes(32).toString('hex');
     const tokenHash = crypto.createHash('sha256').update(rawSetupToken).digest('hex');
     const tokenExpiry = new Date(Date.now() + config.recruiter.passwordSetupExpiryHours * 60 * 60 * 1000);
-
-    // Initial password hash is an unguessable placeholder
-    const placeholderPasswordHash = await bcrypt.hash(crypto.randomBytes(32).toString('hex'), 12);
 
     // Create the recruiter and their default permissions atomically.
     const recruiter = await prisma.$transaction(async (tx) => {
       const createdRecruiter = await tx.user.create({
         data: {
           email,
-          passwordHash: placeholderPasswordHash,
+          passwordHash,
           fullName: data.fullName.trim(),
           role: data.role || (data.recruiterType === 'FREELANCER' ? 'FREELANCE_RECRUITER' : 'RECRUITER'),
           phone: data.phone?.trim() || undefined,
@@ -149,6 +155,7 @@ export const createRecruiter = async (
       recruiter_id: recruiter.recruiterId || '',
       recruiter_name: recruiter.fullName,
       recruiter_email: recruiter.email,
+      temporary_password: temporaryPassword,
       setup_url: setupUrl,
       login_url: config.recruiter.loginUrl,
     });
@@ -169,8 +176,9 @@ export const createRecruiter = async (
           recruiterType: recruiter.recruiterType,
           createdAt: recruiter.createdAt,
         },
+        temporaryPassword,
       },
-      'Recruiter created successfully and invitation email sent with secure password setup link.'
+      'Recruiter created successfully and welcome email dispatched with login credentials.'
     );
   } catch (err) {
     next(err);
@@ -1185,4 +1193,104 @@ export const deleteRecruiter = async (
     next(err);
   }
 };
+
+/**
+ * Send / Resend Recruiter Welcome Email: POST /api/admin/recruiters/:id/send-welcome or POST /api/recruiters/:id/send-welcome
+ * Generates a fresh secure setup token, sets mustSetPassword: true, and dispatches the welcome email.
+ */
+export const sendRecruiterWelcomeEmail = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const identifier = req.params.id;
+    if (!identifier) {
+      sendError(res, 'Recruiter ID is required.', 400);
+      return;
+    }
+
+    const recruiter = await prisma.user.findFirst({
+      where: {
+        OR: [
+          { id: identifier },
+          { recruiterId: identifier },
+        ],
+        role: { in: ['RECRUITER', 'FREELANCE_RECRUITER'] },
+      },
+    });
+
+    if (!recruiter) {
+      sendError(res, 'Recruiter not found.', 404);
+      return;
+    }
+
+    if (!recruiter.isActive) {
+      sendError(res, 'Cannot send welcome email to an inactive recruiter account.', 400);
+      return;
+    }
+
+    // Determine temporary password: use provided password or generate a clean strong default
+    const rawPassword =
+      (typeof req.body?.password === 'string' && req.body.password.trim()) ||
+      (typeof req.body?.temporaryPassword === 'string' && req.body.temporaryPassword.trim());
+    const temporaryPassword = rawPassword || `Orrica@${crypto.randomBytes(4).toString('hex')}`;
+    const passwordHash = await bcrypt.hash(temporaryPassword, 12);
+
+    // Generate secure one-time password setup token (valid for configured hours, default 24h)
+    const rawSetupToken = crypto.randomBytes(32).toString('hex');
+    const tokenHash = crypto.createHash('sha256').update(rawSetupToken).digest('hex');
+    const expiryHours = config.recruiter.passwordSetupExpiryHours || 24;
+    const tokenExpiry = new Date(Date.now() + expiryHours * 60 * 60 * 1000);
+
+    await prisma.user.update({
+      where: { id: recruiter.id },
+      data: {
+        passwordHash,
+        mustSetPassword: true,
+        resetPasswordToken: tokenHash,
+        resetPasswordExpires: tokenExpiry,
+      },
+    });
+
+    const setupUrl = `${config.recruiter.passwordSetupUrl}?token=${rawSetupToken}&email=${encodeURIComponent(recruiter.email)}`;
+
+    dispatchEmail('RECRUITER_WELCOME', recruiter.email, {
+      recruiter_id: recruiter.recruiterId || '',
+      recruiter_name: recruiter.fullName,
+      recruiter_email: recruiter.email,
+      temporary_password: temporaryPassword,
+      setup_url: setupUrl,
+      login_url: config.recruiter.loginUrl,
+    });
+
+    await logAudit({
+      req,
+      action: 'SEND_RECRUITER_WELCOME_EMAIL',
+      module: 'RECRUITERS',
+      entity: 'User',
+      entityId: recruiter.id,
+      newValue: {
+        recruiterId: recruiter.recruiterId,
+        email: recruiter.email,
+        expiryHours,
+      },
+    });
+
+    sendSuccess(
+      res,
+      {
+        id: recruiter.id,
+        recruiterId: recruiter.recruiterId,
+        email: recruiter.email,
+        temporaryPassword,
+        sent: true,
+      },
+      `Welcome email dispatched successfully to ${recruiter.email} with credentials.`
+    );
+  } catch (err) {
+    next(err);
+  }
+};
+
 

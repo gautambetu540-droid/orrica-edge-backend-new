@@ -12,6 +12,7 @@ import {
   updateRecruiterJobs,
   getRecruiterAnalytics,
   getRecruiterProductivity,
+  sendRecruiterWelcomeEmail,
 } from '../controllers/recruiter.controller';
 import {
   getMyRecruiterPermissions,
@@ -201,6 +202,20 @@ router.put(
   authenticateJwt,
   requireRoles('SUPER_ADMIN', 'ADMIN'),
   updateRecruiterPermissions
+);
+
+router.post(
+  '/:id/send-welcome',
+  authenticateJwt,
+  requireRoles('SUPER_ADMIN', 'ADMIN'),
+  sendRecruiterWelcomeEmail
+);
+
+router.post(
+  '/:id/resend-welcome',
+  authenticateJwt,
+  requireRoles('SUPER_ADMIN', 'ADMIN'),
+  sendRecruiterWelcomeEmail
 );
 
 export default router;
