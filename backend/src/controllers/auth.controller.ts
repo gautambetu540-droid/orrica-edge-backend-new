@@ -183,16 +183,20 @@ export const login = async (req: Request, res: Response, next: NextFunction): Pr
     };
 
     if (!user.mfaEnabled) {
-      const mfaSetupToken = buildMfaPendingToken(user, 'SETUP_REQUIRED');
+      const accessToken = jwt.sign(
+        { userId: user.id, email: user.email, role: user.role },
+        config.jwt.accessSecret,
+        { expiresIn: '1d' }
+      );
 
       res.json({
         success: true,
-        message: 'Password verified. MFA setup is required before accessing the account.',
+        message: 'Login successful.',
         data: {
-          token: mfaSetupToken,
-          mfaSetupToken,
-          requiresMfaSetup: true,
-          requiresMfa: true,
+          token: accessToken,
+          accessToken,
+          requiresMfaSetup: false,
+          requiresMfa: false,
           requiresPasswordChange: (user.role === 'RECRUITER' || user.role === 'FREELANCE_RECRUITER') && user.mustSetPassword,
           user: userData,
         },

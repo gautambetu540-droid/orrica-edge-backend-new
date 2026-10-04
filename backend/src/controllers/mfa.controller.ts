@@ -187,6 +187,7 @@ export const verifyMfaSetup = async (
       message: 'Multi-factor authentication enabled successfully.',
       data: {
         token: accessToken,
+        accessToken,
         user: {
           id: user.id,
           email: user.email,
@@ -294,6 +295,7 @@ export const verifyMfaChallenge = async (
       message: 'MFA verification successful.',
       data: {
         token: accessToken,
+        accessToken,
         user: {
           id: user.id,
           email: user.email,

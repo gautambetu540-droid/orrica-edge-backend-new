@@ -29,13 +29,33 @@ declare global {
 }
 
 export const authenticateJwt = (req: Request, res: Response, next: NextFunction): void => {
+  let token: string | undefined;
+
   const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+  if (authHeader) {
+    const match = authHeader.match(/^Bearer\s+(.+)$/i);
+    if (match) {
+      token = match[1].trim();
+    }
+  }
+
+  // Also check cookies if available
+  if (!token && (req as any).cookies) {
+    token =
+      (req as any).cookies.oe_auth_token ||
+      (req as any).cookies.token ||
+      (req as any).cookies.accessToken;
+  }
+
+  // Also check x-access-token header
+  if (!token && req.headers['x-access-token']) {
+    token = String(req.headers['x-access-token']).trim();
+  }
+
+  if (!token) {
     res.status(401).json({ success: false, message: 'Unauthorized: Missing or invalid token' });
     return;
   }
-
-  const token = authHeader.split(' ')[1];
 
   try {
     const decoded = jwt.verify(token, config.jwt.accessSecret) as AuthUserPayload;

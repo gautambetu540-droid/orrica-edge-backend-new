@@ -9,7 +9,10 @@ export const config = {
   databaseUrl: process.env.DATABASE_URL || '',
 
   mfa: {
-    encryptionKey: process.env.MFA_ENCRYPTION_KEY || '',
+    encryptionKey:
+      process.env.MFA_ENCRYPTION_KEY ||
+      process.env.JWT_ACCESS_SECRET ||
+      'orrica_edge_production_mfa_default_key_2026',
   },
 
   jwt: {
