@@ -52,9 +52,8 @@ export const getAdminPortalData = async (req: Request, res: Response, next: Next
         },
       }),
       prisma.job.findMany({ include: { client: true, createdBy: { select: { id: true, fullName: true, email: true, role: true } } }, orderBy: { createdAt: 'desc' }, take: 1000 }),
-      prisma.user.findMany({
-        where: { role: { in: ['RECRUITER', 'FREELANCE_RECRUITER', 'TEAM_LEADER', 'ADMIN', 'SUPER_ADMIN'] } },
-        select: {
+      (async () => {
+        const select = {
           id: true,
           email: true,
           fullName: true,
@@ -66,9 +65,28 @@ export const getAdminPortalData = async (req: Request, res: Response, next: Next
           recruiterType: true,
           teamLeaderId: true,
           teamLeader: { select: { id: true, fullName: true, email: true } },
-        },
-        orderBy: { createdAt: 'desc' },
-      }),
+        };
+        try {
+          return await prisma.user.findMany({
+            where: { role: { in: ['RECRUITER', 'FREELANCE_RECRUITER', 'TEAM_LEADER', 'ADMIN', 'SUPER_ADMIN'] } },
+            select,
+            orderBy: { createdAt: 'desc' },
+          });
+        } catch (err: any) {
+          if (err?.message?.includes('FREELANCE_RECRUITER') || err?.message?.includes('22P02')) {
+            try {
+              await prisma.$executeRawUnsafe(`ALTER TYPE "Role" ADD VALUE IF NOT EXISTS 'FREELANCE_RECRUITER';`);
+              await prisma.$executeRawUnsafe(`ALTER TYPE "Role" ADD VALUE IF NOT EXISTS 'TEAM_LEADER';`);
+            } catch (_) {}
+            return await prisma.user.findMany({
+              where: { role: { in: ['RECRUITER', 'ADMIN', 'SUPER_ADMIN'] } },
+              select,
+              orderBy: { createdAt: 'desc' },
+            });
+          }
+          throw err;
+        }
+      })(),
       prisma.interview.findMany({ orderBy: { scheduledAt: 'desc' }, take: 500 }),
       prisma.assessment.findMany({ orderBy: { createdAt: 'desc' } }),
       prisma.assessmentAttempt.findMany({ orderBy: { submittedAt: 'desc' }, take: 500 }),
@@ -302,25 +320,46 @@ export const createEmployeeUser = async (req: Request, res: Response, next: Next
 
 export const getEmployeeUsers = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const employees = await prisma.user.findMany({
-      where: {
-        role: { in: ['ADMIN', 'SUPER_ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'] },
-      },
-      select: {
-        id: true,
-        email: true,
-        fullName: true,
-        role: true,
-        phone: true,
-        isActive: true,
-        recruiterId: true,
-        recruiterType: true,
-        teamLeaderId: true,
-        teamLeader: { select: { id: true, fullName: true, email: true } },
-        createdAt: true,
-      },
-      orderBy: { createdAt: 'desc' },
-    });
+    const select = {
+      id: true,
+      email: true,
+      fullName: true,
+      role: true,
+      phone: true,
+      isActive: true,
+      recruiterId: true,
+      recruiterType: true,
+      teamLeaderId: true,
+      teamLeader: { select: { id: true, fullName: true, email: true } },
+      createdAt: true,
+    };
+
+    let employees;
+    try {
+      employees = await prisma.user.findMany({
+        where: {
+          role: { in: ['ADMIN', 'SUPER_ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'] },
+        },
+        select,
+        orderBy: { createdAt: 'desc' },
+      });
+    } catch (queryErr: any) {
+      if (queryErr?.message?.includes('FREELANCE_RECRUITER') || queryErr?.message?.includes('22P02')) {
+        try {
+          await prisma.$executeRawUnsafe(`ALTER TYPE "Role" ADD VALUE IF NOT EXISTS 'FREELANCE_RECRUITER';`);
+          await prisma.$executeRawUnsafe(`ALTER TYPE "Role" ADD VALUE IF NOT EXISTS 'TEAM_LEADER';`);
+        } catch (_) {}
+        employees = await prisma.user.findMany({
+          where: {
+            role: { in: ['ADMIN', 'SUPER_ADMIN', 'RECRUITER'] },
+          },
+          select,
+          orderBy: { createdAt: 'desc' },
+        });
+      } else {
+        throw queryErr;
+      }
+    }
 
     sendSuccess(res, { employees });
   } catch (err) {

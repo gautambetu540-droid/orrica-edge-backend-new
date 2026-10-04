@@ -536,28 +536,46 @@ export const getTeamMembers = async (
       where.teamLeaderId = user.userId;
     }
 
-    const recruiters = await prisma.user.findMany({
-      where,
-      select: {
-        id: true,
-        recruiterId: true,
-        fullName: true,
-        email: true,
-        phone: true,
-        role: true,
-        recruiterType: true,
-        avatarUrl: true,
-        createdAt: true,
-        _count: {
-          select: {
-            sourcedCandidates: true,
-            assignedApplications: true,
-            assignedJobs: true,
-          },
+    const select = {
+      id: true,
+      recruiterId: true,
+      fullName: true,
+      email: true,
+      phone: true,
+      role: true,
+      recruiterType: true,
+      avatarUrl: true,
+      createdAt: true,
+      _count: {
+        select: {
+          sourcedCandidates: true,
+          assignedApplications: true,
+          assignedJobs: true,
         },
       },
-      orderBy: { fullName: 'asc' },
-    });
+    };
+
+    let recruiters;
+    try {
+      recruiters = await prisma.user.findMany({
+        where,
+        select,
+        orderBy: { fullName: 'asc' },
+      });
+    } catch (queryErr: any) {
+      if (queryErr?.message?.includes('FREELANCE_RECRUITER') || queryErr?.message?.includes('22P02')) {
+        try {
+          await prisma.$executeRawUnsafe(`ALTER TYPE "Role" ADD VALUE IF NOT EXISTS 'FREELANCE_RECRUITER';`);
+        } catch (_) {}
+        recruiters = await prisma.user.findMany({
+          where: { ...where, role: 'RECRUITER' },
+          select,
+          orderBy: { fullName: 'asc' },
+        });
+      } else {
+        throw queryErr;
+      }
+    }
 
     sendSuccess(res, { teamMembers: recruiters });
   } catch (err) {

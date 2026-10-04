@@ -149,8 +149,31 @@ export const getAdminDashboard = async (req: Request, res: Response, next: NextF
       prisma.application.count({ where: { stage: 'SELECTED' } }),
       prisma.application.count({ where: { stage: 'JOINED' } }),
       prisma.application.count({ where: { stage: 'REJECTED' } }),
-      prisma.user.count({ where: { role: { in: ['RECRUITER', 'FREELANCE_RECRUITER'] }, isActive: true } }),
-      prisma.user.count({ where: { role: 'TEAM_LEADER', isActive: true } }),
+      (async () => {
+        try {
+          return await prisma.user.count({ where: { role: { in: ['RECRUITER', 'FREELANCE_RECRUITER'] }, isActive: true } });
+        } catch (err: any) {
+          if (err?.message?.includes('FREELANCE_RECRUITER') || err?.message?.includes('22P02')) {
+            try {
+              await prisma.$executeRawUnsafe(`ALTER TYPE "Role" ADD VALUE IF NOT EXISTS 'FREELANCE_RECRUITER';`);
+            } catch (_) {}
+            return await prisma.user.count({ where: { role: 'RECRUITER', isActive: true } });
+          }
+          return 0;
+        }
+      })(),
+      (async () => {
+        try {
+          return await prisma.user.count({ where: { role: 'TEAM_LEADER', isActive: true } });
+        } catch (err: any) {
+          if (err?.message?.includes('TEAM_LEADER') || err?.message?.includes('22P02')) {
+            try {
+              await prisma.$executeRawUnsafe(`ALTER TYPE "Role" ADD VALUE IF NOT EXISTS 'TEAM_LEADER';`);
+            } catch (_) {}
+          }
+          return 0;
+        }
+      })(),
       prisma.interview.count({ where: { scheduledAt: { gte: todayStart, lte: todayEnd } } }),
       prisma.interview.count(),
       prisma.application.findMany({
@@ -238,29 +261,51 @@ export const getTLDashboard = async (req: Request, res: Response, next: NextFunc
     const tlId = user.role === 'TEAM_LEADER' ? user.userId : (req.query.teamLeaderId ? String(req.query.teamLeaderId) : user.userId);
 
     // 1. Identify recruiters in this TL's pod
-    const podRecruiters = await prisma.user.findMany({
-      where: {
-        teamLeaderId: tlId,
-        role: { in: ['RECRUITER', 'FREELANCE_RECRUITER'] },
-        isActive: true,
-      },
-      select: {
-        id: true,
-        fullName: true,
-        email: true,
-        phone: true,
-        recruiterType: true,
-        avatarUrl: true,
-        createdAt: true,
-        _count: {
-          select: {
-            sourcedCandidates: true,
-            assignedApplications: true,
-          },
+    const select = {
+      id: true,
+      fullName: true,
+      email: true,
+      phone: true,
+      recruiterType: true,
+      avatarUrl: true,
+      createdAt: true,
+      _count: {
+        select: {
+          sourcedCandidates: true,
+          assignedApplications: true,
         },
       },
-      orderBy: { fullName: 'asc' },
-    });
+    };
+
+    let podRecruiters;
+    try {
+      podRecruiters = await prisma.user.findMany({
+        where: {
+          teamLeaderId: tlId,
+          role: { in: ['RECRUITER', 'FREELANCE_RECRUITER'] },
+          isActive: true,
+        },
+        select,
+        orderBy: { fullName: 'asc' },
+      });
+    } catch (err: any) {
+      if (err?.message?.includes('FREELANCE_RECRUITER') || err?.message?.includes('22P02')) {
+        try {
+          await prisma.$executeRawUnsafe(`ALTER TYPE "Role" ADD VALUE IF NOT EXISTS 'FREELANCE_RECRUITER';`);
+        } catch (_) {}
+        podRecruiters = await prisma.user.findMany({
+          where: {
+            teamLeaderId: tlId,
+            role: 'RECRUITER',
+            isActive: true,
+          },
+          select,
+          orderBy: { fullName: 'asc' },
+        });
+      } else {
+        throw err;
+      }
+    }
 
     const recruiterIds = [tlId, ...podRecruiters.map((r) => r.id)];
 

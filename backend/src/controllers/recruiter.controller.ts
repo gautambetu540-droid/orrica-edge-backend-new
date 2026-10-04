@@ -751,36 +751,66 @@ export const getRecruiters = async (
       where.teamLeaderId = user.userId;
     }
 
-    const recruiters = await prisma.user.findMany({
-      where,
-      orderBy: { createdAt: 'asc' },
-      select: {
-        id: true,
-        recruiterId: true,
-        email: true,
-        fullName: true,
-        phone: true,
-        avatarUrl: true,
-        role: true,
-        recruiterType: true,
-        isActive: true,
-        mustSetPassword: true,
-        mfaEnabled: true,
-        lastLoginAt: true,
-        createdAt: true,
-        teamLeaderId: true,
-        teamLeader: {
-          select: {
-            id: true,
-            fullName: true,
-            email: true,
-          },
-        },
-        assignedJobs: {
-          select: { id: true },
+    const selectFields = {
+      id: true,
+      recruiterId: true,
+      email: true,
+      fullName: true,
+      phone: true,
+      avatarUrl: true,
+      role: true,
+      recruiterType: true,
+      isActive: true,
+      mustSetPassword: true,
+      mfaEnabled: true,
+      lastLoginAt: true,
+      createdAt: true,
+      teamLeaderId: true,
+      teamLeader: {
+        select: {
+          id: true,
+          fullName: true,
+          email: true,
         },
       },
-    });
+      assignedJobs: {
+        select: { id: true },
+      },
+    };
+
+    let recruiters;
+    try {
+      recruiters = await prisma.user.findMany({
+        where,
+        orderBy: { createdAt: 'asc' },
+        select: selectFields,
+      });
+    } catch (queryErr: any) {
+      if (
+        queryErr?.message?.includes('FREELANCE_RECRUITER') ||
+        queryErr?.message?.includes('22P02')
+      ) {
+        console.warn(
+          '[RECRUITER] PostgreSQL Role enum missing FREELANCE_RECRUITER. Triggering auto-heal...'
+        );
+        try {
+          await prisma.$executeRawUnsafe(
+            `ALTER TYPE "Role" ADD VALUE IF NOT EXISTS 'FREELANCE_RECRUITER';`
+          );
+        } catch (healErr) {
+          console.warn('[RECRUITER] Auto-heal warning:', healErr);
+        }
+
+        // Retry with RECRUITER only if FREELANCE_RECRUITER is not immediately available
+        recruiters = await prisma.user.findMany({
+          where: { ...where, role: 'RECRUITER' },
+          orderBy: { createdAt: 'asc' },
+          select: selectFields,
+        });
+      } else {
+        throw queryErr;
+      }
+    }
 
     const recruiterRecords = await Promise.all(recruiters.map(async (recruiter) => {
       const [

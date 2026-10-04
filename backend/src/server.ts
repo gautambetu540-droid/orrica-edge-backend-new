@@ -28,6 +28,7 @@ import notificationRoutes from './routes/notification.routes';
 import teamLeaderRoutes from './routes/team-leader.routes';
 import searchRoutes from './routes/search.routes';
 import { ensureDefaultUniversalForm } from './controllers/universal-form.controller';
+import { ensureDatabaseSchema } from './scripts/bootstrap-db';
 import swaggerRouter from './swagger/swagger';
 
 const app = express();
@@ -140,119 +141,39 @@ const repairLegacyClientNames = async () => {
   }
 };
 
-// Ensure critical PostgreSQL columns exist to prevent any "column does not exist" errors
-const ensureDatabaseSchema = async () => {
-  const executeSafe = async (query: string, label: string) => {
-    try {
-      await prisma.$executeRawUnsafe(query);
-    } catch (err: any) {
-      console.warn(`[SCHEMA] ${label} warning:`, err?.message || err);
-    }
-  };
+// Server Startup & Graceful Shutdown
+const startServer = async () => {
+  try {
+    await ensureDatabaseSchema();
+    await repairLegacyClientNames();
+    await ensureDefaultUniversalForm();
+  } catch (err) {
+    console.error('[STARTUP] Initialization warning:', err);
+  }
 
-  await executeSafe(`
-    DO $$ BEGIN
-      CREATE TYPE "Gender" AS ENUM ('MALE', 'FEMALE', 'OTHER');
-    EXCEPTION
-      WHEN duplicate_object THEN null;
-    END $$;
-  `, 'Create Gender enum');
+  if (process.env.NODE_ENV !== 'test') {
+    const server = app.listen(config.port, '0.0.0.0', () => {
+      console.log(`=======================================================`);
+      console.log(`🚀 Orrica Edge Enterprise ATS Backend Server Started`);
+      console.log(`📡 URL: http://localhost:${config.port}`);
+      console.log(`📖 Swagger API Docs: http://localhost:${config.port}/api/docs`);
+      console.log(`🩺 Health: http://localhost:${config.port}/health`);
+      console.log(`=======================================================`);
+    });
 
-  await executeSafe(`
-    DO $$ BEGIN
-      CREATE TYPE "ReviewStatus" AS ENUM ('PENDING_TL_REVIEW', 'TL_APPROVED', 'TL_SENT_BACK', 'TL_REJECTED');
-    EXCEPTION
-      WHEN duplicate_object THEN null;
-    END $$;
-  `, 'Create ReviewStatus enum');
+    const handleShutdown = (signal: string) => {
+      console.log(`\n[SHUTDOWN] Received ${signal}. Closing HTTP server gracefully...`);
+      server.close(() => {
+        console.log('[SHUTDOWN] HTTP server closed cleanly. Exiting process.');
+        process.exit(0);
+      });
+    };
 
-  await executeSafe(`
-    DELETE FROM "_prisma_migrations" 
-    WHERE "migration_name" = '20261003203500_add_recruitment_os_team_leader_and_timelines' 
-      AND "finished_at" IS NULL;
-  `, 'Clear failed migration lock');
-
-  await executeSafe(`ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "teamLeaderId" TEXT;`, 'Add users.teamLeaderId');
-  await executeSafe(`CREATE INDEX IF NOT EXISTS "users_teamLeaderId_idx" ON "users"("teamLeaderId");`, 'Index users.teamLeaderId');
-
-  await executeSafe(`
-    ALTER TABLE "candidates" 
-      ADD COLUMN IF NOT EXISTS "name" TEXT,
-      ADD COLUMN IF NOT EXISTS "fatherName" TEXT,
-      ADD COLUMN IF NOT EXISTS "dateOfBirth" TIMESTAMP(3),
-      ADD COLUMN IF NOT EXISTS "gender" "Gender",
-      ADD COLUMN IF NOT EXISTS "currentLocation" TEXT,
-      ADD COLUMN IF NOT EXISTS "preferredLocation" TEXT,
-      ADD COLUMN IF NOT EXISTS "totalExperience" DECIMAL(4, 1) DEFAULT 0,
-      ADD COLUMN IF NOT EXISTS "relevantExperience" DECIMAL(4, 1) DEFAULT 0,
-      ADD COLUMN IF NOT EXISTS "highestQualification" TEXT,
-      ADD COLUMN IF NOT EXISTS "previousCompany" TEXT,
-      ADD COLUMN IF NOT EXISTS "noticePeriod" TEXT,
-      ADD COLUMN IF NOT EXISTS "currentSalary" DECIMAL(10, 2),
-      ADD COLUMN IF NOT EXISTS "expectedSalary" DECIMAL(10, 2),
-      ADD COLUMN IF NOT EXISTS "nextActionDate" TIMESTAMP(3),
-      ADD COLUMN IF NOT EXISTS "nextActionType" TEXT,
-      ADD COLUMN IF NOT EXISTS "nextActionRemarks" TEXT,
-      ADD COLUMN IF NOT EXISTS "sourcingRecruiterId" TEXT,
-      ADD COLUMN IF NOT EXISTS "teamLeaderId" TEXT;
-  `, 'Add candidate columns');
-
-  await executeSafe(`
-    ALTER TABLE "applications" 
-      ADD COLUMN IF NOT EXISTS "applicationCode" TEXT,
-      ADD COLUMN IF NOT EXISTS "teamLeaderId" TEXT,
-      ADD COLUMN IF NOT EXISTS "appliedDate" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      ADD COLUMN IF NOT EXISTS "status" TEXT NOT NULL DEFAULT 'Submitted',
-      ADD COLUMN IF NOT EXISTS "reviewStatus" "ReviewStatus" DEFAULT 'PENDING_TL_REVIEW',
-      ADD COLUMN IF NOT EXISTS "sendBackReason" TEXT,
-      ADD COLUMN IF NOT EXISTS "sendBackRemarks" TEXT;
-  `, 'Add application columns');
-
-  await executeSafe(`
-    CREATE TABLE IF NOT EXISTS "candidate_timelines" (
-      "id" TEXT NOT NULL,
-      "candidateId" TEXT NOT NULL,
-      "applicationId" TEXT,
-      "userId" TEXT,
-      "userName" TEXT,
-      "userRole" TEXT,
-      "action" TEXT NOT NULL,
-      "previousStatus" TEXT,
-      "newStatus" TEXT,
-      "remarks" TEXT,
-      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      CONSTRAINT "candidate_timelines_pkey" PRIMARY KEY ("id")
-    );
-  `, 'Create candidate_timelines table');
-
-  console.log('[SCHEMA] Verified and ensured all PostgreSQL tables and columns exist.');
+    process.on('SIGTERM', () => handleShutdown('SIGTERM'));
+    process.on('SIGINT', () => handleShutdown('SIGINT'));
+  }
 };
 
-void ensureDatabaseSchema();
-repairLegacyClientNames();
-ensureDefaultUniversalForm();
-
-// Graceful Shutdown & Server Startup
-if (process.env.NODE_ENV !== 'test') {
-  const server = app.listen(config.port, '0.0.0.0', () => {
-    console.log(`=======================================================`);
-    console.log(`🚀 Orrica Edge Enterprise ATS Backend Server Started`);
-    console.log(`📡 URL: http://localhost:${config.port}`);
-    console.log(`📖 Swagger API Docs: http://localhost:${config.port}/api/docs`);
-    console.log(`🩺 Health: http://localhost:${config.port}/health`);
-    console.log(`=======================================================`);
-  });
-
-  const handleShutdown = (signal: string) => {
-    console.log(`\n[SHUTDOWN] Received ${signal}. Closing HTTP server gracefully...`);
-    server.close(() => {
-      console.log('[SHUTDOWN] HTTP server closed cleanly. Exiting process.');
-      process.exit(0);
-    });
-  };
-
-  process.on('SIGTERM', () => handleShutdown('SIGTERM'));
-  process.on('SIGINT', () => handleShutdown('SIGINT'));
-}
+void startServer();
 
 export default app;
