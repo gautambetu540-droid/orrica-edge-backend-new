@@ -344,6 +344,7 @@ export const getCandidates = async (req: Request, res: Response, next: NextFunct
       workMode,
       employmentType,
       walkInStatus,
+      walkInOnly,
       walkInDateFrom,
       walkInDateTo,
       followUpDateFrom,
@@ -432,6 +433,10 @@ export const getCandidates = async (req: Request, res: Response, next: NextFunct
 
     if (Object.keys(applicationSome).length) {
       andFilters.push({ applications: { some: applicationSome } });
+    }
+
+    if (String(walkInOnly).toLowerCase() === 'true') {
+      andFilters.push({ walkInStatus: { not: null } });
     }
 
     if (walkInStatus) {
