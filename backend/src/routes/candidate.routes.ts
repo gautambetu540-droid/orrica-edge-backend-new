@@ -46,6 +46,14 @@ router.get(
   getCandidates
 );
 
+router.get(
+  '/walk-ins',
+  authenticateJwt,
+  requireRoles('SUPER_ADMIN', 'ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
+  requireRecruiterPermission('candidates'),
+  getCandidates
+);
+
 router.post(
   '/',
   authenticateJwt,
