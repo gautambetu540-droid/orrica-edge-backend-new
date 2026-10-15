@@ -99,8 +99,8 @@ const activitySchema = z.object({
   metadata: z.record(z.any()).optional(),
 });
 
-const walkInStatuses = ['EXPECTED', 'CONFIRMED', 'ARRIVED', 'RESCHEDULED', 'NO_SHOW', 'CANCELLED', 'COMPLETED'] as const;
-const walkInResponses = ['COMING_TODAY', 'COMING_TOMORROW', 'SPECIFIC_DATE', 'NOT_SURE', 'NOT_INTERESTED', 'NO_RESPONSE'] as const;
+const walkInStatuses = ['EXPECTED', 'CONFIRMED', 'ARRIVED', 'ATTENDED', 'RESCHEDULED', 'NO_SHOW', 'CANCELLED', 'COMPLETED'] as const;
+const walkInResponses = ['COMING_TODAY', 'COMING_TOMORROW', 'SPECIFIC_DATE', 'NOT_COMING', 'NOT_SURE', 'NOT_INTERESTED', 'NO_RESPONSE'] as const;
 
 const safeDate = z
   .union([z.coerce.date(), z.string(), z.literal('')])
@@ -1256,7 +1256,14 @@ export const updateCandidate = async (req: Request, res: Response, next: NextFun
             candidateId: existing.id,
             userId: req.user?.userId || null,
             recruiterId: existing.ownerRecruiterId || (req.user?.role === 'RECRUITER' ? req.user.userId : null),
-            action: 'WALK_IN_UPDATED',
+            action: (() => {
+            const st = String(data.walkInStatus || '').toUpperCase();
+            if (st === 'ARRIVED' || st === 'ATTENDED' || st === 'COMPLETED') return 'WALK_IN_ATTENDED';
+            if (st === 'NO_SHOW') return 'WALK_IN_NO_SHOW';
+            if (st === 'CANCELLED') return 'WALK_IN_CANCELLED';
+            if (st === 'EXPECTED' || st === 'CONFIRMED') return 'WALK_IN_SCHEDULED';
+            return 'WALK_IN_UPDATED';
+          })(),
             metadata: {
               walkInStatus: data.walkInStatus ?? existing.walkInStatus,
               walkInResponse: data.walkInResponse ?? existing.walkInResponse,
