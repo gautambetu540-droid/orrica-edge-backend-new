@@ -3,6 +3,7 @@ import { prisma } from '../prisma/client';
 import { sendSuccess, sendError } from '../utils/response';
 import { sendDynamicEmail } from '../services/email.service';
 import { logCandidateTimeline } from '../services/timeline.service';
+import { formatCandidateGreetingName, formatCandidateGreeting } from '../utils/nameFormatter';
 
 /**
  * Public candidate details lookup by confirmation token
@@ -63,31 +64,72 @@ export const getWalkInConfirmation = async (req: Request, res: Response, next: N
 
     const application = candidate.applications?.[0];
     const job = application?.job;
+    const greetingName = formatCandidateGreetingName(candidate);
 
-    // Public sanitized payload
-    sendSuccess(res, {
-      candidate: {
-        id: candidate.id,
-        candidateCode: candidate.candidateCode,
-        fullName: candidate.fullName,
-        email: candidate.email,
-        walkInStatus: candidate.walkInStatus,
-        walkInResponse: candidate.walkInResponse,
-        walkInDate: candidate.walkInDate,
-        walkInTime: candidate.walkInTime,
-      },
-      jobTitle: job?.title || 'Walk-in Interview Candidate',
-      jobCode: job?.jobCode || 'OE-WALK',
+    // Retrieve configured session details from job.hiringProcess or defaults
+    const hiringProcess = (job?.hiringProcess as any) || {};
+    const savedSession = hiringProcess.walkInSession || {};
+
+    const walkInDateStr = candidate.walkInDate
+      ? candidate.walkInDate.toISOString().slice(0, 10)
+      : savedSession.date || new Date().toISOString().slice(0, 10);
+
+    const reportingTimeStr = candidate.walkInTime || savedSession.reportingTime || '09:30 AM';
+    const venueNameStr = savedSession.venueName || 'Orrica Edge Corporate Tower — Hub 4';
+    const venueAddressStr = savedSession.venueAddress || 'Floor 4, Block B, DLF Cyber City, Phase II, Gurugram, Haryana 122002';
+    const googleMapsLinkStr = savedSession.googleMapsLink || 'https://maps.google.com/?q=DLF+Cyber+City+Gurugram';
+    const instructionsStr = savedSession.instructions || 'Please bring 2 copies of your updated resume and government photo ID. Arrive in business formals.';
+
+    const sanitizedCandidate = {
+      id: candidate.id,
+      candidateCode: candidate.candidateCode,
+      name: candidate.fullName || candidate.name,
+      fullName: candidate.fullName,
+      greetingName,
+      email: candidate.email,
+      walkInStatus: candidate.walkInStatus,
+      walkInConfirmationStatus: candidate.walkInStatus === 'RESCHEDULE_REQUESTED' ? 'RESCHEDULE_REQUESTED' : (candidate.walkInStatus === 'CONFIRMED' ? 'CONFIRMED' : (candidate.walkInStatus === 'CANCELLED' ? 'NOT_INTERESTED' : 'CONFIRMATION_PENDING')),
+      walkInResponse: candidate.walkInResponse,
+      walkInDate: walkInDateStr,
+      walkInTime: reportingTimeStr,
+      reportingTime: reportingTimeStr,
+      venueName: venueNameStr,
+      venueAddress: venueAddressStr,
+      googleMapsLink: googleMapsLinkStr,
+      candidateInstructions: instructionsStr,
+      instructions: instructionsStr,
+      appliedPosition: job?.title || 'Walk-in Interview Candidate',
+      targetJobTitle: job?.title || 'Walk-in Interview Candidate',
+    };
+
+    const sessionDetails = {
+      id: savedSession.id || ('session-' + (job?.id || candidate.id)),
+      date: walkInDateStr,
+      interviewDate: walkInDateStr,
+      reportingTime: reportingTimeStr,
+      interviewStartTime: savedSession.interviewStartTime || '10:00 AM',
+      interviewEndTime: savedSession.interviewEndTime || '02:00 PM',
+      venueName: venueNameStr,
+      venueAddress: venueAddressStr,
+      googleMapsLink: googleMapsLinkStr,
+      instructions: instructionsStr,
+      candidateInstructions: instructionsStr,
       clientName: job?.client?.companyName || 'Orrica Edge Partner',
-      session: {
-        id: 'session-' + candidate.id,
-        date: candidate.walkInDate?.toISOString().slice(0, 10),
-        reportingTime: candidate.walkInTime || '10:00 AM',
-        venueName: 'Orrica Edge Corporate Tower — Hub 4',
-        venueAddress: 'Floor 4, Block B, DLF Cyber City, Phase II, Gurugram, Haryana 122002',
-        googleMapsLink: 'https://maps.google.com/?q=DLF+Cyber+City+Gurugram',
-        instructions: 'Please bring 2 copies of your updated resume and government photo ID. Arrive in business formals.',
-      },
+    };
+
+    const payload = {
+      candidate: sanitizedCandidate,
+      jobTitle: job?.title || 'Walk-in Interview Candidate',
+      clientName: job?.client?.companyName || 'Orrica Edge Partner',
+      session: sessionDetails,
+    };
+
+    // Return both top-level and inside data for universal compatibility
+    res.status(200).json({
+      success: true,
+      message: 'Success',
+      ...payload,
+      data: payload,
     });
   } catch (err) {
     next(err);
@@ -108,7 +150,6 @@ export const submitWalkInConfirmation = async (req: Request, res: Response, next
       return;
     }
 
-    // Token format: wic_<base64url> or wic_<candidateId>_<hashOrCode> or <candidateId> or candidateCode
     let candidateId = rawToken;
     if (rawToken.startsWith('wic_')) {
       const part = rawToken.slice(4);
@@ -156,7 +197,13 @@ export const submitWalkInConfirmation = async (req: Request, res: Response, next
     const application = candidate.applications?.[0];
     const job = application?.job;
     const jobTitle = job?.title || 'Walk-in Interview';
-    const jobId = job?.jobCode || job?.id || 'OE-WALK';
+    const greetingName = formatCandidateGreetingName(candidate);
+
+    const hiringProcess = (job?.hiringProcess as any) || {};
+    const savedSession = hiringProcess.walkInSession || {};
+    const venueNameStr = savedSession.venueName || 'Orrica Edge Corporate Tower — Hub 4';
+    const venueAddressStr = savedSession.venueAddress || 'Floor 4, Block B, DLF Cyber City, Phase II, Gurugram, Haryana 122002';
+    const googleMapsLinkStr = savedSession.googleMapsLink || 'https://maps.google.com/?q=DLF+Cyber+City+Gurugram';
 
     let newWalkInStatus = candidate.walkInStatus || 'EXPECTED';
     let newWalkInResponse = candidate.walkInResponse || 'NO_RESPONSE';
@@ -169,7 +216,7 @@ export const submitWalkInConfirmation = async (req: Request, res: Response, next
       timelineAction = 'Candidate Confirmed Attendance';
       templateKey = 'WALK_IN_CONFIRMED_ACK';
     } else if (action === 'RESCHEDULE') {
-      newWalkInStatus = 'RESCHEDULED';
+      newWalkInStatus = 'RESCHEDULE_REQUESTED';
       newWalkInResponse = 'SPECIFIC_DATE';
       timelineAction = 'Candidate Requested Reschedule';
       templateKey = 'WALK_IN_RESCHEDULE_ACK';
@@ -180,12 +227,14 @@ export const submitWalkInConfirmation = async (req: Request, res: Response, next
       templateKey = 'WALK_IN_NOT_INTERESTED_ACK';
     }
 
+    // Persist update (idempotent for repeated submissions)
     const updated = await prisma.candidate.update({
       where: { id: candidate.id },
       data: {
         walkInStatus: newWalkInStatus,
         walkInResponse: newWalkInResponse,
         feedback: comment || reason || candidate.feedback,
+        nextActionRemarks: action === 'RESCHEDULE' && preferredDate ? `Candidate requested reschedule to ${preferredDate}. ${comment || ''}`.trim() : undefined,
       },
     });
 
@@ -194,12 +243,13 @@ export const submitWalkInConfirmation = async (req: Request, res: Response, next
       data: {
         candidateId: candidate.id,
         action: `WALK_IN_${action}`,
-        notes: `Candidate self-selected ${action}. ${comment || reason || ''}`.trim(),
+        notes: `Candidate submitted ${action}. ${comment || reason || ''}`.trim(),
         metadata: {
           action,
           preferredDate,
           reason,
           comment,
+          submittedAt: new Date().toISOString(),
         },
       },
     });
@@ -212,10 +262,10 @@ export const submitWalkInConfirmation = async (req: Request, res: Response, next
       userRole: 'CANDIDATE',
       action: timelineAction,
       newStatus: updated.status,
-      remarks: `Candidate submitted self-confirmation: ${action}. ${comment || ''}`.trim(),
+      remarks: `Candidate submitted self-confirmation: ${action}. ${comment || reason || ''}`.trim(),
     });
 
-    // Send acknowledgement email if candidate has email
+    // Send acknowledgement email if candidate has a valid email address
     if (candidate.email && candidate.email.includes('@')) {
       const walkInDateStr = candidate.walkInDate ? candidate.walkInDate.toISOString().slice(0, 10) : '';
       try {
@@ -223,16 +273,16 @@ export const submitWalkInConfirmation = async (req: Request, res: Response, next
           templateKey,
           recipient: candidate.email,
           variables: {
-            candidate_name: candidate.fullName || candidate.name || 'Candidate',
+            candidate_name: greetingName,
+            candidate_greeting: formatCandidateGreeting(candidate),
             candidate_email: candidate.email,
             job_title: jobTitle,
-            job_id: jobId,
             walk_in_date: walkInDateStr,
             walkin_date: walkInDateStr,
-            reporting_time: candidate.walkInTime || '10:00 AM',
-            venue_name: 'Orrica Edge Corporate Tower — Hub 4',
-            venue_address: 'Floor 4, Block B, DLF Cyber City, Phase II, Gurugram, Haryana 122002',
-            google_maps_link: 'https://maps.google.com/?q=DLF+Cyber+City+Gurugram',
+            reporting_time: candidate.walkInTime || '09:30 AM',
+            venue_name: venueNameStr,
+            venue_address: venueAddressStr,
+            google_maps_link: googleMapsLinkStr,
             preferred_date: preferredDate || '',
             comments: comment || reason || '',
           },
@@ -242,9 +292,112 @@ export const submitWalkInConfirmation = async (req: Request, res: Response, next
       }
     }
 
-    sendSuccess(res, {
+    const resultData = {
       candidate: updated,
       message: `Response recorded successfully for ${action}.`,
+    };
+
+    res.status(200).json({
+      success: true,
+      ...resultData,
+      data: resultData,
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * Admin: Get active walk-in sessions
+ * GET /api/v1/walk-in/sessions
+ */
+export const getWalkInSessions = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const jobs = await prisma.job.findMany({
+      include: { client: true },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+    });
+
+    const sessions = jobs
+      .map((job) => {
+        const hp = (job.hiringProcess as any) || {};
+        if (hp.walkInSession) {
+          return {
+            ...hp.walkInSession,
+            jobId: job.id,
+            jobTitle: job.title,
+            clientName: job.client?.companyName,
+          };
+        }
+        return null;
+      })
+      .filter(Boolean);
+
+    sendSuccess(res, { sessions });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * Admin: Save or update walk-in session details
+ * PUT /api/v1/walk-in/sessions/:id
+ */
+export const updateWalkInSession = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const sessionIdOrJobId = req.params.id;
+    const sessionData = req.body;
+
+    if (!sessionData || !sessionData.venueName || !sessionData.venueAddress) {
+      sendError(res, 'Venue name and address are required to save session details.', 400);
+      return;
+    }
+
+    // Locate job by ID or jobId in sessionData
+    const targetJobId = sessionData.jobId || sessionIdOrJobId;
+    const job = await prisma.job.findFirst({
+      where: {
+        OR: [
+          { id: targetJobId },
+          { jobCode: targetJobId },
+        ],
+      },
+    });
+
+    if (job) {
+      const existingHp = (job.hiringProcess as any) || {};
+      const updatedHp = {
+        ...existingHp,
+        walkInSession: {
+          id: sessionData.id || sessionIdOrJobId,
+          jobId: job.id,
+          date: sessionData.date || sessionData.interviewDate,
+          interviewDate: sessionData.date || sessionData.interviewDate,
+          reportingTime: sessionData.reportingTime || '09:30 AM',
+          interviewStartTime: sessionData.interviewStartTime || '10:00 AM',
+          interviewEndTime: sessionData.interviewEndTime || '02:00 PM',
+          venueName: sessionData.venueName,
+          venueAddress: sessionData.venueAddress,
+          googleMapsLink: sessionData.googleMapsLink,
+          instructions: sessionData.instructions,
+          requiredDocuments: sessionData.requiredDocuments,
+          status: sessionData.status || 'SCHEDULED',
+          updatedAt: new Date().toISOString(),
+        },
+      };
+
+      await prisma.job.update({
+        where: { id: job.id },
+        data: {
+          hiringProcess: updatedHp,
+        },
+      });
+    }
+
+    sendSuccess(res, {
+      session: sessionData,
+      message: 'Walk-in session details saved successfully.',
     });
   } catch (err) {
     next(err);

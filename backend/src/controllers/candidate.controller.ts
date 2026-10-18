@@ -8,6 +8,7 @@ import { uploadResumeFile } from '../services/storage.service';
 import { generateCandidateCode, generateApplicationCode } from '../utils/codeGenerators';
 import { logCandidateTimeline } from '../services/timeline.service';
 import { sendDynamicEmail } from '../services/email.service';
+import { formatCandidateGreetingName, formatCandidateGreeting } from '../utils/nameFormatter';
 
 export const CANONICAL_PIPELINE_STAGES = [
   'New',
@@ -1780,10 +1781,47 @@ export const resendWalkInEmail = async (req: Request, res: Response, next: NextF
       return;
     }
 
+    const application = candidate.applications?.[0];
+    const job = application?.job;
+
+    // Verify candidate alignment with target job if specified
+    if (req.body?.jobId && job) {
+      const targetJobId = String(req.body.jobId);
+      const isAligned = candidate.applications.some(
+        (app) => app.jobId === targetJobId || app.job?.id === targetJobId || app.job?.jobCode === targetJobId
+      );
+      if (!isAligned && candidate.applications.length > 0) {
+        sendError(res, 'Candidate is not aligned with the specified walk-in job opening.', 400);
+        return;
+      }
+    }
+
     // Walk-in session validation
     const targetWalkInDate = candidate.walkInDate || (req.body?.walkInDate ? new Date(req.body.walkInDate) : null);
     if (!targetWalkInDate || isNaN(targetWalkInDate.getTime())) {
-      sendError(res, 'Candidate does not have an active walk-in session or scheduled date.', 400);
+      sendError(res, 'Candidate does not have an active walk-in session or scheduled date. The Admin must save session details before sending invitations.', 400);
+      return;
+    }
+
+    // Resolve saved session details from body or job.hiringProcess.walkInSession
+    const hiringProcess = (job?.hiringProcess as any) || {};
+    const savedSession = hiringProcess.walkInSession || {};
+
+    const reportingTimeStr = (req.body?.reportingTime || candidate.walkInTime || savedSession.reportingTime || '').trim();
+    const venueNameStr = (req.body?.venueName || savedSession.venueName || '').trim();
+    const venueAddressStr = (req.body?.venueAddress || savedSession.venueAddress || '').trim();
+    const googleMapsLinkStr = (req.body?.googleMapsLink || savedSession.googleMapsLink || '').trim();
+    const instructionsStr = (req.body?.instructions || savedSession.instructions || '').trim();
+
+    // Enforce required walk-in session details
+    if (!reportingTimeStr || !venueNameStr || !venueAddressStr || !instructionsStr) {
+      sendError(res, 'Walk-in session details are incomplete. The Admin must save session details (venue name, complete address, reporting time, and instructions) before sending invitations.', 400);
+      return;
+    }
+
+    // Enforce valid Google Maps link
+    if (!googleMapsLinkStr || (!googleMapsLinkStr.startsWith('http://') && !googleMapsLinkStr.startsWith('https://'))) {
+      sendError(res, 'A valid Google Maps destination URL is required for the walk-in session directions.', 400);
       return;
     }
 
@@ -1808,17 +1846,10 @@ export const resendWalkInEmail = async (req: Request, res: Response, next: NextF
       return;
     }
 
-    const application = candidate.applications?.[0];
-    const job = application?.job;
     const jobTitle = req.body?.jobTitle || job?.title || 'Walk-in Interview Candidate';
-    const jobId = req.body?.jobId || job?.jobCode || job?.id || 'OE-WALK';
     const clientName = req.body?.clientName || job?.client?.companyName || 'Orrica Edge Partner';
     const walkInDateStr = targetWalkInDate.toISOString().slice(0, 10);
-    const reportingTimeStr = req.body?.reportingTime || candidate.walkInTime || '10:00 AM';
-    const venueNameStr = req.body?.venueName || 'Orrica Edge Corporate Tower — Hub 4';
-    const venueAddressStr = req.body?.venueAddress || 'Floor 4, Block B, DLF Cyber City, Phase II, Gurugram, Haryana 122002';
-    const googleMapsLinkStr = req.body?.googleMapsLink || 'https://maps.google.com/?q=DLF+Cyber+City+Gurugram';
-    const instructionsStr = req.body?.instructions || 'Please bring 2 copies of your updated resume and government photo ID. Arrive in business formals.';
+    const greetingName = formatCandidateGreetingName(candidate);
 
     const token = `wic_${Buffer.from(candidate.id).toString("base64url")}`;
     const frontendBase = (process.env.FRONTEND_URL || 'https://orricaedge.com').replace(/\/+$/, '');
@@ -1828,10 +1859,10 @@ export const resendWalkInEmail = async (req: Request, res: Response, next: NextF
     const notInterestedUrl = `${confirmationUrl}?action=not_interested`;
 
     const variables: Record<string, string> = {
-      candidate_name: candidate.fullName || candidate.name || 'Candidate',
+      candidate_name: greetingName,
+      candidate_greeting: formatCandidateGreeting(candidate),
       candidate_email: candidate.email,
       job_title: jobTitle,
-      job_id: jobId,
       client_name: clientName,
       walk_in_date: walkInDateStr,
       walkin_date: walkInDateStr,
@@ -1875,6 +1906,7 @@ export const resendWalkInEmail = async (req: Request, res: Response, next: NextF
           jobTitle,
           walkInDate: walkInDateStr,
           reportingTime: reportingTimeStr,
+          venueName: venueNameStr,
           messageId: dispatchResult.messageId,
         },
       },
@@ -1940,14 +1972,50 @@ export const sendWalkInInvitation = async (req: Request, res: Response, next: Ne
       return;
     }
 
+    const application = candidate.applications?.[0];
+    const job = application?.job;
+
+    // Verify candidate alignment with target job if specified
+    if (req.body?.jobId && job) {
+      const targetJobId = String(req.body.jobId);
+      const isAligned = candidate.applications.some(
+        (app) => app.jobId === targetJobId || app.job?.id === targetJobId || app.job?.jobCode === targetJobId
+      );
+      if (!isAligned && candidate.applications.length > 0) {
+        sendError(res, 'Candidate is not aligned with the specified walk-in job opening.', 400);
+        return;
+      }
+    }
+
     let targetWalkInDate = candidate.walkInDate;
     if (req.body?.walkInDate) {
       targetWalkInDate = new Date(req.body.walkInDate);
     }
-    const reportingTime = req.body?.reportingTime || req.body?.walkInTime || candidate.walkInTime || '10:00 AM';
 
     if (!targetWalkInDate || isNaN(targetWalkInDate.getTime())) {
-      sendError(res, 'Candidate does not have an active walk-in session or scheduled date.', 400);
+      sendError(res, 'Candidate does not have an active walk-in session or scheduled date. The Admin must save session details before sending invitations.', 400);
+      return;
+    }
+
+    // Resolve saved session details from body or job.hiringProcess.walkInSession
+    const hiringProcess = (job?.hiringProcess as any) || {};
+    const savedSession = hiringProcess.walkInSession || {};
+
+    const reportingTime = (req.body?.reportingTime || req.body?.walkInTime || candidate.walkInTime || savedSession.reportingTime || '').trim();
+    const venueNameStr = (req.body?.venueName || savedSession.venueName || '').trim();
+    const venueAddressStr = (req.body?.venueAddress || savedSession.venueAddress || '').trim();
+    const googleMapsLinkStr = (req.body?.googleMapsLink || savedSession.googleMapsLink || '').trim();
+    const instructionsStr = (req.body?.instructions || savedSession.instructions || '').trim();
+
+    // Enforce required walk-in session details
+    if (!reportingTime || !venueNameStr || !venueAddressStr || !instructionsStr) {
+      sendError(res, 'Walk-in session details are incomplete. The Admin must save session details (venue name, complete address, reporting time, and instructions) before sending invitations.', 400);
+      return;
+    }
+
+    // Enforce valid Google Maps link
+    if (!googleMapsLinkStr || (!googleMapsLinkStr.startsWith('http://') && !googleMapsLinkStr.startsWith('https://'))) {
+      sendError(res, 'A valid Google Maps destination URL is required for walk-in interview directions.', 400);
       return;
     }
 
@@ -1961,26 +2029,20 @@ export const sendWalkInInvitation = async (req: Request, res: Response, next: Ne
       },
     });
 
-    const application = candidate.applications?.[0];
-    const job = application?.job;
     const jobTitle = req.body?.jobTitle || job?.title || 'Walk-in Interview Candidate';
-    const jobId = req.body?.jobId || job?.jobCode || job?.id || 'OE-WALK';
     const clientName = req.body?.clientName || job?.client?.companyName || 'Orrica Edge Partner';
     const walkInDateStr = targetWalkInDate.toISOString().slice(0, 10);
-    const venueNameStr = req.body?.venueName || 'Orrica Edge Corporate Tower — Hub 4';
-    const venueAddressStr = req.body?.venueAddress || 'Floor 4, Block B, DLF Cyber City, Phase II, Gurugram, Haryana 122002';
-    const googleMapsLinkStr = req.body?.googleMapsLink || 'https://maps.google.com/?q=DLF+Cyber+City+Gurugram';
-    const instructionsStr = req.body?.instructions || 'Please bring 2 copies of your updated resume and government photo ID. Arrive in business formals.';
+    const greetingName = formatCandidateGreetingName(candidate);
 
     const token = `wic_${Buffer.from(candidate.id).toString("base64url")}`;
     const frontendBase = (process.env.FRONTEND_URL || 'https://orricaedge.com').replace(/\/+$/, '');
     const confirmationUrl = `${frontendBase}/walk-in/confirm/${encodeURIComponent(token)}`;
 
     const variables: Record<string, string> = {
-      candidate_name: candidate.fullName || candidate.name || 'Candidate',
+      candidate_name: greetingName,
+      candidate_greeting: formatCandidateGreeting(candidate),
       candidate_email: candidate.email,
       job_title: jobTitle,
-      job_id: jobId,
       client_name: clientName,
       walk_in_date: walkInDateStr,
       walkin_date: walkInDateStr,
@@ -2024,6 +2086,7 @@ export const sendWalkInInvitation = async (req: Request, res: Response, next: Ne
           jobTitle,
           walkInDate: walkInDateStr,
           reportingTime,
+          venueName: venueNameStr,
           messageId: dispatchResult.messageId,
         },
       },
@@ -2103,6 +2166,12 @@ export const approveWalkInReschedule = async (req: Request, res: Response, next:
     const job = application?.job;
     const jobTitle = job?.title || 'Walk-in Interview Candidate';
     const dateStr = newWalkInDate.toISOString().slice(0, 10);
+    const greetingName = formatCandidateGreetingName(candidate);
+
+    const hiringProcess = (job?.hiringProcess as any) || {};
+    const savedSession = hiringProcess.walkInSession || {};
+    const venueNameStr = savedSession.venueName || 'Orrica Edge Corporate Tower — Hub 4';
+    const venueAddressStr = savedSession.venueAddress || 'Floor 4, Block B, DLF Cyber City, Phase II, Gurugram, Haryana 122002';
 
     if (candidate.email && candidate.email.includes('@')) {
       try {
@@ -2110,15 +2179,15 @@ export const approveWalkInReschedule = async (req: Request, res: Response, next:
           templateKey: 'WALK_IN_RESCHEDULE_APPROVED',
           recipient: candidate.email,
           variables: {
-            candidate_name: candidate.fullName || candidate.name || 'Candidate',
+            candidate_name: greetingName,
+            candidate_greeting: formatCandidateGreeting(candidate),
             candidate_email: candidate.email,
             job_title: jobTitle,
-            job_id: job?.jobCode || job?.id || 'OE-WALK',
             walk_in_date: dateStr,
             walkin_date: dateStr,
             reporting_time: newWalkInTime,
-            venue_name: 'Orrica Edge Recruitment & Interview Center',
-            venue_address: 'Corporate Suite, Tech Park',
+            venue_name: venueNameStr,
+            venue_address: venueAddressStr,
           },
         });
       } catch (emailErr: any) {

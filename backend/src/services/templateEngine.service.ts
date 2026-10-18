@@ -16,8 +16,8 @@ export const DEFAULT_TEMPLATES: Record<string, DefaultTemplateDefinition> = {
     templateKey: 'WALK_IN_INVITATION',
     name: 'Walk-in Interview Invitation',
     category: 'Candidate',
-    subject: 'Walk-in Interview Invitation: {{job_title}} — {{walk_in_date}}',
-    htmlBody: '<h2>Walk-in Interview Invitation</h2><p>Dear <strong>{{candidate_name}}</strong>,</p><p>You have been invited to attend a walk-in interview session for the position of <strong>{{job_title}}</strong>.</p><div style="background-color:#f8fafc;border:1px solid #e2e8f0;padding:18px;border-radius:8px;margin:20px 0;"><p style="margin:4px 0;"><strong>Date:</strong> {{walk_in_date}}</p><p style="margin:4px 0;"><strong>Reporting Time:</strong> {{reporting_time}}</p><p style="margin:4px 0;"><strong>Venue:</strong> {{venue_name}}</p><p style="margin:4px 0;"><strong>Address:</strong> {{venue_address}}</p><p style="margin:4px 0;"><strong>Google Maps:</strong> <a href="{{google_maps_link}}" target="_blank" style="color:#f97316;">View Location</a></p></div><div style="background-color:#fff7ed;border-left:4px solid #f97316;padding:12px;margin:16px 0;"><p style="margin:0;font-weight:bold;color:#9a3412;">Instructions:</p><p style="margin:4px 0 0;font-size:14px;color:#7c2d12;">{{instructions}}</p></div><p>Please indicate your availability using the options below:</p><div style="margin:20px 0;"><a href="{{confirm_url}}" style="background-color:#16a34a;color:#ffffff;padding:10px 18px;text-decoration:none;border-radius:6px;font-weight:bold;display:inline-block;margin-right:10px;">Confirm Attendance</a><a href="{{reschedule_url}}" style="background-color:#f59e0b;color:#ffffff;padding:10px 18px;text-decoration:none;border-radius:6px;font-weight:bold;display:inline-block;margin-right:10px;">Request Another Date</a><a href="{{not_interested_url}}" style="background-color:#64748b;color:#ffffff;padding:10px 18px;text-decoration:none;border-radius:6px;font-weight:bold;display:inline-block;">Not Interested</a></div><p style="font-size:13px;color:#64748b;">If the buttons above do not open, please copy and paste this link: <a href="{{confirmation_url}}" style="color:#2563eb;">{{confirmation_url}}</a></p>',
+    subject: 'Walk-in Interview Invitation – {{job_title}}',
+    htmlBody: '<h2 style="font-size:17px;margin:0 0 16px;color:#0f172a;font-weight:700;">Walk-in Interview Invitation</h2><p style="font-size:12.75px;line-height:1.6;margin:0 0 12px;color:#334155;">Dear <strong>{{candidate_name}}</strong>,</p><p style="font-size:12.75px;line-height:1.6;margin:0 0 16px;color:#334155;">You have been invited to attend a walk-in interview session for the position of <strong>{{job_title}}</strong>.</p><div style="background-color:#f8fafc;border:1px solid #e2e8f0;padding:18px;border-radius:8px;margin:20px 0;font-size:12.75px;line-height:1.6;color:#334155;"><p style="margin:4px 0;font-size:12.75px;color:#334155;"><strong>Date:</strong> {{walk_in_date}}</p><p style="margin:4px 0;font-size:12.75px;color:#334155;"><strong>Reporting Time:</strong> {{reporting_time}}</p><p style="margin:4px 0;font-size:12.75px;color:#334155;"><strong>Venue:</strong> {{venue_name}}</p><p style="margin:4px 0;font-size:12.75px;color:#334155;"><strong>Address:</strong> {{venue_address}}</p><p style="margin:4px 0;font-size:12.75px;"><strong style="color:#334155;">Google Maps:</strong> <a href="{{google_maps_link}}" target="_blank" style="color:#f97316;font-size:12.75px;text-decoration:none;font-weight:600;">View Location</a></p></div><div style="background-color:#fff7ed;border-left:4px solid #f97316;padding:12px;margin:16px 0;"><p style="margin:0;font-weight:bold;color:#9a3412;font-size:11.9px;">Instructions:</p><p style="margin:4px 0 0;font-size:11.9px;line-height:1.5;color:#7c2d12;">{{instructions}}</p></div><p style="font-size:12.75px;margin:18px 0 10px;color:#334155;font-weight:500;">Please indicate your availability using the options below:</p><div style="margin:20px 0;"><a href="{{confirm_url}}" style="background-color:#16a34a;color:#ffffff;padding:10px 18px;text-decoration:none;border-radius:6px;font-weight:bold;display:inline-block;margin-right:10px;font-size:11.9px;line-height:1.2;">Confirm Attendance</a><a href="{{reschedule_url}}" style="background-color:#f59e0b;color:#ffffff;padding:10px 18px;text-decoration:none;border-radius:6px;font-weight:bold;display:inline-block;margin-right:10px;font-size:11.9px;line-height:1.2;">Request Another Date</a><a href="{{not_interested_url}}" style="background-color:#64748b;color:#ffffff;padding:10px 18px;text-decoration:none;border-radius:6px;font-weight:bold;display:inline-block;font-size:11.9px;line-height:1.2;">Not Interested</a></div><p style="font-size:11.05px;color:#64748b;margin-top:16px;">If the buttons above do not open, please copy and paste this link: <a href="{{confirmation_url}}" style="color:#2563eb;word-break:break-all;font-size:11.05px;">{{confirmation_url}}</a></p>',
     plainText: 'Dear {{candidate_name}}, You have been invited to attend a walk-in interview session for {{job_title}} on {{walk_in_date}} at {{reporting_time}}. Venue: {{venue_name}}, {{venue_address}}. Please indicate your availability: {{confirmation_url}}',
     variables: ['candidate_name', 'candidate_email', 'job_title', 'job_id', 'walk_in_date', 'walkin_date', 'reporting_time', 'walk_in_time', 'venue_name', 'venue_address', 'google_maps_link', 'instructions', 'candidate_instructions', 'confirmation_url', 'confirmation_link', 'confirm_url', 'reschedule_url', 'not_interested_url'],
   },
@@ -26,7 +26,7 @@ export const DEFAULT_TEMPLATES: Record<string, DefaultTemplateDefinition> = {
     name: 'Walk-in Attendance Confirmed Acknowledgement',
     category: 'Candidate',
     subject: 'Confirmed: Walk-in Interview for {{job_title}} on {{walk_in_date}}',
-    htmlBody: '<h2>Attendance Confirmed</h2><p>Dear <strong>{{candidate_name}}</strong>,</p><p>Thank you for confirming your attendance for the walk-in interview for <strong>{{job_title}}</strong>.</p><div style="background-color:#f8fafc;border:1px solid #e2e8f0;padding:18px;border-radius:8px;margin:20px 0;"><p style="margin:4px 0;"><strong>Date:</strong> {{walk_in_date}}</p><p style="margin:4px 0;"><strong>Reporting Time:</strong> {{reporting_time}}</p><p style="margin:4px 0;"><strong>Venue:</strong> {{venue_name}}</p><p style="margin:4px 0;"><strong>Address:</strong> {{venue_address}}</p><p style="margin:4px 0;"><strong>Google Maps:</strong> <a href="{{google_maps_link}}" target="_blank" style="color:#f97316;">View Location</a></p></div><p>Please arrive 15 minutes before your reporting time and carry 2 printed copies of your resume, a government-issued photo ID, and academic certificates.</p>',
+    htmlBody: '<h2 style="font-size:17px;margin:0 0 16px;color:#0f172a;font-weight:700;">Attendance Confirmed</h2><p style="font-size:12.75px;line-height:1.6;margin:0 0 12px;color:#334155;">Dear <strong>{{candidate_name}}</strong>,</p><p style="font-size:12.75px;line-height:1.6;margin:0 0 16px;color:#334155;">Thank you for confirming your attendance for the walk-in interview for <strong>{{job_title}}</strong>.</p><div style="background-color:#f8fafc;border:1px solid #e2e8f0;padding:18px;border-radius:8px;margin:20px 0;font-size:12.75px;line-height:1.6;color:#334155;"><p style="margin:4px 0;font-size:12.75px;color:#334155;"><strong>Date:</strong> {{walk_in_date}}</p><p style="margin:4px 0;font-size:12.75px;color:#334155;"><strong>Reporting Time:</strong> {{reporting_time}}</p><p style="margin:4px 0;font-size:12.75px;color:#334155;"><strong>Venue:</strong> {{venue_name}}</p><p style="margin:4px 0;font-size:12.75px;color:#334155;"><strong>Address:</strong> {{venue_address}}</p><p style="margin:4px 0;font-size:12.75px;"><strong style="color:#334155;">Google Maps:</strong> <a href="{{google_maps_link}}" target="_blank" style="color:#f97316;font-size:12.75px;text-decoration:none;font-weight:600;">View Location</a></p></div><p style="font-size:12.75px;line-height:1.6;color:#334155;">Please arrive 15 minutes before your reporting time and carry 2 printed copies of your resume, a government-issued photo ID, and academic certificates.</p>',
     plainText: 'Dear {{candidate_name}}, Thank you for confirming your attendance for the walk-in interview for {{job_title}} on {{walk_in_date}} at {{reporting_time}}. Venue: {{venue_name}}, {{venue_address}}.',
     variables: ['candidate_name', 'job_title', 'job_id', 'walk_in_date', 'reporting_time', 'venue_name', 'venue_address', 'google_maps_link', 'instructions'],
   },
@@ -35,7 +35,7 @@ export const DEFAULT_TEMPLATES: Record<string, DefaultTemplateDefinition> = {
     name: 'Walk-in Reschedule Request Acknowledgement',
     category: 'Candidate',
     subject: 'Reschedule Request Received: {{job_title}} Walk-in',
-    htmlBody: '<h2>Reschedule Request Received</h2><p>Dear <strong>{{candidate_name}}</strong>,</p><p>We have received your request to reschedule your walk-in interview for <strong>{{job_title}}</strong>.</p><div style="background-color:#f8fafc;border:1px solid #e2e8f0;padding:18px;border-radius:8px;margin:20px 0;"><p style="margin:4px 0;"><strong>Preferred Date:</strong> {{preferred_date}}</p><p style="margin:4px 0;"><strong>Your Comments:</strong> {{comments}}</p></div><p>Our recruitment team is reviewing your requested date and will contact you shortly with an updated schedule.</p>',
+    htmlBody: '<h2 style="font-size:17px;margin:0 0 16px;color:#0f172a;font-weight:700;">Reschedule Request Received</h2><p style="font-size:12.75px;line-height:1.6;margin:0 0 12px;color:#334155;">Dear <strong>{{candidate_name}}</strong>,</p><p style="font-size:12.75px;line-height:1.6;margin:0 0 16px;color:#334155;">We have received your request to reschedule your walk-in interview for <strong>{{job_title}}</strong>.</p><div style="background-color:#f8fafc;border:1px solid #e2e8f0;padding:18px;border-radius:8px;margin:20px 0;font-size:12.75px;line-height:1.6;color:#334155;"><p style="margin:4px 0;font-size:12.75px;color:#334155;"><strong>Preferred Date:</strong> {{preferred_date}}</p><p style="margin:4px 0;font-size:12.75px;color:#334155;"><strong>Your Comments:</strong> {{comments}}</p></div><p style="font-size:12.75px;line-height:1.6;color:#334155;">Our recruitment team is reviewing your requested date and will contact you shortly with an updated schedule.</p>',
     plainText: 'Dear {{candidate_name}}, We received your request to reschedule your walk-in interview for {{job_title}} to {{preferred_date}}. Our recruitment team will contact you shortly with an updated schedule.',
     variables: ['candidate_name', 'job_title', 'job_id', 'preferred_date', 'comments'],
   },
@@ -44,7 +44,7 @@ export const DEFAULT_TEMPLATES: Record<string, DefaultTemplateDefinition> = {
     name: 'Walk-in Not Interested Acknowledgement',
     category: 'Candidate',
     subject: 'Walk-in Interview Response: {{job_title}}',
-    htmlBody: '<h2>Response Received</h2><p>Dear <strong>{{candidate_name}}</strong>,</p><p>Thank you for letting us know that you are not interested in attending the walk-in interview for <strong>{{job_title}}</strong>.</p><p>We have updated your response for this session. Your profile remains active in our talent network for future opportunities matching your background.</p>',
+    htmlBody: '<h2 style="font-size:17px;margin:0 0 16px;color:#0f172a;font-weight:700;">Response Received</h2><p style="font-size:12.75px;line-height:1.6;margin:0 0 12px;color:#334155;">Dear <strong>{{candidate_name}}</strong>,</p><p style="font-size:12.75px;line-height:1.6;margin:0 0 12px;color:#334155;">Thank you for letting us know that you are not interested in attending the walk-in interview for <strong>{{job_title}}</strong>.</p><p style="font-size:12.75px;line-height:1.6;color:#334155;">We have updated your response for this session. Your profile remains active in our talent network for future opportunities matching your background.</p>',
     plainText: 'Dear {{candidate_name}}, Thank you for letting us know you are not interested in attending the walk-in interview for {{job_title}}. Your profile remains active in our talent network for future opportunities.',
     variables: ['candidate_name', 'job_title', 'job_id'],
   },
@@ -53,7 +53,7 @@ export const DEFAULT_TEMPLATES: Record<string, DefaultTemplateDefinition> = {
     name: 'Walk-in Schedule Changed & Reconfirmation Required',
     category: 'Candidate',
     subject: 'Schedule Changed — Reconfirmation Required: {{job_title}} Walk-in',
-    htmlBody: '<h2>Walk-in Schedule Updated</h2><p>Dear <strong>{{candidate_name}}</strong>,</p><p>Please be advised that the scheduled walk-in interview details for <strong>{{job_title}}</strong> have been updated.</p><div style="background-color:#f8fafc;border:1px solid #e2e8f0;padding:18px;border-radius:8px;margin:20px 0;"><p style="margin:4px 0;"><strong>Updated Date:</strong> {{walk_in_date}}</p><p style="margin:4px 0;"><strong>Reporting Time:</strong> {{reporting_time}}</p><p style="margin:4px 0;"><strong>Venue:</strong> {{venue_name}}</p><p style="margin:4px 0;"><strong>Address:</strong> {{venue_address}}</p><p style="margin:4px 0;"><strong>Google Maps:</strong> <a href="{{google_maps_link}}" target="_blank" style="color:#f97316;">View Location</a></p></div><p>Because details have changed, please reconfirm your availability below:</p><div style="margin:20px 0;"><a href="{{confirm_url}}" style="background-color:#16a34a;color:#ffffff;padding:10px 18px;text-decoration:none;border-radius:6px;font-weight:bold;display:inline-block;margin-right:10px;">Confirm Updated Date</a><a href="{{reschedule_url}}" style="background-color:#f59e0b;color:#ffffff;padding:10px 18px;text-decoration:none;border-radius:6px;font-weight:bold;display:inline-block;margin-right:10px;">Request Another Date</a><a href="{{not_interested_url}}" style="background-color:#64748b;color:#ffffff;padding:10px 18px;text-decoration:none;border-radius:6px;font-weight:bold;display:inline-block;">Not Interested</a></div>',
+    htmlBody: '<h2 style="font-size:17px;margin:0 0 16px;color:#0f172a;font-weight:700;">Walk-in Schedule Updated</h2><p style="font-size:12.75px;line-height:1.6;margin:0 0 12px;color:#334155;">Dear <strong>{{candidate_name}}</strong>,</p><p style="font-size:12.75px;line-height:1.6;margin:0 0 16px;color:#334155;">Please be advised that the scheduled walk-in interview details for <strong>{{job_title}}</strong> have been updated.</p><div style="background-color:#f8fafc;border:1px solid #e2e8f0;padding:18px;border-radius:8px;margin:20px 0;font-size:12.75px;line-height:1.6;color:#334155;"><p style="margin:4px 0;font-size:12.75px;color:#334155;"><strong>Updated Date:</strong> {{walk_in_date}}</p><p style="margin:4px 0;font-size:12.75px;color:#334155;"><strong>Reporting Time:</strong> {{reporting_time}}</p><p style="margin:4px 0;font-size:12.75px;color:#334155;"><strong>Venue:</strong> {{venue_name}}</p><p style="margin:4px 0;font-size:12.75px;color:#334155;"><strong>Address:</strong> {{venue_address}}</p><p style="margin:4px 0;font-size:12.75px;"><strong style="color:#334155;">Google Maps:</strong> <a href="{{google_maps_link}}" target="_blank" style="color:#f97316;font-size:12.75px;text-decoration:none;font-weight:600;">View Location</a></p></div><p style="font-size:12.75px;margin:18px 0 10px;color:#334155;font-weight:500;">Because details have changed, please reconfirm your availability below:</p><div style="margin:20px 0;"><a href="{{confirm_url}}" style="background-color:#16a34a;color:#ffffff;padding:10px 18px;text-decoration:none;border-radius:6px;font-weight:bold;display:inline-block;margin-right:10px;font-size:11.9px;line-height:1.2;">Confirm Updated Date</a><a href="{{reschedule_url}}" style="background-color:#f59e0b;color:#ffffff;padding:10px 18px;text-decoration:none;border-radius:6px;font-weight:bold;display:inline-block;margin-right:10px;font-size:11.9px;line-height:1.2;">Request Another Date</a><a href="{{not_interested_url}}" style="background-color:#64748b;color:#ffffff;padding:10px 18px;text-decoration:none;border-radius:6px;font-weight:bold;display:inline-block;font-size:11.9px;line-height:1.2;">Not Interested</a></div>',
     plainText: 'Dear {{candidate_name}}, The walk-in interview schedule for {{job_title}} has been updated to {{walk_in_date}} at {{reporting_time}}. Please reconfirm your attendance: {{confirmation_url}}',
     variables: ['candidate_name', 'job_title', 'job_id', 'walk_in_date', 'reporting_time', 'venue_name', 'venue_address', 'google_maps_link', 'confirmation_url', 'confirm_url', 'reschedule_url', 'not_interested_url'],
   },
@@ -291,26 +291,29 @@ export const compileEmailTemplate = async (
         plainText: `Notification regarding ${templateKey}`,
       };
     }
-  } else if (templateKey === 'RECRUITER_WELCOME' && template.htmlBody && !template.htmlBody.includes('temporary_password')) {
-    // Stale template without password field found in database: auto-heal to canonical template
-    const defaultTpl = DEFAULT_TEMPLATES.RECRUITER_WELCOME;
-    template = {
-      ...template,
-      htmlBody: defaultTpl.htmlBody,
-      plainText: defaultTpl.plainText,
-      variables: defaultTpl.variables,
-    };
-    cache.set(cacheKey, template, 300);
-    prisma.emailTemplate
-      .update({
-        where: { templateKey: 'RECRUITER_WELCOME' },
-        data: {
-          htmlBody: defaultTpl.htmlBody,
-          plainText: defaultTpl.plainText,
-          variables: defaultTpl.variables,
-        },
-      })
-      .catch((err) => console.warn('[TEMPLATE ENGINE] Auto-heal sync error:', err.message));
+  } else if (templateKey.startsWith('WALK_IN_') || (templateKey === 'RECRUITER_WELCOME' && template.htmlBody && !template.htmlBody.includes('temporary_password'))) {
+    const canonicalTpl = DEFAULT_TEMPLATES[templateKey];
+    if (canonicalTpl) {
+      template = {
+        ...template,
+        subject: canonicalTpl.subject,
+        htmlBody: canonicalTpl.htmlBody,
+        plainText: canonicalTpl.plainText,
+        variables: canonicalTpl.variables,
+      };
+      cache.set(cacheKey, template, 300);
+      prisma.emailTemplate
+        .update({
+          where: { templateKey },
+          data: {
+            subject: canonicalTpl.subject,
+            htmlBody: canonicalTpl.htmlBody,
+            plainText: canonicalTpl.plainText,
+            variables: canonicalTpl.variables,
+          },
+        })
+        .catch((err) => console.warn('[TEMPLATE ENGINE] Auto-heal sync error:', err.message));
+    }
   }
 
   const interpolatedSubject = interpolateVariables(template.subject, enrichedVars);
