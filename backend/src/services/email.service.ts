@@ -12,8 +12,14 @@ export interface DispatchEmailPayload {
   variables: Record<string, string>;
 }
 
-// Internal worker to compile dynamic template, send via Resend and record in EmailLog
-const processEmailDispatch = async (payload: DispatchEmailPayload): Promise<void> => {
+/**
+ * Core dynamic email dispatcher that awaits template compilation, provider transmission,
+ * and records the audit log in prisma.emailLog.
+ * Rejects if provider returns an error so controllers can handle email-provider failures.
+ */
+export const sendDynamicEmail = async (
+  payload: DispatchEmailPayload
+): Promise<{ success: boolean; messageId?: string }> => {
   const { templateKey, recipient, variables } = payload;
 
   try {
@@ -42,18 +48,24 @@ const processEmailDispatch = async (payload: DispatchEmailPayload): Promise<void
     }
 
     // Persist email audit record
-    await prisma.emailLog.create({
-      data: {
-        recipient,
-        subject: compiled.subject,
-        template: templateKey,
-        status: 'SENT',
-        messageId,
-        payload: variables,
-      },
-    });
+    try {
+      await prisma.emailLog.create({
+        data: {
+          recipient,
+          subject: compiled.subject,
+          template: templateKey,
+          status: 'SENT',
+          messageId,
+          payload: variables,
+        },
+      });
+    } catch (logErr: any) {
+      console.warn('[EMAIL AUDIT LOG WARNING]:', logErr?.message);
+    }
+
+    return { success: true, messageId };
   } catch (err: any) {
-    console.error(`[BACKGROUND EMAIL FAILED] To: ${recipient} | Error:`, err.message);
+    console.error(`[EMAIL DISPATCH FAILED] To: ${recipient} | Error:`, err.message);
 
     try {
       await prisma.emailLog.create({
@@ -69,6 +81,8 @@ const processEmailDispatch = async (payload: DispatchEmailPayload): Promise<void
     } catch {
       // ignore secondary db error
     }
+
+    throw err;
   }
 };
 
@@ -82,7 +96,7 @@ export const dispatchEmail = (
   variables: Record<string, string>
 ): void => {
   setImmediate(() => {
-    processEmailDispatch({ templateKey, recipient, variables }).catch((err) => {
+    sendDynamicEmail({ templateKey, recipient, variables }).catch((err) => {
       console.error('[UNCAUGHT EMAIL QUEUE ERROR]:', err);
     });
   });

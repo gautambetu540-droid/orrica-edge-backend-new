@@ -7,6 +7,7 @@ import { createNotification } from '../services/notification.service';
 import { uploadResumeFile } from '../services/storage.service';
 import { generateCandidateCode, generateApplicationCode } from '../utils/codeGenerators';
 import { logCandidateTimeline } from '../services/timeline.service';
+import { sendDynamicEmail } from '../services/email.service';
 
 export const CANONICAL_PIPELINE_STAGES = [
   'New',
@@ -1732,3 +1733,429 @@ export const updateCandidateStatus = async (req: Request, res: Response, next: N
 };
 
 
+
+/**
+ * Manual Resend of Walk-in Confirmation Email: POST /api/v1/candidates/:id/resend-walk-in-email
+ * Re-dispatches personalized walk-in email with secure confirmation link.
+ * Handles 404 for missing candidate, 400 for missing walk-in session or invalid email,
+ * 502 for email-provider failures, and enforces idempotency cooldown.
+ */
+export const resendWalkInEmail = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const identifier = req.params.id;
+
+    if (!identifier || (identifier.length > 36 && !/^[0-9a-fA-F-]+$/.test(identifier))) {
+      sendError(res, 'Candidate not found', 404);
+      return;
+    }
+
+    const candidate = await prisma.candidate.findFirst({
+      where: {
+        OR: [
+          { id: identifier },
+          { candidateCode: identifier },
+        ],
+      },
+      include: {
+        applications: {
+          include: {
+            job: {
+              include: { client: true },
+            },
+          },
+          orderBy: { appliedDate: 'desc' },
+          take: 1,
+        },
+      },
+    });
+
+    if (!candidate) {
+      sendError(res, 'Candidate not found', 404);
+      return;
+    }
+
+    // Email validation
+    if (!candidate.email || !candidate.email.trim() || !candidate.email.includes('@')) {
+      sendError(res, 'Candidate does not have a valid email address configured.', 400);
+      return;
+    }
+
+    // Walk-in session validation
+    const targetWalkInDate = candidate.walkInDate || (req.body?.walkInDate ? new Date(req.body.walkInDate) : null);
+    if (!targetWalkInDate || isNaN(targetWalkInDate.getTime())) {
+      sendError(res, 'Candidate does not have an active walk-in session or scheduled date.', 400);
+      return;
+    }
+
+    // Idempotency: Prevent accidental duplicate emails within 15 seconds
+    const recentActivity = await prisma.candidateActivity.findFirst({
+      where: {
+        candidateId: candidate.id,
+        action: 'WALK_IN_EMAIL_RESENT',
+        createdAt: { gte: new Date(Date.now() - 15 * 1000) },
+      },
+    });
+
+    if (recentActivity) {
+      sendSuccess(res, {
+        candidateId: candidate.id,
+        candidateName: candidate.fullName,
+        recipient: candidate.email,
+        dispatched: true,
+        cooldown: true,
+        message: `Walk-in confirmation email was recently dispatched to ${candidate.email}. (Cooldown active)`,
+      });
+      return;
+    }
+
+    const application = candidate.applications?.[0];
+    const job = application?.job;
+    const jobTitle = req.body?.jobTitle || job?.title || 'Walk-in Interview Candidate';
+    const jobId = req.body?.jobId || job?.jobCode || job?.id || 'OE-WALK';
+    const clientName = req.body?.clientName || job?.client?.companyName || 'Orrica Edge Partner';
+    const walkInDateStr = targetWalkInDate.toISOString().slice(0, 10);
+    const reportingTimeStr = req.body?.reportingTime || candidate.walkInTime || '10:00 AM';
+    const venueNameStr = req.body?.venueName || 'Orrica Edge Recruitment & Interview Center';
+    const venueAddressStr = req.body?.venueAddress || 'Corporate Suite, Tech Park';
+    const googleMapsLinkStr = req.body?.googleMapsLink || '';
+    const instructionsStr = req.body?.instructions || 'Please carry 2 printed copies of your resume, a government-issued photo ID, and academic certificates.';
+
+    const token = `wic_${candidate.id}_${candidate.candidateCode || candidate.id.slice(0, 8)}`;
+    const frontendBase = (process.env.FRONTEND_URL || 'https://orricaedge.com').replace(/\/+$/, '');
+    const confirmationUrl = `${frontendBase}/walk-in/confirm/${encodeURIComponent(token)}`;
+    const confirmUrl = `${confirmationUrl}?action=confirm`;
+    const rescheduleUrl = `${confirmationUrl}?action=reschedule`;
+    const notInterestedUrl = `${confirmationUrl}?action=not_interested`;
+
+    const variables: Record<string, string> = {
+      candidate_name: candidate.fullName || candidate.name || 'Candidate',
+      candidate_email: candidate.email,
+      job_title: jobTitle,
+      job_id: jobId,
+      client_name: clientName,
+      walk_in_date: walkInDateStr,
+      walkin_date: walkInDateStr,
+      reporting_time: reportingTimeStr,
+      walk_in_time: reportingTimeStr,
+      venue_name: venueNameStr,
+      venue_address: venueAddressStr,
+      google_maps_link: googleMapsLinkStr,
+      instructions: instructionsStr,
+      candidate_instructions: instructionsStr,
+      confirmation_url: confirmationUrl,
+      confirmation_link: confirmationUrl,
+      confirm_url: confirmUrl,
+      reschedule_url: rescheduleUrl,
+      not_interested_url: notInterestedUrl,
+    };
+
+    let dispatchResult: { success: boolean; messageId?: string };
+    try {
+      dispatchResult = await sendDynamicEmail({
+        templateKey: 'WALK_IN_INVITATION',
+        recipient: candidate.email,
+        variables,
+      });
+    } catch (providerErr: any) {
+      console.error(`[WALK-IN RESEND EMAIL FAILED] Candidate ${candidate.id}:`, providerErr);
+      sendError(res, `Email provider failed to dispatch confirmation email: ${providerErr.message || 'Provider transmission error'}`, 502);
+      return;
+    }
+
+    const recruiterId = req.user?.role === 'RECRUITER' ? req.user.userId : null;
+    await prisma.candidateActivity.create({
+      data: {
+        candidateId: candidate.id,
+        userId: req.user?.userId || null,
+        recruiterId,
+        action: 'WALK_IN_EMAIL_RESENT',
+        notes: `Walk-in confirmation email dispatched to ${candidate.email} for ${jobTitle} (${walkInDateStr}).`,
+        metadata: {
+          recipient: candidate.email,
+          jobTitle,
+          walkInDate: walkInDateStr,
+          reportingTime: reportingTimeStr,
+          messageId: dispatchResult.messageId,
+        },
+      },
+    });
+
+    await logCandidateTimeline({
+      candidateId: candidate.id,
+      userId: req.user?.userId || null,
+      userName: req.user?.email || 'Recruiter',
+      userRole: req.user?.role || 'ADMIN',
+      action: 'Walk-in Email Resent',
+      newStatus: candidate.status,
+      remarks: `Walk-in confirmation email manually resent to ${candidate.email}. Message ID: ${dispatchResult.messageId || 'simulated'}`,
+    });
+
+    sendSuccess(res, {
+      candidateId: candidate.id,
+      candidateName: candidate.fullName,
+      recipient: candidate.email,
+      dispatched: true,
+      messageId: dispatchResult.messageId,
+      message: `Walk-in confirmation email dispatched to ${candidate.email}.`,
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * Dispatch Initial Walk-in Invitation: POST /api/v1/candidates/:id/send-walk-in-invitation
+ */
+export const sendWalkInInvitation = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const identifier = req.params.id;
+
+    const candidate = await prisma.candidate.findFirst({
+      where: {
+        OR: [
+          { id: identifier },
+          { candidateCode: identifier },
+        ],
+      },
+      include: {
+        applications: {
+          include: {
+            job: {
+              include: { client: true },
+            },
+          },
+          orderBy: { appliedDate: 'desc' },
+          take: 1,
+        },
+      },
+    });
+
+    if (!candidate) {
+      sendError(res, 'Candidate not found', 404);
+      return;
+    }
+
+    if (!candidate.email || !candidate.email.trim() || !candidate.email.includes('@')) {
+      sendError(res, 'Candidate does not have a valid email address configured.', 400);
+      return;
+    }
+
+    let targetWalkInDate = candidate.walkInDate;
+    if (req.body?.walkInDate) {
+      targetWalkInDate = new Date(req.body.walkInDate);
+    }
+    const reportingTime = req.body?.reportingTime || req.body?.walkInTime || candidate.walkInTime || '10:00 AM';
+
+    if (!targetWalkInDate || isNaN(targetWalkInDate.getTime())) {
+      sendError(res, 'Candidate does not have an active walk-in session or scheduled date.', 400);
+      return;
+    }
+
+    // Persist walk-in schedule if updated
+    const updatedCandidate = await prisma.candidate.update({
+      where: { id: candidate.id },
+      data: {
+        walkInDate: targetWalkInDate,
+        walkInTime: reportingTime,
+        walkInStatus: candidate.walkInStatus || 'EXPECTED',
+      },
+    });
+
+    const application = candidate.applications?.[0];
+    const job = application?.job;
+    const jobTitle = req.body?.jobTitle || job?.title || 'Walk-in Interview Candidate';
+    const jobId = req.body?.jobId || job?.jobCode || job?.id || 'OE-WALK';
+    const clientName = req.body?.clientName || job?.client?.companyName || 'Orrica Edge Partner';
+    const walkInDateStr = targetWalkInDate.toISOString().slice(0, 10);
+    const venueNameStr = req.body?.venueName || 'Orrica Edge Recruitment & Interview Center';
+    const venueAddressStr = req.body?.venueAddress || 'Corporate Suite, Tech Park';
+    const googleMapsLinkStr = req.body?.googleMapsLink || '';
+    const instructionsStr = req.body?.instructions || 'Please carry 2 printed copies of your resume, a government-issued photo ID, and academic certificates.';
+
+    const token = `wic_${candidate.id}_${candidate.candidateCode || candidate.id.slice(0, 8)}`;
+    const frontendBase = (process.env.FRONTEND_URL || 'https://orricaedge.com').replace(/\/+$/, '');
+    const confirmationUrl = `${frontendBase}/walk-in/confirm/${encodeURIComponent(token)}`;
+
+    const variables: Record<string, string> = {
+      candidate_name: candidate.fullName || candidate.name || 'Candidate',
+      candidate_email: candidate.email,
+      job_title: jobTitle,
+      job_id: jobId,
+      client_name: clientName,
+      walk_in_date: walkInDateStr,
+      walkin_date: walkInDateStr,
+      reporting_time: reportingTime,
+      walk_in_time: reportingTime,
+      venue_name: venueNameStr,
+      venue_address: venueAddressStr,
+      google_maps_link: googleMapsLinkStr,
+      instructions: instructionsStr,
+      candidate_instructions: instructionsStr,
+      confirmation_url: confirmationUrl,
+      confirmation_link: confirmationUrl,
+      confirm_url: `${confirmationUrl}?action=confirm`,
+      reschedule_url: `${confirmationUrl}?action=reschedule`,
+      not_interested_url: `${confirmationUrl}?action=not_interested`,
+    };
+
+    let dispatchResult: { success: boolean; messageId?: string };
+    try {
+      dispatchResult = await sendDynamicEmail({
+        templateKey: 'WALK_IN_INVITATION',
+        recipient: candidate.email,
+        variables,
+      });
+    } catch (providerErr: any) {
+      console.error(`[WALK-IN INVITATION EMAIL FAILED] Candidate ${candidate.id}:`, providerErr);
+      sendError(res, `Email provider failed to dispatch invitation email: ${providerErr.message || 'Provider transmission error'}`, 502);
+      return;
+    }
+
+    const recruiterId = req.user?.role === 'RECRUITER' ? req.user.userId : null;
+    await prisma.candidateActivity.create({
+      data: {
+        candidateId: candidate.id,
+        userId: req.user?.userId || null,
+        recruiterId,
+        action: 'WALK_IN_INVITATION_SENT',
+        notes: `Walk-in invitation sent to ${candidate.email} for ${jobTitle} (${walkInDateStr}).`,
+        metadata: {
+          recipient: candidate.email,
+          jobTitle,
+          walkInDate: walkInDateStr,
+          reportingTime,
+          messageId: dispatchResult.messageId,
+        },
+      },
+    });
+
+    await logCandidateTimeline({
+      candidateId: candidate.id,
+      userId: req.user?.userId || null,
+      userName: req.user?.email || 'Recruiter',
+      userRole: req.user?.role || 'ADMIN',
+      action: 'Walk-in Invitation Sent',
+      newStatus: updatedCandidate.status,
+      remarks: `Walk-in invitation email dispatched to ${candidate.email}. Message ID: ${dispatchResult.messageId || 'simulated'}`,
+    });
+
+    sendSuccess(res, {
+      candidateId: candidate.id,
+      candidateName: candidate.fullName,
+      recipient: candidate.email,
+      candidate: updatedCandidate,
+      dispatched: true,
+      messageId: dispatchResult.messageId,
+      message: `Walk-in invitation dispatched to ${candidate.email}.`,
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * Approve Walk-in Reschedule Request: POST /api/v1/candidates/:id/approve-walk-in-reschedule
+ */
+export const approveWalkInReschedule = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const identifier = req.params.id;
+    const { approvedDate, approvedTime } = req.body;
+
+    const candidate = await prisma.candidate.findFirst({
+      where: {
+        OR: [
+          { id: identifier },
+          { candidateCode: identifier },
+        ],
+      },
+      include: {
+        applications: {
+          include: {
+            job: {
+              include: { client: true },
+            },
+          },
+          orderBy: { appliedDate: 'desc' },
+          take: 1,
+        },
+      },
+    });
+
+    if (!candidate) {
+      sendError(res, 'Candidate not found', 404);
+      return;
+    }
+
+    const newWalkInDate = approvedDate ? new Date(approvedDate) : (candidate.walkInDate || new Date());
+    const newWalkInTime = approvedTime || candidate.walkInTime || '10:00 AM';
+
+    const updated = await prisma.candidate.update({
+      where: { id: candidate.id },
+      data: {
+        walkInDate: newWalkInDate,
+        walkInTime: newWalkInTime,
+        walkInStatus: 'CONFIRMED',
+        walkInResponse: 'COMING_TODAY',
+      },
+    });
+
+    const application = candidate.applications?.[0];
+    const job = application?.job;
+    const jobTitle = job?.title || 'Walk-in Interview Candidate';
+    const dateStr = newWalkInDate.toISOString().slice(0, 10);
+
+    if (candidate.email && candidate.email.includes('@')) {
+      try {
+        await sendDynamicEmail({
+          templateKey: 'WALK_IN_RESCHEDULE_APPROVED',
+          recipient: candidate.email,
+          variables: {
+            candidate_name: candidate.fullName || candidate.name || 'Candidate',
+            candidate_email: candidate.email,
+            job_title: jobTitle,
+            job_id: job?.jobCode || job?.id || 'OE-WALK',
+            walk_in_date: dateStr,
+            walkin_date: dateStr,
+            reporting_time: newWalkInTime,
+            venue_name: 'Orrica Edge Recruitment & Interview Center',
+            venue_address: 'Corporate Suite, Tech Park',
+          },
+        });
+      } catch (emailErr: any) {
+        console.warn('[RESCHEDULE APPROVAL EMAIL WARNING]:', emailErr.message);
+      }
+    }
+
+    const recruiterId = req.user?.role === 'RECRUITER' ? req.user.userId : null;
+    await prisma.candidateActivity.create({
+      data: {
+        candidateId: candidate.id,
+        userId: req.user?.userId || null,
+        recruiterId,
+        action: 'WALK_IN_RESCHEDULE_APPROVED',
+        notes: `Walk-in reschedule request approved for ${dateStr} at ${newWalkInTime}.`,
+        metadata: {
+          approvedDate: dateStr,
+          approvedTime: newWalkInTime,
+        },
+      },
+    });
+
+    await logCandidateTimeline({
+      candidateId: candidate.id,
+      userId: req.user?.userId || null,
+      userName: req.user?.email || 'Recruiter',
+      userRole: req.user?.role || 'ADMIN',
+      action: 'Walk-in Reschedule Approved',
+      newStatus: updated.status,
+      remarks: `Walk-in reschedule approved for ${dateStr} at ${newWalkInTime}.`,
+    });
+
+    sendSuccess(res, {
+      candidate: updated,
+      message: `Reschedule approved for ${dateStr}.`,
+    });
+  } catch (err) {
+    next(err);
+  }
+};

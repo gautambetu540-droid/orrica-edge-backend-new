@@ -12,6 +12,9 @@ import {
   checkDuplicateCandidate,
   getCandidateTimeline,
   updateCandidateStatus,
+  resendWalkInEmail,
+  sendWalkInInvitation,
+  approveWalkInReschedule,
 } from '../controllers/candidate.controller';
 import { uploadResume } from '../middlewares/upload.middleware';
 import {
@@ -146,6 +149,29 @@ router.delete(
   authenticateJwt,
   requireRoles('SUPER_ADMIN', 'ADMIN'),
   deleteCandidate
+);
+
+
+// Walk-in Management & Confirmation routes
+router.post(
+  '/:id/resend-walk-in-email',
+  authenticateJwt,
+  requireRoles('SUPER_ADMIN', 'ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
+  resendWalkInEmail
+);
+
+router.post(
+  '/:id/send-walk-in-invitation',
+  authenticateJwt,
+  requireRoles('SUPER_ADMIN', 'ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
+  sendWalkInInvitation
+);
+
+router.post(
+  '/:id/approve-walk-in-reschedule',
+  authenticateJwt,
+  requireRoles('SUPER_ADMIN', 'ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
+  approveWalkInReschedule
 );
 
 export default router;

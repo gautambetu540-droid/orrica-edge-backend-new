@@ -30,6 +30,7 @@ import searchRoutes from './routes/search.routes';
 import { ensureDefaultUniversalForm } from './controllers/universal-form.controller';
 import { ensureDatabaseSchema } from './scripts/bootstrap-db';
 import userRoutes from './routes/user.routes';
+import walkInRoutes from './routes/walk-in.routes';
 import swaggerRouter from './swagger/swagger';
 
 const app = express();
@@ -124,10 +125,12 @@ const registerApiRoutes = (prefix: string) => {
   app.use(`${prefix}/admin/migrate`, migrationRoutes);
   app.use(`${prefix}/universal-forms`, universalFormRoutes);
   app.use(`${prefix}/notifications`, notificationRoutes);
+  app.use(`${prefix}/walk-in`, walkInRoutes);
 };
 
 registerApiRoutes('/api/v1');
 registerApiRoutes('/api');
+app.use('/walk-in', walkInRoutes);
 
 // 404 Route Handler
 app.use('*', (req, res) => {
