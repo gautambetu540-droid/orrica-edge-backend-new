@@ -4,6 +4,48 @@ import { sendSuccess, sendError } from '../utils/response';
 import { sendDynamicEmail } from '../services/email.service';
 import { logCandidateTimeline } from '../services/timeline.service';
 import { formatCandidateGreetingName, formatCandidateGreeting } from '../utils/nameFormatter';
+import { formatWalkInDate } from '../utils/dateFormatter';
+
+export interface DecodedTokenPayload {
+  candidateId: string;
+  jobId?: string;
+  applicationId?: string;
+  sessionId?: string;
+}
+
+/**
+ * Parses walk-in confirmation token supporting both structured JSON and legacy base64/UUID formats.
+ */
+export function parseWalkInToken(rawToken: string): DecodedTokenPayload {
+  let candidateId = rawToken;
+  let jobId: string | undefined;
+  let applicationId: string | undefined;
+  let sessionId: string | undefined;
+
+  if (rawToken.startsWith('wic_')) {
+    const part = rawToken.slice(4);
+    try {
+      const decoded = Buffer.from(part, 'base64url').toString('utf8');
+      if (decoded.startsWith('{') && decoded.endsWith('}')) {
+        const parsed = JSON.parse(decoded);
+        if (parsed.c) candidateId = parsed.c;
+        if (parsed.j) jobId = parsed.j;
+        if (parsed.a) applicationId = parsed.a;
+        if (parsed.s) sessionId = parsed.s;
+      } else if (/^[0-9a-fA-F-]{36}$/.test(decoded) || /^[A-Za-z0-9_-]+$/.test(decoded)) {
+        candidateId = decoded;
+      } else {
+        candidateId = part.split('_')[0] || part;
+      }
+    } catch {
+      candidateId = part.split('_')[0] || part;
+    }
+  } else if (rawToken.startsWith('tok_')) {
+    candidateId = rawToken.slice(4);
+  }
+
+  return { candidateId, jobId, applicationId, sessionId };
+}
 
 /**
  * Public candidate details lookup by confirmation token
@@ -17,23 +59,7 @@ export const getWalkInConfirmation = async (req: Request, res: Response, next: N
       return;
     }
 
-    // Token format: wic_<base64url> or wic_<candidateId>_<hashOrCode> or <candidateId> or candidateCode
-    let candidateId = rawToken;
-    if (rawToken.startsWith('wic_')) {
-      const part = rawToken.slice(4);
-      try {
-        const decoded = Buffer.from(part, 'base64url').toString('utf8');
-        if (/^[0-9a-fA-F-]{36}$/.test(decoded) || /^[A-Za-z0-9_-]+$/.test(decoded)) {
-          candidateId = decoded;
-        } else {
-          candidateId = part.split('_')[0] || part;
-        }
-      } catch {
-        candidateId = part.split('_')[0] || part;
-      }
-    } else if (rawToken.startsWith('tok_')) {
-      candidateId = rawToken.slice(4);
-    }
+    const { candidateId, jobId: tokenJobId, applicationId: tokenAppId, sessionId: tokenSessionId } = parseWalkInToken(rawToken);
 
     const candidate = await prisma.candidate.findFirst({
       where: {
@@ -52,7 +78,6 @@ export const getWalkInConfirmation = async (req: Request, res: Response, next: N
             },
           },
           orderBy: { appliedDate: 'desc' },
-          take: 1,
         },
       },
     });
@@ -62,23 +87,68 @@ export const getWalkInConfirmation = async (req: Request, res: Response, next: N
       return;
     }
 
-    const application = candidate.applications?.[0];
+    // Match exact application based on token signature or candidate activity history
+    let application: any = null;
+    if (tokenAppId && candidate.applications.length > 0) {
+      application = candidate.applications.find((app) => app.id === tokenAppId);
+    }
+    if (!application && tokenJobId && candidate.applications.length > 0) {
+      application = candidate.applications.find(
+        (app) => app.jobId === tokenJobId || app.job?.id === tokenJobId || app.job?.jobCode === tokenJobId
+      );
+    }
+    if (!application && (candidate as any).targetJobId && candidate.applications.length > 0) {
+      application = candidate.applications.find(
+        (app) => app.jobId === (candidate as any).targetJobId || app.job?.id === (candidate as any).targetJobId
+      );
+    }
+    if (!application && candidate.applications.length > 1) {
+      const recentActivity = await prisma.candidateActivity.findFirst({
+        where: {
+          candidateId: candidate.id,
+          action: { in: ['WALK_IN_INVITATION_SENT', 'WALK_IN_EMAIL_RESENT', 'WALK_IN_SCHEDULED'] },
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+      if (recentActivity?.metadata) {
+        const meta = recentActivity.metadata as any;
+        if (meta.jobId) {
+          application = candidate.applications.find(
+            (app) => app.jobId === meta.jobId || app.job?.id === meta.jobId
+          );
+        }
+      }
+    }
+    if (!application) {
+      application = candidate.applications?.[0] || null;
+    }
+
     const job = application?.job;
     const greetingName = formatCandidateGreetingName(candidate);
 
-    // Retrieve configured session details from job.hiringProcess or defaults
+    // Retrieve configured session details from job.hiringProcess
     const hiringProcess = (job?.hiringProcess as any) || {};
     const savedSession = hiringProcess.walkInSession || {};
 
-    const walkInDateStr = candidate.walkInDate
-      ? candidate.walkInDate.toISOString().slice(0, 10)
-      : savedSession.date || new Date().toISOString().slice(0, 10);
+    // Format walk-in date using IST date formatter
+    const rawDate = candidate.walkInDate || savedSession.date || savedSession.interviewDate;
+    const dateInfo = formatWalkInDate(rawDate);
+    const walkInDateStr = dateInfo.dateStr;
 
-    const reportingTimeStr = candidate.walkInTime || savedSession.reportingTime || '09:30 AM';
-    const venueNameStr = savedSession.venueName || 'Orrica Edge Corporate Tower — Hub 4';
-    const venueAddressStr = savedSession.venueAddress || 'Floor 4, Block B, DLF Cyber City, Phase II, Gurugram, Haryana 122002';
-    const googleMapsLinkStr = savedSession.googleMapsLink || 'https://maps.google.com/?q=DLF+Cyber+City+Gurugram';
-    const instructionsStr = savedSession.instructions || 'Please bring 2 copies of your updated resume and government photo ID. Arrive in business formals.';
+    const reportingTimeStr = (candidate.walkInTime || savedSession.reportingTime || '').trim();
+    const venueNameStr = (savedSession.venueName || '').trim();
+    const venueAddressStr = (savedSession.venueAddress || '').trim();
+    let googleMapsLinkStr = (savedSession.googleMapsLink || '').trim();
+
+    if (!googleMapsLinkStr && venueAddressStr) {
+      googleMapsLinkStr = 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(venueAddressStr);
+    }
+    if (googleMapsLinkStr && !googleMapsLinkStr.startsWith('http://') && !googleMapsLinkStr.startsWith('https://')) {
+      googleMapsLinkStr = '';
+    }
+
+    const instructionsStr = (savedSession.instructions || '').trim();
+    const venueConfigured = Boolean(venueNameStr && venueAddressStr);
 
     const sanitizedCandidate = {
       id: candidate.id,
@@ -88,7 +158,14 @@ export const getWalkInConfirmation = async (req: Request, res: Response, next: N
       greetingName,
       email: candidate.email,
       walkInStatus: candidate.walkInStatus,
-      walkInConfirmationStatus: candidate.walkInStatus === 'RESCHEDULE_REQUESTED' ? 'RESCHEDULE_REQUESTED' : (candidate.walkInStatus === 'CONFIRMED' ? 'CONFIRMED' : (candidate.walkInStatus === 'CANCELLED' ? 'NOT_INTERESTED' : 'CONFIRMATION_PENDING')),
+      walkInConfirmationStatus:
+        candidate.walkInStatus === 'RESCHEDULE_REQUESTED'
+          ? 'RESCHEDULE_REQUESTED'
+          : candidate.walkInStatus === 'CONFIRMED'
+          ? 'CONFIRMED'
+          : candidate.walkInStatus === 'CANCELLED'
+          ? 'NOT_INTERESTED'
+          : 'CONFIRMATION_PENDING',
       walkInResponse: candidate.walkInResponse,
       walkInDate: walkInDateStr,
       walkInTime: reportingTimeStr,
@@ -98,22 +175,27 @@ export const getWalkInConfirmation = async (req: Request, res: Response, next: N
       googleMapsLink: googleMapsLinkStr,
       candidateInstructions: instructionsStr,
       instructions: instructionsStr,
+      venueConfigured,
       appliedPosition: job?.title || 'Walk-in Interview Candidate',
       targetJobTitle: job?.title || 'Walk-in Interview Candidate',
     };
 
     const sessionDetails = {
-      id: savedSession.id || ('session-' + (job?.id || candidate.id)),
+      id: savedSession.id || tokenSessionId || ('session-' + (job?.id || candidate.id)),
       date: walkInDateStr,
       interviewDate: walkInDateStr,
+      weekday: dateInfo.weekday,
+      longWeekday: dateInfo.longWeekday,
+      displayDate: dateInfo.displayDate,
       reportingTime: reportingTimeStr,
-      interviewStartTime: savedSession.interviewStartTime || '10:00 AM',
-      interviewEndTime: savedSession.interviewEndTime || '02:00 PM',
+      interviewStartTime: savedSession.interviewStartTime || '',
+      interviewEndTime: savedSession.interviewEndTime || '',
       venueName: venueNameStr,
       venueAddress: venueAddressStr,
       googleMapsLink: googleMapsLinkStr,
       instructions: instructionsStr,
       candidateInstructions: instructionsStr,
+      venueConfigured,
       clientName: job?.client?.companyName || 'Orrica Edge Partner',
     };
 
@@ -122,9 +204,9 @@ export const getWalkInConfirmation = async (req: Request, res: Response, next: N
       jobTitle: job?.title || 'Walk-in Interview Candidate',
       clientName: job?.client?.companyName || 'Orrica Edge Partner',
       session: sessionDetails,
+      venueConfigured,
     };
 
-    // Return both top-level and inside data for universal compatibility
     res.status(200).json({
       success: true,
       message: 'Success',
@@ -150,22 +232,7 @@ export const submitWalkInConfirmation = async (req: Request, res: Response, next
       return;
     }
 
-    let candidateId = rawToken;
-    if (rawToken.startsWith('wic_')) {
-      const part = rawToken.slice(4);
-      try {
-        const decoded = Buffer.from(part, 'base64url').toString('utf8');
-        if (/^[0-9a-fA-F-]{36}$/.test(decoded) || /^[A-Za-z0-9_-]+$/.test(decoded)) {
-          candidateId = decoded;
-        } else {
-          candidateId = part.split('_')[0] || part;
-        }
-      } catch {
-        candidateId = part.split('_')[0] || part;
-      }
-    } else if (rawToken.startsWith('tok_')) {
-      candidateId = rawToken.slice(4);
-    }
+    const { candidateId, jobId: tokenJobId, applicationId: tokenAppId, sessionId: tokenSessionId } = parseWalkInToken(rawToken);
 
     const candidate = await prisma.candidate.findFirst({
       where: {
@@ -184,7 +251,6 @@ export const submitWalkInConfirmation = async (req: Request, res: Response, next
             },
           },
           orderBy: { appliedDate: 'desc' },
-          take: 1,
         },
       },
     });
@@ -194,16 +260,58 @@ export const submitWalkInConfirmation = async (req: Request, res: Response, next
       return;
     }
 
-    const application = candidate.applications?.[0];
+    // Match exact application based on token signature or candidate activity history
+    let application: any = null;
+    if (tokenAppId && candidate.applications.length > 0) {
+      application = candidate.applications.find((app) => app.id === tokenAppId);
+    }
+    if (!application && tokenJobId && candidate.applications.length > 0) {
+      application = candidate.applications.find(
+        (app) => app.jobId === tokenJobId || app.job?.id === tokenJobId || app.job?.jobCode === tokenJobId
+      );
+    }
+    if (!application && (candidate as any).targetJobId && candidate.applications.length > 0) {
+      application = candidate.applications.find(
+        (app) => app.jobId === (candidate as any).targetJobId || app.job?.id === (candidate as any).targetJobId
+      );
+    }
+    if (!application && candidate.applications.length > 1) {
+      const recentActivity = await prisma.candidateActivity.findFirst({
+        where: {
+          candidateId: candidate.id,
+          action: { in: ['WALK_IN_INVITATION_SENT', 'WALK_IN_EMAIL_RESENT', 'WALK_IN_SCHEDULED'] },
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+      if (recentActivity?.metadata) {
+        const meta = recentActivity.metadata as any;
+        if (meta.jobId) {
+          application = candidate.applications.find(
+            (app) => app.jobId === meta.jobId || app.job?.id === meta.jobId
+          );
+        }
+      }
+    }
+    if (!application) {
+      application = candidate.applications?.[0] || null;
+    }
+
     const job = application?.job;
     const jobTitle = job?.title || 'Walk-in Interview';
     const greetingName = formatCandidateGreetingName(candidate);
 
     const hiringProcess = (job?.hiringProcess as any) || {};
     const savedSession = hiringProcess.walkInSession || {};
-    const venueNameStr = savedSession.venueName || 'Orrica Edge Corporate Tower — Hub 4';
-    const venueAddressStr = savedSession.venueAddress || 'Floor 4, Block B, DLF Cyber City, Phase II, Gurugram, Haryana 122002';
-    const googleMapsLinkStr = savedSession.googleMapsLink || 'https://maps.google.com/?q=DLF+Cyber+City+Gurugram';
+    const venueNameStr = (savedSession.venueName || '').trim();
+    const venueAddressStr = (savedSession.venueAddress || '').trim();
+    let googleMapsLinkStr = (savedSession.googleMapsLink || '').trim();
+
+    if (!googleMapsLinkStr && venueAddressStr) {
+      googleMapsLinkStr = 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(venueAddressStr);
+    }
+    if (googleMapsLinkStr && !googleMapsLinkStr.startsWith('http://') && !googleMapsLinkStr.startsWith('https://')) {
+      googleMapsLinkStr = '';
+    }
 
     let newWalkInStatus = candidate.walkInStatus || 'EXPECTED';
     let newWalkInResponse = candidate.walkInResponse || 'NO_RESPONSE';
@@ -234,7 +342,10 @@ export const submitWalkInConfirmation = async (req: Request, res: Response, next
         walkInStatus: newWalkInStatus,
         walkInResponse: newWalkInResponse,
         feedback: comment || reason || candidate.feedback,
-        nextActionRemarks: action === 'RESCHEDULE' && preferredDate ? `Candidate requested reschedule to ${preferredDate}. ${comment || ''}`.trim() : undefined,
+        nextActionRemarks:
+          action === 'RESCHEDULE' && preferredDate
+            ? ('Candidate requested reschedule to ' + preferredDate + '. ' + (comment || '')).trim()
+            : undefined,
       },
     });
 
@@ -242,13 +353,16 @@ export const submitWalkInConfirmation = async (req: Request, res: Response, next
     await prisma.candidateActivity.create({
       data: {
         candidateId: candidate.id,
-        action: `WALK_IN_${action}`,
-        notes: `Candidate submitted ${action}. ${comment || reason || ''}`.trim(),
+        action: 'WALK_IN_' + action,
+        notes: ('Candidate submitted ' + action + '. ' + (comment || reason || '')).trim(),
         metadata: {
           action,
           preferredDate,
           reason,
           comment,
+          jobId: job?.id,
+          applicationId: application?.id,
+          sessionId: savedSession?.id || tokenSessionId,
           submittedAt: new Date().toISOString(),
         },
       },
@@ -262,12 +376,14 @@ export const submitWalkInConfirmation = async (req: Request, res: Response, next
       userRole: 'CANDIDATE',
       action: timelineAction,
       newStatus: updated.status,
-      remarks: `Candidate submitted self-confirmation: ${action}. ${comment || reason || ''}`.trim(),
+      remarks: ('Candidate submitted self-confirmation: ' + action + '. ' + (comment || reason || '')).trim(),
     });
 
     // Send acknowledgement email if candidate has a valid email address
     if (candidate.email && candidate.email.includes('@')) {
-      const walkInDateStr = candidate.walkInDate ? candidate.walkInDate.toISOString().slice(0, 10) : '';
+      const dateInfo = formatWalkInDate(candidate.walkInDate || savedSession.date || savedSession.interviewDate);
+      const walkInDateStr = dateInfo.dateStr;
+
       try {
         await sendDynamicEmail({
           templateKey,
@@ -279,7 +395,7 @@ export const submitWalkInConfirmation = async (req: Request, res: Response, next
             job_title: jobTitle,
             walk_in_date: walkInDateStr,
             walkin_date: walkInDateStr,
-            reporting_time: candidate.walkInTime || '09:30 AM',
+            reporting_time: candidate.walkInTime || savedSession.reportingTime || '09:30 AM',
             venue_name: venueNameStr,
             venue_address: venueAddressStr,
             google_maps_link: googleMapsLinkStr,
@@ -294,7 +410,7 @@ export const submitWalkInConfirmation = async (req: Request, res: Response, next
 
     const resultData = {
       candidate: updated,
-      message: `Response recorded successfully for ${action}.`,
+      message: 'Response recorded successfully for ' + action + '.',
     };
 
     res.status(200).json({
@@ -349,7 +465,7 @@ export const updateWalkInSession = async (req: Request, res: Response, next: Nex
     const sessionIdOrJobId = req.params.id;
     const sessionData = req.body;
 
-    if (!sessionData || !sessionData.venueName || !sessionData.venueAddress) {
+    if (!sessionData || !sessionData.venueName?.trim() || !sessionData.venueAddress?.trim()) {
       sendError(res, 'Venue name and address are required to save session details.', 400);
       return;
     }
@@ -367,21 +483,32 @@ export const updateWalkInSession = async (req: Request, res: Response, next: Nex
 
     if (job) {
       const existingHp = (job.hiringProcess as any) || {};
+      const rawDate = sessionData.date || sessionData.interviewDate;
+      const dateInfo = formatWalkInDate(rawDate);
+
+      let mapsUrl = (sessionData.googleMapsLink || '').trim();
+      if (!mapsUrl && sessionData.venueAddress?.trim()) {
+        mapsUrl = 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(sessionData.venueAddress.trim());
+      }
+      if (mapsUrl && !mapsUrl.startsWith('http://') && !mapsUrl.startsWith('https://')) {
+        mapsUrl = '';
+      }
+
       const updatedHp = {
         ...existingHp,
         walkInSession: {
           id: sessionData.id || sessionIdOrJobId,
           jobId: job.id,
-          date: sessionData.date || sessionData.interviewDate,
-          interviewDate: sessionData.date || sessionData.interviewDate,
+          date: dateInfo.dateStr,
+          interviewDate: dateInfo.dateStr,
           reportingTime: sessionData.reportingTime || '09:30 AM',
           interviewStartTime: sessionData.interviewStartTime || '10:00 AM',
           interviewEndTime: sessionData.interviewEndTime || '02:00 PM',
-          venueName: sessionData.venueName,
-          venueAddress: sessionData.venueAddress,
-          googleMapsLink: sessionData.googleMapsLink,
-          instructions: sessionData.instructions,
-          requiredDocuments: sessionData.requiredDocuments,
+          venueName: sessionData.venueName.trim(),
+          venueAddress: sessionData.venueAddress.trim(),
+          googleMapsLink: mapsUrl,
+          instructions: sessionData.instructions || '',
+          requiredDocuments: sessionData.requiredDocuments || [],
           status: sessionData.status || 'SCHEDULED',
           updatedAt: new Date().toISOString(),
         },
