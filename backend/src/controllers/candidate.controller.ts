@@ -1815,12 +1815,12 @@ export const resendWalkInEmail = async (req: Request, res: Response, next: NextF
     const clientName = req.body?.clientName || job?.client?.companyName || 'Orrica Edge Partner';
     const walkInDateStr = targetWalkInDate.toISOString().slice(0, 10);
     const reportingTimeStr = req.body?.reportingTime || candidate.walkInTime || '10:00 AM';
-    const venueNameStr = req.body?.venueName || 'Orrica Edge Recruitment & Interview Center';
-    const venueAddressStr = req.body?.venueAddress || 'Corporate Suite, Tech Park';
-    const googleMapsLinkStr = req.body?.googleMapsLink || '';
-    const instructionsStr = req.body?.instructions || 'Please carry 2 printed copies of your resume, a government-issued photo ID, and academic certificates.';
+    const venueNameStr = req.body?.venueName || 'Orrica Edge Corporate Tower — Hub 4';
+    const venueAddressStr = req.body?.venueAddress || 'Floor 4, Block B, DLF Cyber City, Phase II, Gurugram, Haryana 122002';
+    const googleMapsLinkStr = req.body?.googleMapsLink || 'https://maps.google.com/?q=DLF+Cyber+City+Gurugram';
+    const instructionsStr = req.body?.instructions || 'Please bring 2 copies of your updated resume and government photo ID. Arrive in business formals.';
 
-    const token = `wic_${candidate.id}_${candidate.candidateCode || candidate.id.slice(0, 8)}`;
+    const token = `wic_${Buffer.from(candidate.id).toString("base64url")}`;
     const frontendBase = (process.env.FRONTEND_URL || 'https://orricaedge.com').replace(/\/+$/, '');
     const confirmationUrl = `${frontendBase}/walk-in/confirm/${encodeURIComponent(token)}`;
     const confirmUrl = `${confirmationUrl}?action=confirm`;
@@ -1967,12 +1967,12 @@ export const sendWalkInInvitation = async (req: Request, res: Response, next: Ne
     const jobId = req.body?.jobId || job?.jobCode || job?.id || 'OE-WALK';
     const clientName = req.body?.clientName || job?.client?.companyName || 'Orrica Edge Partner';
     const walkInDateStr = targetWalkInDate.toISOString().slice(0, 10);
-    const venueNameStr = req.body?.venueName || 'Orrica Edge Recruitment & Interview Center';
-    const venueAddressStr = req.body?.venueAddress || 'Corporate Suite, Tech Park';
-    const googleMapsLinkStr = req.body?.googleMapsLink || '';
-    const instructionsStr = req.body?.instructions || 'Please carry 2 printed copies of your resume, a government-issued photo ID, and academic certificates.';
+    const venueNameStr = req.body?.venueName || 'Orrica Edge Corporate Tower — Hub 4';
+    const venueAddressStr = req.body?.venueAddress || 'Floor 4, Block B, DLF Cyber City, Phase II, Gurugram, Haryana 122002';
+    const googleMapsLinkStr = req.body?.googleMapsLink || 'https://maps.google.com/?q=DLF+Cyber+City+Gurugram';
+    const instructionsStr = req.body?.instructions || 'Please bring 2 copies of your updated resume and government photo ID. Arrive in business formals.';
 
-    const token = `wic_${candidate.id}_${candidate.candidateCode || candidate.id.slice(0, 8)}`;
+    const token = `wic_${Buffer.from(candidate.id).toString("base64url")}`;
     const frontendBase = (process.env.FRONTEND_URL || 'https://orricaedge.com').replace(/\/+$/, '');
     const confirmationUrl = `${frontendBase}/walk-in/confirm/${encodeURIComponent(token)}`;
 

@@ -16,11 +16,20 @@ export const getWalkInConfirmation = async (req: Request, res: Response, next: N
       return;
     }
 
-    // Token format: wic_<candidateId>_<hashOrCode> or <candidateId> or candidateCode
+    // Token format: wic_<base64url> or wic_<candidateId>_<hashOrCode> or <candidateId> or candidateCode
     let candidateId = rawToken;
     if (rawToken.startsWith('wic_')) {
-      const parts = rawToken.split('_');
-      candidateId = parts[1] || rawToken;
+      const part = rawToken.slice(4);
+      try {
+        const decoded = Buffer.from(part, 'base64url').toString('utf8');
+        if (/^[0-9a-fA-F-]{36}$/.test(decoded) || /^[A-Za-z0-9_-]+$/.test(decoded)) {
+          candidateId = decoded;
+        } else {
+          candidateId = part.split('_')[0] || part;
+        }
+      } catch {
+        candidateId = part.split('_')[0] || part;
+      }
     } else if (rawToken.startsWith('tok_')) {
       candidateId = rawToken.slice(4);
     }
@@ -74,8 +83,10 @@ export const getWalkInConfirmation = async (req: Request, res: Response, next: N
         id: 'session-' + candidate.id,
         date: candidate.walkInDate?.toISOString().slice(0, 10),
         reportingTime: candidate.walkInTime || '10:00 AM',
-        venueName: 'Orrica Edge Recruitment & Interview Center',
-        venueAddress: 'Corporate Suite, Tech Park',
+        venueName: 'Orrica Edge Corporate Tower — Hub 4',
+        venueAddress: 'Floor 4, Block B, DLF Cyber City, Phase II, Gurugram, Haryana 122002',
+        googleMapsLink: 'https://maps.google.com/?q=DLF+Cyber+City+Gurugram',
+        instructions: 'Please bring 2 copies of your updated resume and government photo ID. Arrive in business formals.',
       },
     });
   } catch (err) {
@@ -97,10 +108,20 @@ export const submitWalkInConfirmation = async (req: Request, res: Response, next
       return;
     }
 
+    // Token format: wic_<base64url> or wic_<candidateId>_<hashOrCode> or <candidateId> or candidateCode
     let candidateId = rawToken;
     if (rawToken.startsWith('wic_')) {
-      const parts = rawToken.split('_');
-      candidateId = parts[1] || rawToken;
+      const part = rawToken.slice(4);
+      try {
+        const decoded = Buffer.from(part, 'base64url').toString('utf8');
+        if (/^[0-9a-fA-F-]{36}$/.test(decoded) || /^[A-Za-z0-9_-]+$/.test(decoded)) {
+          candidateId = decoded;
+        } else {
+          candidateId = part.split('_')[0] || part;
+        }
+      } catch {
+        candidateId = part.split('_')[0] || part;
+      }
     } else if (rawToken.startsWith('tok_')) {
       candidateId = rawToken.slice(4);
     }
@@ -209,9 +230,9 @@ export const submitWalkInConfirmation = async (req: Request, res: Response, next
             walk_in_date: walkInDateStr,
             walkin_date: walkInDateStr,
             reporting_time: candidate.walkInTime || '10:00 AM',
-            venue_name: 'Orrica Edge Recruitment & Interview Center',
-            venue_address: 'Corporate Suite, Tech Park',
-            google_maps_link: '',
+            venue_name: 'Orrica Edge Corporate Tower — Hub 4',
+            venue_address: 'Floor 4, Block B, DLF Cyber City, Phase II, Gurugram, Haryana 122002',
+            google_maps_link: 'https://maps.google.com/?q=DLF+Cyber+City+Gurugram',
             preferred_date: preferredDate || '',
             comments: comment || reason || '',
           },
