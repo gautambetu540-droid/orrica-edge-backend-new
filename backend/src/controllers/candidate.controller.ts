@@ -915,7 +915,13 @@ export const assignCandidate = async (req: Request, res: Response, next: NextFun
           { candidateCode: identifier },
         ],
       },
-      select: { id: true, ownerRecruiterId: true },
+      include: {
+        applications: {
+          include: { job: { select: { title: true } } },
+          orderBy: { appliedDate: 'desc' },
+          take: 1,
+        },
+      },
     });
     if (!existing) {
       sendError(res, 'Candidate not found', 404);
@@ -956,13 +962,15 @@ export const assignCandidate = async (req: Request, res: Response, next: NextFun
       });
 
       if (recruiterId && recruiterId !== existing.ownerRecruiterId) {
+        const candidateName = existing.fullName || existing.name || 'Candidate';
+        const jobTitle = existing.applications?.[0]?.job?.title || existing.currentDesignation || 'Job Opening';
         await tx.notification.create({
           data: {
             userId: recruiterId,
-            title: 'Candidate assigned to you',
-            message: 'A candidate has been assigned to your recruiter bucket. Open My Candidates to review the profile.',
+            title: 'Candidate Assigned',
+            message: `A new candidate has been assigned to you. ${candidateName} - ${jobTitle}`,
             type: 'CANDIDATE_ASSIGNED',
-            link: '/recruiter/candidates',
+            link: `/candidates/${existing.id}`,
           },
         });
       }
