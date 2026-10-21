@@ -961,7 +961,7 @@ export const assignCandidate = async (req: Request, res: Response, next: NextFun
         },
       });
 
-      if (recruiterId && recruiterId !== existing.ownerRecruiterId) {
+      if (recruiterId) {
         const candidateName = existing.fullName || existing.name || 'Candidate';
         const jobTitle = existing.applications?.[0]?.job?.title || existing.currentDesignation || 'Job Opening';
         await tx.notification.create({
