@@ -8,6 +8,7 @@ import { sendSuccess, sendError } from '../utils/response';
 import { logAudit } from '../services/audit.service';
 import { generateCandidateCode, generateApplicationCode } from '../utils/codeGenerators';
 import { logCandidateTimeline } from '../services/timeline.service';
+import { createNotifications } from '../services/notification.service';
 
 const applySchema = z.object({
   jobId: z.string().uuid(),
@@ -64,6 +65,7 @@ export const applyForJob = async (req: Request, res: Response, next: NextFunctio
         location: true,
         workMode: true,
         languages: true,
+        createdById: true,
       },
     });
 
@@ -230,8 +232,46 @@ export const applyForJob = async (req: Request, res: Response, next: NextFunctio
       return { candidate: cand, application: app };
     });
 
+    // Notify all active Admins & relevant recruiters of new candidate application
+    try {
+      const adminUsers = await prisma.user.findMany({
+        where: {
+          role: { in: ['ADMIN', 'SUPER_ADMIN'] },
+          isActive: true,
+        },
+        select: { id: true },
+      });
+
+      const userIdsToNotify = new Set<string>();
+      adminUsers.forEach((admin) => userIdsToNotify.add(admin.id));
+      if (job.createdById) userIdsToNotify.add(job.createdById);
+      if (candidate.ownerRecruiterId) userIdsToNotify.add(candidate.ownerRecruiterId);
+      if (candidate.sourcingRecruiterId) userIdsToNotify.add(candidate.sourcingRecruiterId);
+
+      if (userIdsToNotify.size > 0) {
+        await createNotifications(
+          Array.from(userIdsToNotify).map((uid) => ({
+            userId: uid,
+            title: 'New Candidate Application Received',
+            message: `${candidate.fullName || candidate.name} applied for "${job.title}" (${application.applicationCode || undefined}). Experience: ${experience} yrs.`,
+            type: 'CANDIDATE_APPLIED',
+            link: `/admin/candidates?id=${candidate.id}`,
+          }))
+        );
+      }
+    } catch (notifErr: any) {
+      console.warn('[APPLY NOTIFICATION ERROR]:', notifErr.message);
+    }
+
     // Fire non-blocking email in background
-    sendApplicationReceivedEmailAsync(candidate.fullName, candidate.email, job.title);
+    sendApplicationReceivedEmailAsync(
+      candidate.fullName || candidate.name || 'Candidate',
+      candidate.email,
+      job.title,
+      job.jobCode || 'OE-2026',
+      job.location || 'India',
+      application.applicationCode || 'APP-01'
+    );
 
     sendSuccess(
       res,

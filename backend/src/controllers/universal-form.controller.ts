@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { prisma } from '../prisma/client';
 import { uploadResumeFile } from '../services/storage.service';
 import { sendSuccess, sendError } from '../utils/response';
-import { createNotification } from '../services/notification.service';
+import { createNotification, createNotifications } from '../services/notification.service';
 
 const universalFormBodySchema = z.object({
   name: z.string().min(2).max(120).optional(),
@@ -657,14 +657,32 @@ export const submitPublicUniversalForm = async (req: Request, res: Response, nex
       return { candidate, submission, application, activity };
     });
 
-    if (recruiter) {
-      await createNotification({
-        userId: recruiter.id,
-        title: 'New candidate received',
-        message: `${result.candidate.fullName} submitted their profile through your candidate link${targetJob ? ` for ${targetJob.title}` : ''}.`,
-        type: 'CANDIDATE_ADDED',
-        link: '/recruiter/candidates',
+    try {
+      const adminUsers = await prisma.user.findMany({
+        where: {
+          role: { in: ['ADMIN', 'SUPER_ADMIN'] },
+          isActive: true,
+        },
+        select: { id: true },
       });
+
+      const userIdsToNotify = new Set<string>();
+      adminUsers.forEach((a) => userIdsToNotify.add(a.id));
+      if (recruiter?.id) userIdsToNotify.add(recruiter.id);
+
+      if (userIdsToNotify.size > 0) {
+        await createNotifications(
+          Array.from(userIdsToNotify).map((uid) => ({
+            userId: uid,
+            title: 'New Candidate Registration',
+            message: `${result.candidate.fullName} submitted their profile via ${form.name || form.slug}${targetJob ? ` for "${targetJob.title}"` : ''}.`,
+            type: 'CANDIDATE_REGISTERED',
+            link: `/admin/candidates?id=${result.candidate.id}`,
+          }))
+        );
+      }
+    } catch (notifErr: any) {
+      console.warn('[UNIVERSAL FORM NOTIFICATION ERROR]:', notifErr.message);
     }
 
     sendSuccess(
