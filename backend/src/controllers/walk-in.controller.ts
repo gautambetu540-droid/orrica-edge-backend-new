@@ -4,7 +4,8 @@ import { sendSuccess, sendError } from '../utils/response';
 import { sendDynamicEmail } from '../services/email.service';
 import { logCandidateTimeline } from '../services/timeline.service';
 import { formatCandidateGreetingName, formatCandidateGreeting } from '../utils/nameFormatter';
-import { formatWalkInDate } from '../utils/dateFormatter';
+import { formatWalkInDate, formatReadableInterviewDate } from '../utils/dateFormatter';
+import { logAudit } from '../services/audit.service';
 
 export interface DecodedTokenPayload {
   candidateId: string;
@@ -439,12 +440,24 @@ export const getWalkInSessions = async (req: Request, res: Response, next: NextF
       .map((job) => {
         const hp = (job.hiringProcess as any) || {};
         if (hp.walkInSession) {
-          return {
+          const s = {
             ...hp.walkInSession,
             jobId: job.id,
             jobTitle: job.title,
             clientName: job.client?.companyName,
           };
+          const text = `${s.id || ''} ${s.jobTitle || ''} ${s.venueName || ''} ${s.venueAddress || ''} ${s.clientName || ''}`.toLowerCase();
+          if (
+            text.includes('noida interview') ||
+            text.includes('gurugram interview') ||
+            text.includes('biotech hub') ||
+            text.includes('season end') ||
+            text.includes('dummy') ||
+            text.includes('test')
+          ) {
+            return null;
+          }
+          return s;
         }
         return null;
       })
@@ -532,6 +545,22 @@ export const updateWalkInSession = async (req: Request, res: Response, next: Nex
 };
 
 
+
+export function isFakeWalkInLocation(l: any): boolean {
+  if (!l) return true;
+  const str = `${l.id || ''} ${l.locationName || ''} ${l.venueName || ''} ${l.venueAddress || ''} ${l.city || ''} ${l.companyName || ''}`.toLowerCase();
+  return (
+    str.includes('noida interview') ||
+    str.includes('gurugram interview') ||
+    str.includes('biotech hub') ||
+    str.includes('season end') ||
+    str.includes('dummy') ||
+    str.includes('test entry') ||
+    str.includes('loc-noida-hub') ||
+    str.includes('loc-gurugram-hub')
+  );
+}
+
 export interface WalkInLocation {
   id: string;
   locationName: string;
@@ -555,74 +584,7 @@ export interface WalkInLocation {
   updatedAt?: string;
 }
 
-const DEFAULT_WALK_IN_LOCATIONS: WalkInLocation[] = [
-  {
-    id: 'loc-noida-hub',
-    locationName: 'Noida Interview Hub',
-    city: 'Noida',
-    companyName: 'Orrica Partner Center',
-    venueName: 'Orrica Edge Assessment Center',
-    venueAddress: 'Sector 62, Electronic City, Noida, Uttar Pradesh 201309',
-    googleMapsLink: 'https://www.google.com/maps/search/?api=1&query=Sector+62+Noida+Uttar+Pradesh',
-    contactPersonName: 'Front Desk Coordinator',
-    contactPersonPhone: '+91 98765 43210',
-    defaultReportingTime: '09:30 AM',
-    defaultInterviewStartTime: '10:00 AM',
-    defaultInterviewEndTime: '02:00 PM',
-    defaultInstructions: 'Please report 15 minutes before scheduled time with physical copies of resume and ID proof.',
-    defaultRequiredDocuments: ['Updated Resume (2 copies)', 'Government Photo ID (Aadhaar/PAN)', 'Educational Certificates'],
-    dressCode: 'Business Formal / Smart Casual',
-    weeklyOffDays: ['Sunday'],
-    blockedDates: [],
-    isActive: true,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  },
-  {
-    id: 'loc-gurugram-hub',
-    locationName: 'Gurugram Interview Hub',
-    city: 'Gurugram',
-    companyName: 'Orrica Partner Center',
-    venueName: 'Orrica Corporate Tower',
-    venueAddress: 'Cyber City, DLF Phase 2, Gurugram, Haryana 122002',
-    googleMapsLink: 'https://www.google.com/maps/search/?api=1&query=Cyber+City+Gurugram+Haryana',
-    contactPersonName: 'HR Helpdesk',
-    contactPersonPhone: '+91 98765 43211',
-    defaultReportingTime: '09:30 AM',
-    defaultInterviewStartTime: '10:00 AM',
-    defaultInterviewEndTime: '02:00 PM',
-    defaultInstructions: 'Carry photo ID for visitor pass entry at building reception.',
-    defaultRequiredDocuments: ['Updated Resume (2 copies)', 'Government Photo ID', 'Past Experience Letters'],
-    dressCode: 'Business Formal / Smart Casual',
-    weeklyOffDays: ['Sunday'],
-    blockedDates: [],
-    isActive: true,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  },
-  {
-    id: 'loc-bengaluru-hub',
-    locationName: 'Bengaluru Tech Hub',
-    city: 'Bengaluru',
-    companyName: 'Orrica Partner Center',
-    venueName: 'Prestige Tech Park Venue',
-    venueAddress: 'Marathahalli - Sarjapur Outer Ring Rd, Kadubeesanahalli, Bengaluru, Karnataka 560103',
-    googleMapsLink: 'https://www.google.com/maps/search/?api=1&query=Prestige+Tech+Park+Bengaluru',
-    contactPersonName: 'Talent Acquisition Team',
-    contactPersonPhone: '+91 98765 43212',
-    defaultReportingTime: '09:30 AM',
-    defaultInterviewStartTime: '10:00 AM',
-    defaultInterviewEndTime: '02:00 PM',
-    defaultInstructions: 'Register at Tower B security desk with original photo ID.',
-    defaultRequiredDocuments: ['Updated Resume (2 copies)', 'Government Photo ID', 'Last 3 Months Salary Slips'],
-    dressCode: 'Smart Casual',
-    weeklyOffDays: ['Sunday'],
-    blockedDates: [],
-    isActive: true,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  },
-];
+const DEFAULT_WALK_IN_LOCATIONS: WalkInLocation[] = [];
 
 let inMemoryLocations: WalkInLocation[] = [...DEFAULT_WALK_IN_LOCATIONS];
 
@@ -633,14 +595,19 @@ async function getStoredLocations(): Promise<WalkInLocation[]> {
     });
     if (record && record.fields && typeof record.fields === 'object') {
       const f = record.fields as any;
-      if (Array.isArray(f.locations) && f.locations.length > 0) {
-        inMemoryLocations = f.locations;
+      if (Array.isArray(f.locations)) {
+        const cleaned = f.locations.filter((loc: WalkInLocation) => !isFakeWalkInLocation(loc));
+        if (cleaned.length !== f.locations.length) {
+          await saveStoredLocations(cleaned);
+        }
+        inMemoryLocations = cleaned;
         return inMemoryLocations;
       }
     }
   } catch (err: any) {
     console.warn('[WALK-IN LOCATIONS DB READ]:', err.message);
   }
+  inMemoryLocations = inMemoryLocations.filter((loc) => !isFakeWalkInLocation(loc));
   return inMemoryLocations;
 }
 
@@ -826,8 +793,88 @@ export const deleteWalkInLocation = async (req: Request, res: Response, next: Ne
     const currentLocations = await getStoredLocations();
     const filtered = currentLocations.filter((l) => l.id !== locId);
 
+    const deletedItem = currentLocations.find((l) => l.id === locId) || null;
     await saveStoredLocations(filtered);
+
+    try {
+      await logAudit({
+        req,
+        action: 'DELETE_WALK_IN_LOCATION',
+        module: 'WALK_IN_OPERATIONS',
+        entity: 'WalkInLocation',
+        entityId: locId,
+        oldValue: deletedItem,
+        newValue: { deletedLocationId: locId, locationName: deletedItem?.locationName },
+      });
+    } catch {}
+
     sendSuccess(res, { id: locId }, 'Walk-in location deleted successfully.');
+  } catch (err) {
+    next(err);
+  }
+};
+
+
+/**
+ * Admin: Delete a walk-in session from a job
+ * DELETE /api/v1/walk-in/sessions/:id
+ */
+export const deleteWalkInSession = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const sessionIdOrJobId = req.params.id;
+    if (!sessionIdOrJobId) {
+      sendError(res, 'Session ID or Job ID is required.', 400);
+      return;
+    }
+
+    let job = await prisma.job.findFirst({
+      where: {
+        OR: [
+          { id: sessionIdOrJobId },
+          { jobCode: sessionIdOrJobId },
+        ],
+      },
+    });
+
+    if (!job) {
+      const allJobs = await prisma.job.findMany({ take: 200 });
+      job = allJobs.find((j) => {
+        const hp = (j.hiringProcess as any) || {};
+        return hp.walkInSession?.id === sessionIdOrJobId;
+      }) || null;
+    }
+
+    if (!job) {
+      sendError(res, 'Walk-in session not found.', 404);
+      return;
+    }
+
+    const existingHp = (job.hiringProcess as any) || {};
+    const oldSession = existingHp.walkInSession || null;
+
+    const updatedHp = { ...existingHp };
+    delete updatedHp.walkInSession;
+
+    await prisma.job.update({
+      where: { id: job.id },
+      data: {
+        hiringProcess: updatedHp,
+      },
+    });
+
+    try {
+      await logAudit({
+        req,
+        action: 'DELETE_WALK_IN_SESSION',
+        module: 'WALK_IN_OPERATIONS',
+        entity: 'Job',
+        entityId: job.id,
+        oldValue: oldSession,
+        newValue: { deletedSessionId: sessionIdOrJobId, jobId: job.id, jobTitle: job.title },
+      });
+    } catch {}
+
+    sendSuccess(res, { id: sessionIdOrJobId, jobId: job.id }, 'Walk-in session deleted successfully.');
   } catch (err) {
     next(err);
   }

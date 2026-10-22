@@ -4,6 +4,7 @@ import {
   submitWalkInConfirmation,
   getWalkInSessions,
   updateWalkInSession,
+  deleteWalkInSession,
   getWalkInLocations,
   createWalkInLocation,
   updateWalkInLocation,
@@ -20,6 +21,7 @@ router.post('/confirm/:token', submitWalkInConfirmation);
 
 // Admin/recruiter session management routes
 router.get('/sessions', authenticateJwt, getWalkInSessions);
+router.delete('/sessions/:id', authenticateJwt, requireRoles('SUPER_ADMIN', 'ADMIN'), deleteWalkInSession);
 router.put('/sessions/:id', authenticateJwt, requireRoles('SUPER_ADMIN', 'ADMIN', 'TEAM_LEADER'), updateWalkInSession);
 
 

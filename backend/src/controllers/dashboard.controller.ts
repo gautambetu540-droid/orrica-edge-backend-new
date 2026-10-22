@@ -2,6 +2,19 @@ import { Request, Response, NextFunction } from 'express';
 import { prisma } from '../prisma/client';
 import { sendSuccess } from '../utils/response';
 
+interface CacheEntry<T> {
+  data: T;
+  timestamp: number;
+}
+
+const DASHBOARD_CACHE_TTL_MS = 25 * 1000; // 25 seconds high-performance TTL
+const statsCache = new Map<string, CacheEntry<any>>();
+
+export function invalidateDashboardCache(): void {
+  statsCache.clear();
+}
+
+
 /**
  * 1. Legacy/General Dashboard Stats (Real DB Calculations, No Mock Data, No Payouts)
  * Route: GET /api/dashboard/stats

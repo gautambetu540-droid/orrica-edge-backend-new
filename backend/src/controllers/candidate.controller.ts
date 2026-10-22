@@ -10,7 +10,7 @@ import { generateCandidateCode, generateCandidateCodesBatch, generateApplication
 import { logCandidateTimeline } from '../services/timeline.service';
 import { sendDynamicEmail } from '../services/email.service';
 import { formatCandidateGreetingName, formatCandidateGreeting } from '../utils/nameFormatter';
-import { formatWalkInDate } from '../utils/dateFormatter';
+import { formatWalkInDate, formatReadableInterviewDate } from '../utils/dateFormatter';
 
 export const CANONICAL_PIPELINE_STAGES = [
   'New',
@@ -2115,7 +2115,22 @@ export const sendWalkInInvitation = async (req: Request, res: Response, next: Ne
       return;
     }
 
-    // Match exact application based on body jobId/applicationId or candidate targetJobId
+    // Role-based candidate access verification
+    const userRole = req.user?.role;
+    const currentUserId = req.user?.userId;
+    if (userRole === 'RECRUITER' || userRole === 'FREELANCE_RECRUITER') {
+      const isAuthorized =
+        candidate.sourcingRecruiterId === currentUserId ||
+        candidate.ownerRecruiterId === currentUserId ||
+        candidate.createdById === currentUserId ||
+        candidate.applications.some((app: any) => app.recruiterId === currentUserId);
+      if (!isAuthorized) {
+        sendError(res, 'You are not authorized to send walk-in invitations to this candidate.', 403);
+        return;
+      }
+    }
+
+    // Match application if available
     let application: any = null;
     if (req.body?.applicationId && candidate.applications.length > 0) {
       application = candidate.applications.find((app) => app.id === req.body.applicationId);
@@ -2137,18 +2152,6 @@ export const sendWalkInInvitation = async (req: Request, res: Response, next: Ne
 
     const job = application?.job;
 
-    // Verify candidate alignment with target job if specified
-    if (req.body?.jobId && job) {
-      const targetJobId = String(req.body.jobId);
-      const isAligned = candidate.applications.some(
-        (app) => app.jobId === targetJobId || app.job?.id === targetJobId || app.job?.jobCode === targetJobId
-      );
-      if (!isAligned && candidate.applications.length > 0) {
-        sendError(res, 'Candidate is not aligned with the specified walk-in job opening.', 400);
-        return;
-      }
-    }
-
     // Resolve saved session details from body or job.hiringProcess.walkInSession
     const hiringProcess = (job?.hiringProcess as any) || {};
     const savedSession = hiringProcess.walkInSession || {};
@@ -2156,9 +2159,11 @@ export const sendWalkInInvitation = async (req: Request, res: Response, next: Ne
     const rawDate = req.body?.walkInDate || candidate.walkInDate || savedSession.date || savedSession.interviewDate;
     const dateInfo = formatWalkInDate(rawDate);
     if (!dateInfo.dateStr) {
-      sendError(res, 'Candidate does not have an active walk-in session or scheduled date. The Admin must save session details before sending invitations.', 400);
+      sendError(res, 'A valid walk-in interview date is required.', 400);
       return;
     }
+
+    const readableInterviewDate = formatReadableInterviewDate(rawDate) || dateInfo.displayDate;
 
     const reportingTime = (req.body?.reportingTime || req.body?.walkInTime || candidate.walkInTime || savedSession.reportingTime || '').trim();
     const venueNameStr = (req.body?.venueName || savedSession.venueName || '').trim();
@@ -2173,13 +2178,7 @@ export const sendWalkInInvitation = async (req: Request, res: Response, next: Ne
 
     // Enforce required walk-in session details
     if (!reportingTime || !venueNameStr || !venueAddressStr) {
-      sendError(res, 'Walk-in session details are incomplete. The Admin must save session details (venue name, complete address, and reporting time) before sending invitations.', 400);
-      return;
-    }
-
-    // Enforce valid Google Maps link
-    if (!googleMapsLinkStr || (!googleMapsLinkStr.startsWith('http://') && !googleMapsLinkStr.startsWith('https://'))) {
-      sendError(res, 'A valid Google Maps destination URL is required for walk-in interview directions.', 400);
+      sendError(res, 'Walk-in session details are incomplete. Please provide a valid venue name, complete address, and reporting time.', 400);
       return;
     }
 
@@ -2220,10 +2219,10 @@ export const sendWalkInInvitation = async (req: Request, res: Response, next: Ne
       candidate_email: candidate.email,
       job_title: jobTitle,
       client_name: clientName,
-      walk_in_date: walkInDateStr,
-      walkin_date: walkInDateStr,
-      walk_in_date_formatted: dateInfo.displayDate,
-      interview_date: dateInfo.displayDate,
+      walk_in_date: readableInterviewDate,
+      walkin_date: readableInterviewDate,
+      walk_in_date_formatted: readableInterviewDate,
+      interview_date: readableInterviewDate,
       reporting_time: reportingTime,
       walk_in_time: reportingTime,
       venue_name: venueNameStr,
@@ -2247,6 +2246,39 @@ export const sendWalkInInvitation = async (req: Request, res: Response, next: Ne
       });
     } catch (providerErr: any) {
       console.error('[WALK-IN INVITATION EMAIL FAILED] Candidate ' + candidate.id + ':', providerErr);
+
+      // Audit Log for Failed Attempt
+      try {
+        await logAudit({
+          req,
+          action: 'WALK_IN_INVITATION_FAILED',
+          module: 'WALK_IN_INVITATIONS',
+          entity: 'Candidate',
+          entityId: candidate.id,
+          newValue: {
+            candidateId: candidate.id,
+            candidateCode: candidate.candidateCode,
+            candidateName: candidate.fullName,
+            candidateEmail: candidate.email,
+            interviewDate: readableInterviewDate,
+            walkInDate: walkInDateStr,
+            venueName: venueNameStr,
+            venueAddress: venueAddressStr,
+            reportingTime,
+            instructions: instructionsStr || null,
+            sentBy: req.user?.role === 'RECRUITER' || req.user?.role === 'FREELANCE_RECRUITER' ? 'Recruiter' : 'Admin',
+            senderRole: req.user?.role || 'ADMIN',
+            senderUserId: req.user?.userId || null,
+            senderName: req.user?.email || 'User',
+            deliveryStatus: 'FAILED',
+            errorDetails: providerErr.message || 'Email dispatch failed',
+            timestamp: new Date().toISOString(),
+          },
+        });
+      } catch (auditErr: any) {
+        console.warn('[AUDIT LOG FAILED ATTEMPT ERROR]:', auditErr.message);
+      }
+
       sendError(res, 'Email provider failed to dispatch invitation email: ' + (providerErr.message || 'Provider transmission error'), 502);
       return;
     }
@@ -2258,17 +2290,19 @@ export const sendWalkInInvitation = async (req: Request, res: Response, next: Ne
         userId: req.user?.userId || null,
         recruiterId,
         action: 'WALK_IN_INVITATION_SENT',
-        notes: 'Walk-in invitation sent to ' + candidate.email + ' for ' + jobTitle + ' (' + walkInDateStr + ').',
+        notes: 'Walk-in invitation sent to ' + candidate.email + ' for ' + jobTitle + ' (' + readableInterviewDate + ').',
         metadata: {
           recipient: candidate.email,
           jobId: job?.id,
           applicationId: application?.id,
           sessionId: savedSession.id || req.body?.sessionId,
           walkInDate: walkInDateStr,
+          interviewDate: readableInterviewDate,
           reportingTime,
           venueName: venueNameStr,
           venueAddress: venueAddressStr,
           googleMapsLink: googleMapsLinkStr,
+          instructions: instructionsStr,
           messageId: dispatchResult.messageId,
           token,
         },
@@ -2282,8 +2316,40 @@ export const sendWalkInInvitation = async (req: Request, res: Response, next: Ne
       userRole: req.user?.role || 'ADMIN',
       action: 'Walk-in Invitation Sent',
       newStatus: updatedCandidate.status,
-      remarks: 'Walk-in invitation dispatched to ' + candidate.email + ' for ' + jobTitle + ' (' + walkInDateStr + ').',
+      remarks: 'Walk-in invitation dispatched to ' + candidate.email + ' for ' + jobTitle + ' (' + readableInterviewDate + ').',
     });
+
+    // Audit Log for Successful Invitation
+    try {
+      await logAudit({
+        req,
+        action: 'WALK_IN_INVITATION_SENT',
+        module: 'WALK_IN_INVITATIONS',
+        entity: 'Candidate',
+        entityId: candidate.id,
+        newValue: {
+          candidateId: candidate.id,
+          candidateCode: candidate.candidateCode,
+          candidateName: candidate.fullName,
+          candidateEmail: candidate.email,
+          interviewDate: readableInterviewDate,
+          walkInDate: walkInDateStr,
+          venueName: venueNameStr,
+          venueAddress: venueAddressStr,
+          reportingTime,
+          instructions: instructionsStr || null,
+          sentBy: req.user?.role === 'RECRUITER' || req.user?.role === 'FREELANCE_RECRUITER' ? 'Recruiter' : 'Admin',
+          senderRole: req.user?.role || 'ADMIN',
+          senderUserId: req.user?.userId || null,
+          senderName: req.user?.email || 'User',
+          deliveryStatus: 'SENT',
+          messageId: dispatchResult.messageId,
+          timestamp: new Date().toISOString(),
+        },
+      });
+    } catch (auditErr: any) {
+      console.warn('[AUDIT LOG SUCCESSFUL INVITATION ERROR]:', auditErr.message);
+    }
 
     sendSuccess(res, {
       candidateId: candidate.id,
@@ -2292,6 +2358,7 @@ export const sendWalkInInvitation = async (req: Request, res: Response, next: Ne
       dispatched: true,
       messageId: dispatchResult.messageId,
       walkInDate: walkInDateStr,
+      interviewDate: readableInterviewDate,
       reportingTime,
       venueName: venueNameStr,
       venueAddress: venueAddressStr,
@@ -2302,9 +2369,6 @@ export const sendWalkInInvitation = async (req: Request, res: Response, next: Ne
   }
 };
 
-/**
- * Approve Walk-in Reschedule Request: POST /api/v1/candidates/:id/approve-walk-in-reschedule
- */
 export const approveWalkInReschedule = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const identifier = req.params.id;

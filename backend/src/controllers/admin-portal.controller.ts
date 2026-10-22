@@ -168,6 +168,9 @@ export const getAuditLogs = async (req: Request, res: Response, next: NextFuncti
     const startDate = typeof req.query.startDate === 'string' ? req.query.startDate.trim() : '';
     const endDate = typeof req.query.endDate === 'string' ? req.query.endDate.trim() : '';
     const sortBy = typeof req.query.sortBy === 'string' ? req.query.sortBy.trim() : 'newest';
+    const moduleParam = typeof req.query.module === 'string' ? req.query.module.trim() : '';
+    const venueParam = typeof req.query.venue === 'string' ? req.query.venue.trim() : '';
+    const statusParam = typeof req.query.status === 'string' ? req.query.status.trim() : '';
 
     const where: any = {};
 
@@ -184,6 +187,10 @@ export const getAuditLogs = async (req: Request, res: Response, next: NextFuncti
       }
     }
 
+
+    if (moduleParam && moduleParam !== 'ALL') {
+      where.module = moduleParam;
+    }
     // 2. Action Filter
     if (action && action !== 'ALL') {
       const actionGroups: Record<string, string[]> = {

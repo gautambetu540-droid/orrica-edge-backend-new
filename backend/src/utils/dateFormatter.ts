@@ -99,3 +99,14 @@ export function formatWalkInDate(input: string | Date | null | undefined): Forma
     displayDate: `${weekday}, ${formattedDate}`,
   };
 }
+
+
+export function formatReadableInterviewDate(input: string | Date | null | undefined): string {
+  const info = formatWalkInDate(input);
+  if (!info.dateStr) return '';
+  const parts = info.dateStr.split('-');
+  if (parts.length !== 3) return info.displayDate || '';
+  const [y, m, d] = parts.map(Number);
+  const date = new Date(Date.UTC(y, m - 1, d, 12, 0, 0));
+  return date.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
+}
