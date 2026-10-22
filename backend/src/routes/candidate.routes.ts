@@ -6,6 +6,8 @@ import {
   updateCandidate,
   deleteCandidate,
   assignCandidate,
+  assignJobToCandidate,
+  bulkAssignJobToCandidates,
   addCandidateActivity,
   getCandidateActivities,
   recruiterSubmitCandidate,
@@ -81,6 +83,23 @@ router.post(
   requireRoles('SUPER_ADMIN', 'ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
   requireRecruiterPermission('candidates'),
   addCandidateActivity
+);
+
+
+// Bulk Job Assignment API (Must be before /:id routes)
+router.post(
+  '/bulk-assign-job',
+  authenticateJwt,
+  requireRoles('SUPER_ADMIN', 'ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
+  bulkAssignJobToCandidates
+);
+
+// Single Candidate Job Assignment API
+router.post(
+  '/:id/assign-job',
+  authenticateJwt,
+  requireRoles('SUPER_ADMIN', 'ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
+  assignJobToCandidate
 );
 
 router.patch(

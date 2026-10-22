@@ -2960,3 +2960,352 @@ export const bulkImportCandidates = async (
     next(err);
   }
 };
+
+
+export const assignJobToCandidate = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const identifier = req.params.id;
+    const { jobId, stage, status, notes } = req.body;
+
+    if (!jobId) {
+      sendError(res, 'Job ID is required', 400);
+      return;
+    }
+
+    if (!(await canAccessCandidate(req, identifier))) {
+      sendError(res, 'Candidate not found or access denied', 404);
+      return;
+    }
+
+    const candidate = await prisma.candidate.findFirst({
+      where: {
+        OR: [{ id: identifier }, { candidateCode: identifier }],
+      },
+      include: {
+        ownerRecruiter: { select: { id: true, fullName: true, email: true } },
+      },
+    });
+
+    if (!candidate) {
+      sendError(res, 'Candidate not found', 404);
+      return;
+    }
+
+    const job = await prisma.job.findUnique({
+      where: { id: jobId },
+      select: { id: true, jobCode: true, title: true, department: true, location: true, client: { select: { companyName: true } } },
+    });
+
+    if (!job) {
+      sendError(res, 'Job not found', 404);
+      return;
+    }
+
+    const currentUserId = req.user?.userId;
+    const userRole = req.user?.role || 'ADMIN';
+    const userEmail = req.user?.email || 'User';
+
+    let application = await prisma.application.findUnique({
+      where: {
+        jobId_candidateId: {
+          jobId: job.id,
+          candidateId: candidate.id,
+        },
+      },
+    });
+
+    let isNewApplication = false;
+
+    if (application) {
+      const updatedNotes = notes
+        ? [...((Array.isArray(application.internalNotes) ? (application.internalNotes as any[]) : [])), { text: notes, by: userEmail, at: new Date().toISOString() }]
+        : application.internalNotes;
+
+      application = await prisma.application.update({
+        where: { id: application.id },
+        data: {
+          stage: (stage as any) || application.stage,
+          status: status || application.status,
+          internalNotes: updatedNotes as any,
+        },
+      });
+    } else {
+      isNewApplication = true;
+      const applicationCode = await generateApplicationCode(prisma);
+      const recruiterId = candidate.ownerRecruiterId || (['RECRUITER', 'FREELANCE_RECRUITER'].includes(userRole) ? currentUserId : null);
+      const teamLeaderId = candidate.teamLeaderId || null;
+
+      application = await prisma.application.create({
+        data: {
+          applicationCode,
+          jobId: job.id,
+          candidateId: candidate.id,
+          recruiterId,
+          teamLeaderId,
+          stage: (stage as any) || 'APPLIED',
+          status: status || 'Submitted',
+          internalNotes: notes ? [{ text: notes, by: userEmail, at: new Date().toISOString() }] : [],
+        },
+      });
+    }
+
+    if (candidate.status === 'New') {
+      await prisma.candidate.update({
+        where: { id: candidate.id },
+        data: { status: 'Submitted' },
+      });
+    }
+
+    try {
+      await logCandidateTimeline({
+        candidateId: candidate.id,
+        applicationId: application.id,
+        userId: currentUserId || null,
+        userName: userEmail,
+        userRole: userRole,
+        action: isNewApplication ? 'Job Assigned' : 'Job Application Updated',
+        previousStatus: candidate.status,
+        newStatus: candidate.status === 'New' ? 'Submitted' : candidate.status,
+        remarks: (isNewApplication ? 'Assigned' : 'Updated assignment') + ' to job "' + job.title + '" (' + (job.jobCode || job.id) + ')' + (notes ? ' - ' + notes : ''),
+      });
+    } catch {}
+
+    try {
+      await prisma.candidateActivity.create({
+        data: {
+          candidateId: candidate.id,
+          jobId: job.id,
+          applicationId: application.id,
+          userId: currentUserId || null,
+          recruiterId: candidate.ownerRecruiterId || (['RECRUITER', 'FREELANCE_RECRUITER'].includes(userRole) ? currentUserId : null),
+          action: 'JOB_ASSIGNED',
+          notes: 'Assigned to job: ' + job.title,
+          metadata: {
+            jobId: job.id,
+            jobTitle: job.title,
+            jobCode: job.jobCode,
+            applicationCode: application.applicationCode,
+            isNewApplication,
+            assignedBy: userEmail,
+          },
+        },
+      });
+    } catch {}
+
+    try {
+      await logAudit({
+        userId: currentUserId,
+        action: 'JOB_ASSIGNED',
+        module: 'CANDIDATES',
+        entity: 'Candidate',
+        entityId: candidate.id,
+        newValue: {
+          candidateId: candidate.id,
+          candidateName: candidate.fullName,
+          candidateCode: candidate.candidateCode,
+          jobId: job.id,
+          jobTitle: job.title,
+          jobCode: job.jobCode,
+          applicationId: application.id,
+          applicationCode: application.applicationCode,
+          isNewApplication,
+        },
+      });
+    } catch {}
+
+    sendSuccess(res, {
+      application,
+      job,
+      candidate: {
+        id: candidate.id,
+        candidateCode: candidate.candidateCode,
+        fullName: candidate.fullName,
+      },
+      message: 'Candidate ' + candidate.fullName + ' successfully assigned to job "' + job.title + '".',
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const bulkAssignJobToCandidates = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const { candidateIds, jobId, stage, status, notes } = req.body;
+
+    if (!Array.isArray(candidateIds) || candidateIds.length === 0) {
+      sendError(res, 'candidateIds array is required and must not be empty', 400);
+      return;
+    }
+
+    if (!jobId) {
+      sendError(res, 'jobId is required', 400);
+      return;
+    }
+
+    const job = await prisma.job.findUnique({
+      where: { id: jobId },
+      select: { id: true, jobCode: true, title: true, department: true },
+    });
+
+    if (!job) {
+      sendError(res, 'Job not found', 404);
+      return;
+    }
+
+    const currentUserId = req.user?.userId;
+    const userRole = req.user?.role || 'ADMIN';
+    const userEmail = req.user?.email || 'User';
+
+    const candidates = await prisma.candidate.findMany({
+      where: {
+        OR: [
+          { id: { in: candidateIds } },
+          { candidateCode: { in: candidateIds } },
+        ],
+      },
+      select: {
+        id: true,
+        candidateCode: true,
+        fullName: true,
+        status: true,
+        ownerRecruiterId: true,
+        teamLeaderId: true,
+      },
+    });
+
+    let assignedCount = 0;
+    let updatedCount = 0;
+    const errors = [];
+
+    for (const cand of candidates) {
+      try {
+        if (userRole !== 'ADMIN' && userRole !== 'SUPER_ADMIN') {
+          const hasAccess = await canAccessCandidate(req, cand.id);
+          if (!hasAccess) {
+            errors.push({ candidateId: cand.id, error: 'Access denied' });
+            continue;
+          }
+        }
+
+        const existingApp = await prisma.application.findUnique({
+          where: {
+            jobId_candidateId: {
+              jobId: job.id,
+              candidateId: cand.id,
+            },
+          },
+        });
+
+        if (existingApp) {
+          if (stage || status || notes) {
+            const updatedNotes = notes
+              ? [...((Array.isArray(existingApp.internalNotes) ? (existingApp.internalNotes as any[]) : [])), { text: notes, by: userEmail, at: new Date().toISOString() }]
+              : existingApp.internalNotes;
+
+            await prisma.application.update({
+              where: { id: existingApp.id },
+              data: {
+                stage: (stage as any) || existingApp.stage,
+                status: status || existingApp.status,
+                internalNotes: updatedNotes as any,
+              },
+            });
+          }
+          updatedCount++;
+        } else {
+          const applicationCode = await generateApplicationCode(prisma);
+          const recruiterId = cand.ownerRecruiterId || (['RECRUITER', 'FREELANCE_RECRUITER'].includes(userRole) ? currentUserId : null);
+          const teamLeaderId = cand.teamLeaderId || null;
+
+          const newApp = await prisma.application.create({
+            data: {
+              applicationCode,
+              jobId: job.id,
+              candidateId: cand.id,
+              recruiterId,
+              teamLeaderId,
+              stage: (stage as any) || 'APPLIED',
+              status: status || 'Submitted',
+              internalNotes: notes ? [{ text: notes, by: userEmail, at: new Date().toISOString() }] : [],
+            },
+          });
+
+          if (cand.status === 'New') {
+            await prisma.candidate.update({
+              where: { id: cand.id },
+              data: { status: 'Submitted' },
+            });
+          }
+
+          try {
+            await logCandidateTimeline({
+              candidateId: cand.id,
+              applicationId: newApp.id,
+              userId: currentUserId || null,
+              userName: userEmail,
+              userRole: userRole,
+              action: 'Job Assigned',
+              previousStatus: cand.status,
+              newStatus: cand.status === 'New' ? 'Submitted' : cand.status,
+              remarks: 'Assigned to job "' + job.title + '" (' + (job.jobCode || job.id) + ')' + (notes ? ' - ' + notes : ''),
+            });
+          } catch {}
+
+          try {
+            await prisma.candidateActivity.create({
+              data: {
+                candidateId: cand.id,
+                jobId: job.id,
+                applicationId: newApp.id,
+                userId: currentUserId || null,
+                recruiterId: cand.ownerRecruiterId || (['RECRUITER', 'FREELANCE_RECRUITER'].includes(userRole) ? currentUserId : null),
+                action: 'JOB_ASSIGNED',
+                notes: 'Assigned to job: ' + job.title,
+                metadata: {
+                  jobId: job.id,
+                  jobTitle: job.title,
+                  jobCode: job.jobCode,
+                  applicationCode: newApp.applicationCode,
+                  assignedBy: userEmail,
+                },
+              },
+            });
+          } catch {}
+
+          assignedCount++;
+        }
+      } catch (err: any) {
+        errors.push({ candidateId: cand.id, error: err.message || 'Failed to assign' });
+      }
+    }
+
+    try {
+      await logAudit({
+        userId: currentUserId,
+        action: 'BULK_JOB_ASSIGNED',
+        module: 'CANDIDATES',
+        entity: 'Candidate',
+        entityId: 'batch-' + Date.now(),
+        newValue: {
+          jobId: job.id,
+          jobTitle: job.title,
+          jobCode: job.jobCode,
+          assignedCount,
+          updatedCount,
+          totalCandidates: candidateIds.length,
+        },
+      });
+    } catch {}
+
+    sendSuccess(res, {
+      job,
+      totalRequested: candidateIds.length,
+      assignedCount,
+      updatedCount,
+      errors,
+      message: 'Assigned ' + assignedCount + ' candidates and updated ' + updatedCount + ' candidates for job "' + job.title + '".',
+    });
+  } catch (err) {
+    next(err);
+  }
+};
