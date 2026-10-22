@@ -443,6 +443,45 @@ async function runTestSuite() {
     'WALK_IN_INVITATION template interpolates candidate name, job title, date, and confirm URL'
   );
 
+  // Verification: Conditional rendering without company_name
+  assert(
+    !compiledHtml.includes('{{#if') && !compiledHtml.includes('{{/if}}'),
+    'WALK_IN_INVITATION contains ZERO raw {{#if}} or {{/if}} directives when company is absent'
+  );
+  assert(
+    !compiledHtml.includes('<strong>Company:</strong>'),
+    'WALK_IN_INVITATION omits Company row when company is absent'
+  );
+
+  // Verification: Conditional rendering with company_name
+  const compiledWithCompany = interpolateVariables(inviteTpl.htmlBody, {
+    ...mockVars,
+    company_name: 'Acme Cloud Solutions',
+  });
+  assert(
+    compiledWithCompany.includes('Acme Cloud Solutions') &&
+    compiledWithCompany.includes('<strong>Company:</strong> Acme Cloud Solutions'),
+    'WALK_IN_INVITATION renders company name when company_name is provided'
+  );
+  assert(
+    !compiledWithCompany.includes('{{#if') && !compiledWithCompany.includes('{{/if}}'),
+    'WALK_IN_INVITATION contains ZERO raw {{#if}} or {{/if}} directives when company is present'
+  );
+
+  // Verification: Multi-city venue fidelity (Indore, Noida, Gurugram)
+  const indoreRender = interpolateVariables(inviteTpl.htmlBody, {
+    ...mockVars,
+    venue_name: 'Orrica Edge Indore Hub',
+    venue_address: '4th Floor, Brilliant Solitaire, Scheme 78, Vijay Nagar, Indore',
+    google_maps_link: 'https://maps.google.com/?q=Brilliant+Solitaire+Indore',
+  });
+  assert(
+    indoreRender.includes('Brilliant Solitaire, Scheme 78, Vijay Nagar, Indore') &&
+    indoreRender.includes('https://maps.google.com/?q=Brilliant+Solitaire+Indore') &&
+    !indoreRender.includes('Noida') && !indoreRender.includes('Logix Cyber Park'),
+    'Indore walk-in email renders exact Indore venue & Maps link with zero Noida leakage'
+  );
+
   // 11.C Route Not Found assertion (simulate Express router lookup)
   const test404Handler = (route: string): number => {
     const knownEndpoints = [

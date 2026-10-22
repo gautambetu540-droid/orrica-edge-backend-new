@@ -17,7 +17,7 @@ export const DEFAULT_TEMPLATES: Record<string, DefaultTemplateDefinition> = {
     name: 'Walk-in Interview Invitation',
     category: 'Candidate',
     subject: 'Walk-in Interview Invitation – {{job_title}}{{#if company_name}} at {{company_name}}{{/if}}',
-    htmlBody: '<h2 style="font-size:17px;margin:0 0 16px;color:#0f172a;font-weight:700;">Walk-in Interview Invitation</h2><p style="font-size:12.75px;line-height:1.6;margin:0 0 12px;color:#334155;">Dear <strong>{{candidate_name}}</strong>,</p><p style="font-size:12.75px;line-height:1.6;margin:0 0 16px;color:#334155;">You have been invited to attend a walk-in interview session for the position of <strong>{{job_title}}</strong>{{#if company_name}} at <strong>{{company_name}}</strong>{{/if}}.</p><div style="background-color:#f8fafc;border:1px solid #e2e8f0;padding:18px;border-radius:8px;margin:20px 0;font-size:12.75px;line-height:1.6;color:#334155;">{{#if company_name}}<p style="margin:4px 0;font-size:12.75px;color:#334155;"><strong>Company:</strong> {{company_name}}</p>{{/if}}<p style="margin:4px 0;font-size:12.75px;color:#334155;"><strong>Date:</strong> {{walk_in_date}}</p><p style="margin:4px 0;font-size:12.75px;color:#334155;"><strong>Reporting Time:</strong> {{reporting_time}}</p><p style="margin:4px 0;font-size:12.75px;color:#334155;"><strong>Venue:</strong> {{venue_name}}</p><p style="margin:4px 0;font-size:12.75px;color:#334155;"><strong>Address:</strong> {{venue_address}}</p><p style="margin:4px 0;font-size:12.75px;"><strong style="color:#334155;">Google Maps:</strong> <a href="{{google_maps_link}}" target="_blank" style="color:#f97316;font-size:12.75px;text-decoration:none;font-weight:600;">View Location</a></p></div><div style="background-color:#fff7ed;border-left:4px solid #f97316;padding:12px;margin:16px 0;"><p style="margin:0;font-weight:bold;color:#9a3412;font-size:11.9px;">Instructions:</p><p style="margin:4px 0 0;font-size:11.9px;line-height:1.5;color:#7c2d12;">{{instructions}}</p></div><p style="font-size:12.75px;margin:18px 0 10px;color:#334155;font-weight:500;">Please indicate your availability using the options below:</p><div style="margin:20px 0;"><a href="{{confirm_url}}" style="background-color:#16a34a;color:#ffffff;padding:10px 18px;text-decoration:none;border-radius:6px;font-weight:bold;display:inline-block;margin-right:10px;font-size:11.9px;line-height:1.2;">Confirm Attendance</a><a href="{{reschedule_url}}" style="background-color:#f59e0b;color:#ffffff;padding:10px 18px;text-decoration:none;border-radius:6px;font-weight:bold;display:inline-block;margin-right:10px;font-size:11.9px;line-height:1.2;">Request Another Date</a><a href="{{not_interested_url}}" style="background-color:#64748b;color:#ffffff;padding:10px 18px;text-decoration:none;border-radius:6px;font-weight:bold;display:inline-block;font-size:11.9px;line-height:1.2;">Not Interested</a></div><p style="font-size:11.05px;color:#64748b;margin-top:16px;">If the buttons above do not open, please copy and paste this link: <a href="{{confirmation_url}}" style="color:#2563eb;word-break:break-all;font-size:11.05px;">{{confirmation_url}}</a></p>',
+    htmlBody: '<h2 style="font-size:17px;margin:0 0 16px;color:#0f172a;font-weight:700;">Walk-in Interview Invitation</h2><p style="font-size:12.75px;line-height:1.6;margin:0 0 12px;color:#334155;">Dear <strong>{{candidate_name}}</strong>,</p><p style="font-size:12.75px;line-height:1.6;margin:0 0 16px;color:#334155;">You have been invited to attend a walk-in interview session for the position of <strong>{{job_title}}</strong>{{#if company_name}} at <strong>{{company_name}}</strong>{{/if}}.</p><div style="background-color:#f8fafc;border:1px solid #e2e8f0;padding:18px;border-radius:8px;margin:20px 0;font-size:12.75px;line-height:1.6;color:#334155;">{{#if company_name}}<p style="margin:4px 0;font-size:12.75px;color:#334155;"><strong>Company:</strong> {{company_name}}</p>{{/if}}<p style="margin:4px 0;font-size:12.75px;color:#334155;"><strong>Date:</strong> {{walk_in_date}}</p><p style="margin:4px 0;font-size:12.75px;color:#334155;"><strong>Reporting Time:</strong> {{reporting_time}}</p><p style="margin:4px 0;font-size:12.75px;color:#334155;"><strong>Venue:</strong> {{venue_name}}</p><p style="margin:4px 0;font-size:12.75px;color:#334155;"><strong>Address:</strong> {{venue_address}}</p><p style="margin:4px 0;font-size:12.75px;"><strong style="color:#334155;">Google Maps:</strong> <a href="{{google_maps_link}}" target="_blank" style="color:#f97316;font-size:12.75px;text-decoration:none;font-weight:600;">View Location on Maps</a></p></div><div style="background-color:#fff7ed;border-left:4px solid #f97316;padding:12px;margin:16px 0;"><p style="margin:0;font-weight:bold;color:#9a3412;font-size:11.9px;">Instructions:</p><p style="margin:4px 0 0;font-size:11.9px;line-height:1.5;color:#7c2d12;">{{instructions}}</p></div><p style="font-size:12.75px;margin:18px 0 10px;color:#334155;font-weight:500;">Please indicate your availability using the options below:</p><div style="margin:20px 0;"><a href="{{confirm_url}}" style="background-color:#16a34a;color:#ffffff;padding:10px 18px;text-decoration:none;border-radius:6px;font-weight:bold;display:inline-block;margin-right:10px;font-size:11.9px;line-height:1.2;">Confirm Attendance</a><a href="{{reschedule_url}}" style="background-color:#f59e0b;color:#ffffff;padding:10px 18px;text-decoration:none;border-radius:6px;font-weight:bold;display:inline-block;margin-right:10px;font-size:11.9px;line-height:1.2;">Request Another Date</a><a href="{{not_interested_url}}" style="background-color:#64748b;color:#ffffff;padding:10px 18px;text-decoration:none;border-radius:6px;font-weight:bold;display:inline-block;font-size:11.9px;line-height:1.2;">Not Interested</a></div><p style="font-size:11.05px;color:#64748b;margin-top:16px;">If the buttons above do not open, please copy and paste this link: <a href="{{confirmation_url}}" style="color:#2563eb;word-break:break-all;font-size:11.05px;">{{confirmation_url}}</a></p>',
     plainText: 'Dear {{candidate_name}}, You have been invited to attend a walk-in interview session for {{job_title}}{{#if company_name}} at {{company_name}}{{/if}} on {{walk_in_date}} at {{reporting_time}}. Venue: {{venue_name}}, {{venue_address}}. Please indicate your availability: {{confirmation_url}}',
     variables: ['candidate_name', 'candidate_email', 'job_title', 'job_id', 'walk_in_date', 'walkin_date', 'reporting_time', 'walk_in_time', 'venue_name', 'venue_address', 'google_maps_link', 'instructions', 'candidate_instructions', 'confirmation_url', 'confirmation_link', 'confirm_url', 'reschedule_url', 'not_interested_url'],
   },
@@ -222,18 +222,101 @@ export const wrapHtmlEmail = (contentHtml: string): string => {
   `.trim();
 };
 
+/**
+ * Evaluates Handlebars-style conditional blocks {{#if var}}...{{else}}...{{/if}}
+ * and {{#unless var}}...{{/unless}} safely.
+ */
+export const evaluateConditionalBlocks = (
+  templateText: string,
+  variables: Record<string, any>
+): string => {
+  if (!templateText) return '';
+
+  let result = templateText;
+  const ifRegex = /\{\{#if\s+([\w.]+)\s*\}\}([\s\S]*?)(?:\{\{else\}\}([\s\S]*?))?\{\{\/if\}\}/g;
+
+  // Multi-pass resolution for nested conditionals (up to 10 passes)
+  let passes = 0;
+  while (ifRegex.test(result) && passes < 10) {
+    passes++;
+    result = result.replace(ifRegex, (_match, varName, ifBranch, elseBranch) => {
+      const val = variables[varName];
+      const isTruthy = Boolean(
+        val !== undefined &&
+        val !== null &&
+        String(val).trim().length > 0 &&
+        String(val).trim().toLowerCase() !== 'false' &&
+        String(val).trim().toLowerCase() !== 'null' &&
+        String(val).trim().toLowerCase() !== 'undefined'
+      );
+      return isTruthy ? (ifBranch || '') : (elseBranch || '');
+    });
+  }
+
+  // Support {{#unless var}}...{{/unless}}
+  const unlessRegex = /\{\{#unless\s+([\w.]+)\s*\}\}([\s\S]*?)\{\{\/unless\}\}/g;
+  let unlessPasses = 0;
+  while (unlessRegex.test(result) && unlessPasses < 10) {
+    unlessPasses++;
+    result = result.replace(unlessRegex, (_match, varName, body) => {
+      const val = variables[varName];
+      const isFalsy =
+        val === undefined ||
+        val === null ||
+        String(val).trim().length === 0 ||
+        String(val).trim().toLowerCase() === 'false';
+      return isFalsy ? (body || '') : '';
+    });
+  }
+
+  return result;
+};
+
+/**
+ * Strips any leftover unparsed template syntax to guarantee
+ * that raw directives like {{#if ...}} or {{/if}} are never sent to recipients.
+ */
+export const stripRawTemplateSyntax = (text: string): string => {
+  if (!text) return '';
+  return text
+    .replace(/\{\{#[^}]*\}\}/g, '')
+    .replace(/\{\{\/[^}]*\}\}/g, '')
+    .replace(/\{\{else\}\}/g, '')
+    .replace(/\{\{\s*[\w.]+\s*\}\}/g, '');
+};
+
+/**
+ * Validates that no unparsed template tags remain in the final rendered content.
+ */
+export const validateRenderedEmail = (rendered: string): { valid: boolean; leftoverTags: string[] } => {
+  if (!rendered) return { valid: true, leftoverTags: [] };
+  const leftovers = rendered.match(/\{\{[^}]+\}\}/g) || [];
+  return {
+    valid: leftovers.length === 0,
+    leftoverTags: leftovers,
+  };
+};
+
 export const interpolateVariables = (
   templateText: string,
   variables: Record<string, string>
 ): string => {
   if (!templateText) return '';
 
-  return templateText.replace(/\{\{\s*([\w.]+)\s*\}\}/g, (match, token) => {
+  // 1. Evaluate conditional {{#if}} blocks first
+  let rendered = evaluateConditionalBlocks(templateText, variables);
+
+  // 2. Interpolate standard variables {{var_name}}
+  rendered = rendered.replace(/\{\{\s*([\w.]+)\s*\}\}/g, (_match, token) => {
     if (Object.prototype.hasOwnProperty.call(variables, token)) {
-      return variables[token] ?? '';
+      const val = variables[token];
+      return val !== undefined && val !== null ? String(val) : '';
     }
     return '';
   });
+
+  // 3. Post-render cleanup: ensure no raw syntax or unresolved placeholders leak
+  return stripRawTemplateSyntax(rendered);
 };
 
 export interface CompiledEmail {
@@ -247,8 +330,11 @@ export const compileEmailTemplate = async (
   templateKey: string,
   variables: Record<string, string>
 ): Promise<CompiledEmail> => {
+  const rawCompanyName = (variables.company_name || variables.client_name || '').trim();
+  const isGenericOrrica = ['orrica edge', 'orrica edge llp', 'orrica edge partner', 'orrica'].includes(rawCompanyName.toLowerCase());
+  const companyName = isGenericOrrica ? '' : rawCompanyName;
+
   const enrichedVars: Record<string, string> = {
-    company_name: 'Orrica Edge',
     support_email: 'no-reply@orricaedge.com',
     dashboard_url: 'https://orricaedge.com',
     walkin_date: variables.walk_in_date || variables.walkin_date || '',
@@ -260,6 +346,8 @@ export const compileEmailTemplate = async (
     confirmation_link: variables.confirmation_url || variables.confirmation_link || '',
     confirmation_url: variables.confirmation_url || variables.confirmation_link || '',
     ...variables,
+    company_name: companyName,
+    client_name: companyName,
   };
 
   const cacheKey = `email_tpl:${templateKey}`;

@@ -1973,7 +1973,8 @@ export const resendWalkInEmail = async (req: Request, res: Response, next: NextF
     }
 
     const jobTitle = req.body?.jobTitle || job?.title || 'Walk-in Interview Candidate';
-    const clientName = req.body?.clientName || job?.client?.companyName || 'Orrica Edge Partner';
+    const rawClientName = (req.body?.clientName || req.body?.companyName || job?.client?.companyName || '').trim();
+    const clientName = (rawClientName && !['orrica edge', 'orrica edge partner', 'orrica edge llp', 'orrica'].includes(rawClientName.toLowerCase())) ? rawClientName : '';
     const walkInDateStr = dateInfo.dateStr;
     const greetingName = formatCandidateGreetingName(candidate);
     const selectedSessionId = (req.body?.sessionId || req.body?.locationId || (candidate as any).walkInSessionId || savedSession.id || '').trim();
@@ -2229,7 +2230,8 @@ export const sendWalkInInvitation = async (req: Request, res: Response, next: Ne
     });
 
     const jobTitle = req.body?.jobTitle || job?.title || 'Walk-in Interview Candidate';
-    const clientName = req.body?.clientName || job?.client?.companyName || 'Orrica Edge Partner';
+    const rawClientName = (req.body?.clientName || req.body?.companyName || job?.client?.companyName || '').trim();
+    const clientName = (rawClientName && !['orrica edge', 'orrica edge partner', 'orrica edge llp', 'orrica'].includes(rawClientName.toLowerCase())) ? rawClientName : '';
     const walkInDateStr = dateInfo.dateStr;
     const greetingName = formatCandidateGreetingName(candidate);
 

@@ -351,7 +351,8 @@ export const submitWalkInConfirmation = async (req: Request, res: Response, next
 
     const job = application?.job;
     const jobTitle = job?.title || 'Walk-in Interview';
-    const clientName = job?.client?.companyName || 'Orrica Edge Partner';
+    const rawClientName = (job?.client?.companyName || '').trim();
+    const clientName = (rawClientName && !['orrica edge', 'orrica edge partner', 'orrica edge llp', 'orrica'].includes(rawClientName.toLowerCase())) ? rawClientName : '';
     const greetingName = formatCandidateGreetingName(candidate);
 
     // Resolve the exact walk-in invitation venue from recent candidate activity or location
