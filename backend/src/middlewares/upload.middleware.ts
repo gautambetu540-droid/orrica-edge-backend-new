@@ -41,3 +41,30 @@ export const uploadResume = multer({
   },
   fileFilter,
 });
+
+/**
+ * Memory storage for Excel and CSV bulk uploads.
+ * Keeps file buffer in memory for safe parsing and avoids temporary disk artifacts.
+ */
+const spreadsheetFilter = (
+  req: any,
+  file: Express.Multer.File,
+  cb: multer.FileFilterCallback
+) => {
+  const allowedExtensions = ['.xlsx', '.xls', '.csv'];
+  const ext = path.extname(file.originalname).toLowerCase();
+
+  if (allowedExtensions.includes(ext)) {
+    cb(null, true);
+  } else {
+    cb(new Error('Invalid file format. Only Excel (.xlsx, .xls) and CSV (.csv) files are supported for bulk candidate import.'));
+  }
+};
+
+export const uploadSpreadsheet = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 10 * 1024 * 1024, // 10MB maximum file size
+  },
+  fileFilter: spreadsheetFilter,
+});

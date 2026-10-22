@@ -15,8 +15,10 @@ import {
   resendWalkInEmail,
   sendWalkInInvitation,
   approveWalkInReschedule,
+  bulkImportCandidates,
+  downloadCandidateImportTemplate,
 } from '../controllers/candidate.controller';
-import { uploadResume } from '../middlewares/upload.middleware';
+import { uploadResume, uploadSpreadsheet } from '../middlewares/upload.middleware';
 import {
   authenticateJwt,
   requireRoles,
@@ -172,6 +174,25 @@ router.post(
   authenticateJwt,
   requireRoles('SUPER_ADMIN', 'ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
   approveWalkInReschedule
+);
+
+
+// Candidate Import Template Download
+router.get(
+  '/template/download',
+  authenticateJwt,
+  requireRoles('SUPER_ADMIN', 'ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
+  requireRecruiterPermission('candidates'),
+  downloadCandidateImportTemplate
+);
+
+// Bulk Candidate Import API
+router.post(
+  '/bulk-import',
+  authenticateJwt,
+  requireRoles('SUPER_ADMIN', 'ADMIN'),
+  uploadSpreadsheet.single('file'),
+  bulkImportCandidates
 );
 
 export default router;

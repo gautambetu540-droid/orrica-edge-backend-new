@@ -1,3 +1,4 @@
+import * as XLSX from 'xlsx';
 import { Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import { prisma } from '../prisma/client';
@@ -5,7 +6,7 @@ import { sendSuccess, sendError } from '../utils/response';
 import { logAudit } from '../services/audit.service';
 import { createNotification } from '../services/notification.service';
 import { uploadResumeFile } from '../services/storage.service';
-import { generateCandidateCode, generateApplicationCode } from '../utils/codeGenerators';
+import { generateCandidateCode, generateCandidateCodesBatch, generateApplicationCode } from '../utils/codeGenerators';
 import { logCandidateTimeline } from '../services/timeline.service';
 import { sendDynamicEmail } from '../services/email.service';
 import { formatCandidateGreetingName, formatCandidateGreeting } from '../utils/nameFormatter';
@@ -2320,6 +2321,550 @@ export const approveWalkInReschedule = async (req: Request, res: Response, next:
       candidate: updated,
       message: 'Reschedule approved for ' + dateStr + '.',
     });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/* ==========================================================================
+   BULK CANDIDATE IMPORT CONTROLLERS
+   ========================================================================== */
+
+/**
+ * Clean and sanitize string against CSV/Formula injection
+ */
+const sanitizeCellValue = (val: any): string => {
+  if (val === null || val === undefined) return '';
+  let str = String(val).trim();
+  if (str.startsWith('=') || str.startsWith('+') || str.startsWith('-') || str.startsWith('@')) {
+    str = "'" + str;
+  }
+  return str;
+};
+
+/**
+ * Normalizes 10-digit Indian phone number
+ */
+const normalizePhoneNumber = (raw: any): { phone: string; isValid: boolean } => {
+  if (!raw) return { phone: '', isValid: false };
+  let cleaned = String(raw).replace(/\D/g, '');
+  if (cleaned.length === 12 && cleaned.startsWith('91')) {
+    cleaned = cleaned.slice(2);
+  } else if (cleaned.length === 11 && cleaned.startsWith('0')) {
+    cleaned = cleaned.slice(1);
+  }
+  const isValid = /^[6-9]\d{9}$/.test(cleaned);
+  return { phone: cleaned, isValid };
+};
+
+/**
+ * Download standard Excel import template
+ * GET /api/v1/candidates/template/download
+ */
+export const downloadCandidateImportTemplate = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const headers = [
+      'Full Name',
+      'Phone',
+      'Email',
+      'Father Name',
+      'Date of Birth (YYYY-MM-DD)',
+      'Gender (Male/Female/Other)',
+      'Current Location',
+      'Preferred Location',
+      'Total Experience (Years)',
+      'Relevant Experience (Years)',
+      'Highest Qualification',
+      'Education',
+      'Current Company',
+      'Current Designation',
+      'Previous Company',
+      'Notice Period',
+      'Notice Period Days',
+      'Current Monthly Salary',
+      'Expected Monthly Salary',
+      'Current CTC',
+      'Expected CTC',
+      'Skills (comma-separated)',
+      'Languages (comma-separated)',
+      'Resume URL',
+      'Source',
+      'Tags (comma-separated)',
+      'Notes'
+    ];
+
+    const sampleRow = [
+      'Aarav Sharma',
+      '9876543210',
+      'aarav.sharma@example.com',
+      'Rajesh Sharma',
+      '1996-05-15',
+      'Male',
+      'Bengaluru, Karnataka',
+      'Bengaluru, Hyderabad',
+      '3.5',
+      '3.0',
+      'B.Tech in Computer Science',
+      'B.Tech',
+      'Infosys Ltd',
+      'Software Engineer',
+      'TCS',
+      '30 Days',
+      '30',
+      '65000',
+      '85000',
+      '780000',
+      '1020000',
+      'React, TypeScript, Node.js',
+      'English, Hindi',
+      'https://example.com/resumes/aarav.pdf',
+      'Excel Bulk Import',
+      'Frontend, Verified',
+      'Immediate joiner with hands-on enterprise experience.'
+    ];
+
+    const ws = XLSX.utils.aoa_to_sheet([headers, sampleRow]);
+    
+    // Set column widths for comfortable reading
+    ws['!cols'] = headers.map(() => ({ wch: 22 }));
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Candidate Import Template');
+
+    const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', 'attachment; filename="Orrica_Edge_Candidate_Import_Template.xlsx"');
+    res.setHeader('Content-Length', buffer.length.toString());
+    res.end(buffer);
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * Bulk Candidate Import from Excel/CSV
+ * POST /api/v1/candidates/bulk-import
+ */
+export const bulkImportCandidates = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const file = req.file;
+    if (!file || !file.buffer) {
+      sendError(res, 'Spreadsheet file is required. Upload a valid .xlsx, .xls, or .csv file.', 400);
+      return;
+    }
+
+    const isDryRun = req.body?.dryRun === true || req.body?.dryRun === 'true' || req.query?.dryRun === 'true';
+    const defaultSource = sanitizeCellValue(req.body?.source || 'Bulk Excel Import');
+    const assignedRecruiterId = req.body?.assignedRecruiterId ? String(req.body.assignedRecruiterId).trim() : null;
+    const currentUserId = (req.user as any)?.id || null;
+
+    // 1. Parse spreadsheet safely (disable formula execution)
+    let workbook: XLSX.WorkBook;
+    try {
+      workbook = XLSX.read(file.buffer, {
+        type: 'buffer',
+        cellFormula: false,
+        cellHTML: false,
+        cellText: true,
+      });
+    } catch (parseErr: any) {
+      sendError(res, `Failed to parse spreadsheet: ${parseErr?.message || 'Invalid or corrupted file.'}`, 400);
+      return;
+    }
+
+    const firstSheetName = workbook.SheetNames[0];
+    if (!firstSheetName) {
+      sendError(res, 'Uploaded spreadsheet contains no worksheets.', 400);
+      return;
+    }
+
+    const worksheet = workbook.Sheets[firstSheetName];
+    const rawRows: Record<string, any>[] = XLSX.utils.sheet_to_json(worksheet, {
+      defval: '',
+      raw: false,
+    });
+
+    if (!rawRows || rawRows.length === 0) {
+      sendError(res, 'Uploaded spreadsheet contains no data rows.', 400);
+      return;
+    }
+
+    const MAX_ROW_LIMIT = 5000;
+    if (rawRows.length > MAX_ROW_LIMIT) {
+      sendError(res, `Spreadsheet exceeds maximum allowed limit of ${MAX_ROW_LIMIT} rows per import batch.`, 400);
+      return;
+    }
+
+    // 2. Normalization map for headers
+    const normalizeKey = (key: string): string => {
+      const lower = key.toLowerCase().replace(/[^a-z0-9]/g, '');
+      if (['fullname', 'name', 'candidatename'].includes(lower)) return 'fullName';
+      if (['phone', 'mobile', 'phonenumber', 'contact', 'mobilenumber', 'contactnumber'].includes(lower)) return 'phone';
+      if (['email', 'emailaddress', 'emailid'].includes(lower)) return 'email';
+      if (['fathername', 'fathersname'].includes(lower)) return 'fatherName';
+      if (['dateofbirth', 'dob', 'birthdate'].includes(lower)) return 'dateOfBirth';
+      if (['gender', 'sex'].includes(lower)) return 'gender';
+      if (['currentlocation', 'location', 'city', 'address', 'fulladdress'].includes(lower)) return 'location';
+      if (['preferredlocation', 'preferredcity'].includes(lower)) return 'preferredLocation';
+      if (['totalexperience', 'experience', 'exp', 'totalexp', 'experienceyears'].includes(lower)) return 'totalExperience';
+      if (['relevantexperience', 'relexp'].includes(lower)) return 'relevantExperience';
+      if (['highestqualification', 'qualification', 'degree', 'highestdegree'].includes(lower)) return 'highestQualification';
+      if (['education', 'academics'].includes(lower)) return 'education';
+      if (['currentcompany', 'company', 'employer'].includes(lower)) return 'currentCompany';
+      if (['currentdesignation', 'designation', 'role', 'jobtitle', 'currentrole'].includes(lower)) return 'currentDesignation';
+      if (['previouscompany', 'pastcompany'].includes(lower)) return 'previousCompany';
+      if (['noticeperiod', 'notice'].includes(lower)) return 'noticePeriod';
+      if (['noticeperioddays', 'noticedays'].includes(lower)) return 'noticePeriodDays';
+      if (['currentsalary', 'currentmonthlysalary', 'salary'].includes(lower)) return 'currentSalary';
+      if (['expectedsalary', 'expectedmonthlysalary'].includes(lower)) return 'expectedSalary';
+      if (['currentctc'].includes(lower)) return 'currentCtc';
+      if (['expectedctc'].includes(lower)) return 'expectedCtc';
+      if (['skills', 'skillset', 'keyskills'].includes(lower)) return 'skills';
+      if (['languages', 'languagesknown'].includes(lower)) return 'languages';
+      if (['resumeurl', 'resumelink', 'cvlink'].includes(lower)) return 'resumeUrl';
+      if (['source', 'sourcingchannel'].includes(lower)) return 'source';
+      if (['tags', 'tag'].includes(lower)) return 'tags';
+      if (['notes', 'remarks', 'feedback', 'comments'].includes(lower)) return 'notes';
+      return lower;
+    };
+
+    // 3. First pass: Parse & Validate fields, detect duplicate phones/emails inside sheet
+    type ProcessedRow = {
+      rowNumber: number;
+      data: any;
+      isValid: boolean;
+      isDuplicateInSheet: boolean;
+      errors: string[];
+    };
+
+    const processedRows: ProcessedRow[] = [];
+    const seenPhonesInSheet = new Map<string, number>();
+    const seenEmailsInSheet = new Map<string, number>();
+
+    const candidatePhonesForDbCheck = new Set<string>();
+    const candidateEmailsForDbCheck = new Set<string>();
+
+    for (let index = 0; index < rawRows.length; index++) {
+      const raw = rawRows[index];
+      const rowNumber = index + 2; // +1 for 0-index, +1 for header row
+      const errors: string[] = [];
+
+      // Extract normalized fields
+      const rowNormalized: Record<string, any> = {};
+      for (const [key, val] of Object.entries(raw)) {
+        const canonicalKey = normalizeKey(key);
+        rowNormalized[canonicalKey] = sanitizeCellValue(val);
+      }
+
+      const fullName = rowNormalized.fullName || '';
+      const rawPhone = rowNormalized.phone || '';
+      const rawEmail = (rowNormalized.email || '').toLowerCase().trim();
+
+      if (!fullName) {
+        errors.push('Full Name is required.');
+      }
+
+      const { phone: normalizedPhone, isValid: isPhoneValid } = normalizePhoneNumber(rawPhone);
+      if (!isPhoneValid) {
+        errors.push(`Invalid phone number '${rawPhone}'. Must be a valid 10-digit Indian mobile number.`);
+      }
+
+      const emailRegex = /^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i;
+      if (!rawEmail || !emailRegex.test(rawEmail)) {
+        errors.push(`Invalid or missing email address '${rawEmail}'.`);
+      }
+
+      // Check within-sheet duplicates
+      let isDuplicateInSheet = false;
+      if (isPhoneValid) {
+        if (seenPhonesInSheet.has(normalizedPhone)) {
+          isDuplicateInSheet = true;
+          errors.push(`Duplicate phone number in spreadsheet. Already appeared in Row ${seenPhonesInSheet.get(normalizedPhone)}.`);
+        } else {
+          seenPhonesInSheet.set(normalizedPhone, rowNumber);
+          candidatePhonesForDbCheck.add(normalizedPhone);
+        }
+      }
+
+      if (rawEmail && emailRegex.test(rawEmail)) {
+        if (seenEmailsInSheet.has(rawEmail)) {
+          isDuplicateInSheet = true;
+          errors.push(`Duplicate email address in spreadsheet. Already appeared in Row ${seenEmailsInSheet.get(rawEmail)}.`);
+        } else {
+          seenEmailsInSheet.set(rawEmail, rowNumber);
+          candidateEmailsForDbCheck.add(rawEmail);
+        }
+      }
+
+      // Parse experience and numbers safely
+      const parseDecimal = (val: any, fallback = 0) => {
+        if (!val) return fallback;
+        const num = parseFloat(String(val).replace(/[^0-9.]/g, ''));
+        return isNaN(num) ? fallback : Math.max(0, num);
+      };
+
+      const totalExp = parseDecimal(rowNormalized.totalExperience, 0);
+      const relExp = parseDecimal(rowNormalized.relevantExperience, 0);
+      const currSal = rowNormalized.currentSalary ? parseDecimal(rowNormalized.currentSalary) : null;
+      const expSal = rowNormalized.expectedSalary ? parseDecimal(rowNormalized.expectedSalary) : null;
+      const currCtc = rowNormalized.currentCtc ? parseDecimal(rowNormalized.currentCtc) : (currSal ? currSal * 12 : null);
+      const expCtc = rowNormalized.expectedCtc ? parseDecimal(rowNormalized.expectedCtc) : (expSal ? expSal * 12 : null);
+
+      // Gender normalization
+      let genderVal: 'MALE' | 'FEMALE' | 'OTHER' | null = null;
+      const rawGender = String(rowNormalized.gender || '').toUpperCase();
+      if (['MALE', 'M'].includes(rawGender)) genderVal = 'MALE';
+      else if (['FEMALE', 'F'].includes(rawGender)) genderVal = 'FEMALE';
+      else if (['OTHER', 'O'].includes(rawGender)) genderVal = 'OTHER';
+
+      // Parse arrays (comma-separated)
+      const parseArray = (str: string) => {
+        if (!str) return [];
+        return str.split(',').map((s) => s.trim()).filter(Boolean);
+      };
+
+      const skillsArr = parseArray(rowNormalized.skills);
+      const languagesArr = parseArray(rowNormalized.languages);
+      const tagsArr = parseArray(rowNormalized.tags);
+
+      // Date of birth
+      let dobDate: Date | null = null;
+      if (rowNormalized.dateOfBirth) {
+        const parsedDob = new Date(rowNormalized.dateOfBirth);
+        if (!isNaN(parsedDob.getTime())) {
+          dobDate = parsedDob;
+        }
+      }
+
+      const candidateData = {
+        fullName,
+        name: fullName,
+        phone: normalizedPhone,
+        email: rawEmail,
+        fatherName: rowNormalized.fatherName || null,
+        dateOfBirth: dobDate,
+        gender: genderVal,
+        currentLocation: rowNormalized.location || '',
+        location: rowNormalized.location || '',
+        preferredLocation: rowNormalized.preferredLocation || null,
+        totalExperience: totalExp,
+        relevantExperience: relExp,
+        experienceYears: totalExp,
+        highestQualification: rowNormalized.highestQualification || rowNormalized.education || null,
+        education: rowNormalized.education || rowNormalized.highestQualification || null,
+        currentCompany: rowNormalized.currentCompany || null,
+        currentDesignation: rowNormalized.currentDesignation || null,
+        previousCompany: rowNormalized.previousCompany || null,
+        noticePeriod: rowNormalized.noticePeriod || (rowNormalized.noticePeriodDays ? `${rowNormalized.noticePeriodDays} Days` : null),
+        noticePeriodDays: rowNormalized.noticePeriodDays ? parseInt(rowNormalized.noticePeriodDays, 10) || null : null,
+        currentSalary: currSal,
+        expectedSalary: expSal,
+        currentCtc: currCtc,
+        expectedCtc: expCtc,
+        skills: skillsArr.length > 0 ? skillsArr : [],
+        languages: languagesArr.length > 0 ? languagesArr : ['English', 'Hindi'],
+        resumeUrl: rowNormalized.resumeUrl || '',
+        source: rowNormalized.source || defaultSource,
+        tags: tagsArr,
+        notes: rowNormalized.notes || null,
+        status: 'New',
+        ownerRecruiterId: assignedRecruiterId,
+        createdById: currentUserId,
+      };
+
+      processedRows.push({
+        rowNumber,
+        data: candidateData,
+        isValid: errors.length === 0,
+        isDuplicateInSheet,
+        errors,
+      });
+    }
+
+    // 4. Second pass: Check existing duplicates against the PostgreSQL database
+    const existingDbCandidates = await prisma.candidate.findMany({
+      where: {
+        OR: [
+          { phone: { in: Array.from(candidatePhonesForDbCheck) } },
+          { email: { in: Array.from(candidateEmailsForDbCheck) } },
+        ],
+      },
+      select: {
+        id: true,
+        candidateCode: true,
+        phone: true,
+        email: true,
+      },
+    });
+
+    const existingDbPhoneMap = new Map<string, string>();
+    const existingDbEmailMap = new Map<string, string>();
+    for (const ec of existingDbCandidates) {
+      if (ec.phone) existingDbPhoneMap.set(ec.phone, ec.candidateCode);
+      if (ec.email) existingDbEmailMap.set(ec.email.toLowerCase(), ec.candidateCode);
+    }
+
+    const errorReport: { row: number; candidateName: string; phone: string; email: string; reason: string }[] = [];
+    const validRowsToInsert: ProcessedRow[] = [];
+    let duplicateDbCount = 0;
+    let duplicateSheetCount = 0;
+    let invalidFieldCount = 0;
+
+    for (const row of processedRows) {
+      if (!row.isValid) {
+        if (row.isDuplicateInSheet) {
+          duplicateSheetCount++;
+        } else {
+          invalidFieldCount++;
+        }
+        errorReport.push({
+          row: row.rowNumber,
+          candidateName: row.data.fullName || 'Unknown',
+          phone: row.data.phone || '',
+          email: row.data.email || '',
+          reason: row.errors.join('; '),
+        });
+        continue;
+      }
+
+      const existingPhoneCode = existingDbPhoneMap.get(row.data.phone);
+      const existingEmailCode = existingDbEmailMap.get(row.data.email);
+
+      if (existingPhoneCode || existingEmailCode) {
+        duplicateDbCount++;
+        const conflictReason = existingPhoneCode
+          ? `Phone number already registered in database under Candidate ID ${existingPhoneCode}.`
+          : `Email already registered in database under Candidate ID ${existingEmailCode}.`;
+        errorReport.push({
+          row: row.rowNumber,
+          candidateName: row.data.fullName,
+          phone: row.data.phone,
+          email: row.data.email,
+          reason: conflictReason,
+        });
+        continue;
+      }
+
+      validRowsToInsert.push(row);
+    }
+
+    const totalDuplicates = duplicateDbCount + duplicateSheetCount;
+
+    // 5. If dryRun is requested, return preview analysis without writing to DB
+    if (isDryRun) {
+      sendSuccess(res, {
+        isDryRun: true,
+        totalRows: rawRows.length,
+        validCount: validRowsToInsert.length,
+        duplicateCount: totalDuplicates,
+        duplicateDbCount,
+        duplicateSheetCount,
+        invalidCount: invalidFieldCount,
+        previewRows: validRowsToInsert.slice(0, 10).map((r) => ({
+          row: r.rowNumber,
+          name: r.data.fullName,
+          phone: r.data.phone,
+          email: r.data.email,
+          location: r.data.location,
+          totalExperience: r.data.totalExperience,
+          currentCompany: r.data.currentCompany,
+        })),
+        errors: errorReport.slice(0, 100), // First 100 errors for preview
+      }, 'Spreadsheet validation completed successfully.');
+      return;
+    }
+
+    // 6. Execute atomic batch insertion in transactions
+    if (validRowsToInsert.length === 0) {
+      sendSuccess(res, {
+        totalProcessed: rawRows.length,
+        importedCount: 0,
+        skippedCount: totalDuplicates,
+        failedCount: invalidFieldCount,
+        generatedCodes: [],
+        errors: errorReport,
+        message: 'No new valid candidates were imported. All rows were either duplicates or contained validation errors.',
+      }, 'Import completed with 0 records inserted.');
+      return;
+    }
+
+    // Reserve candidate codes in a single atomic sequence call
+    const candidateCodes = await generateCandidateCodesBatch(validRowsToInsert.length);
+
+    const insertedCodes: string[] = [];
+    const CHUNK_SIZE = 50;
+
+    for (let i = 0; i < validRowsToInsert.length; i += CHUNK_SIZE) {
+      const chunk = validRowsToInsert.slice(i, i + CHUNK_SIZE);
+      const codesChunk = candidateCodes.slice(i, i + CHUNK_SIZE);
+
+      await prisma.$transaction(async (tx) => {
+        for (let j = 0; j < chunk.length; j++) {
+          const rowItem = chunk[j];
+          const code = codesChunk[j];
+
+          const created = await tx.candidate.create({
+            data: {
+              ...rowItem.data,
+              candidateCode: code,
+            },
+            select: { id: true, candidateCode: true },
+          });
+
+          insertedCodes.push(created.candidateCode);
+
+          // Timeline entry
+          try {
+            await logCandidateTimeline({
+              candidateId: created.id,
+              userId: currentUserId || null,
+              userName: (req.user as any)?.email,
+              userRole: (req.user as any)?.role,
+              action: 'Candidate Imported',
+              newStatus: 'New',
+              remarks: `Candidate profile created (${created.candidateCode}) via Bulk Excel Import by ${(req.user as any)?.email || 'Admin'}`,
+              client: tx,
+            });
+          } catch {}
+        }
+      });
+    }
+
+    // Audit log for the import batch
+    try {
+      await logAudit({
+        userId: currentUserId,
+        action: 'BULK_CANDIDATE_IMPORT',
+        module: 'CANDIDATES',
+        entity: 'Candidate',
+        entityId: `batch-${Date.now()}`,
+        newValue: {
+          importedCount: insertedCodes.length,
+          skippedDuplicates: totalDuplicates,
+          invalidRows: invalidFieldCount,
+          fileName: file.originalname,
+        },
+      });
+    } catch {}
+
+    sendSuccess(res, {
+      totalProcessed: rawRows.length,
+      importedCount: insertedCodes.length,
+      skippedCount: totalDuplicates,
+      failedCount: invalidFieldCount,
+      generatedCodes: insertedCodes,
+      errors: errorReport,
+      message: `Successfully imported ${insertedCodes.length} candidates into the database. ${totalDuplicates} duplicate records skipped. ${invalidFieldCount} invalid rows skipped.`,
+    }, 'Bulk candidate import processed successfully.');
   } catch (err) {
     next(err);
   }
