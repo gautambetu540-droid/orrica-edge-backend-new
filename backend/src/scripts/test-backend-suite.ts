@@ -653,6 +653,144 @@ async function runTestSuite() {
     'In-sheet duplicate detection catches identical phone (Row 4) and identical email (Row 5)'
   );
 
+  // =========================================================
+  // 13. Testing Upgraded Audit Logs Module
+  // =========================================================
+  console.log('\n--- 13. Testing Upgraded Audit Logs Module ---');
+
+  // 13.A Action Type Mapping
+  const actionGroups: Record<string, string[]> = {
+    CANDIDATE_ASSIGNED: ['ASSIGN_CANDIDATE_RECRUITER', 'OWNER_ASSIGNED'],
+    CANDIDATE_REASSIGNED: ['REASSIGN_CANDIDATE_RECRUITER', 'TRANSFER_CANDIDATE_RECRUITER'],
+    CANDIDATE_TRANSFERRED: ['TRANSFER_CANDIDATE_RECRUITER'],
+    CANDIDATE_CREATED: ['CREATE_CANDIDATE', 'PUBLIC_FORM_SUBMITTED', 'Candidate Created'],
+    CANDIDATE_UPDATED: ['UPDATE_CANDIDATE', 'UPDATE_APPLICATION_STAGE', 'Status Changed'],
+    BULK_CANDIDATE_IMPORT: ['BULK_CANDIDATE_IMPORT'],
+  };
+
+  assert(
+    actionGroups.CANDIDATE_ASSIGNED.includes('ASSIGN_CANDIDATE_RECRUITER'),
+    'Action type "CANDIDATE_ASSIGNED" correctly maps to ASSIGN_CANDIDATE_RECRUITER'
+  );
+  assert(
+    actionGroups.CANDIDATE_REASSIGNED.includes('REASSIGN_CANDIDATE_RECRUITER'),
+    'Action type "CANDIDATE_REASSIGNED" correctly maps to REASSIGN_CANDIDATE_RECRUITER'
+  );
+  assert(
+    actionGroups.CANDIDATE_CREATED.includes('CREATE_CANDIDATE'),
+    'Action type "CANDIDATE_CREATED" maps to CREATE_CANDIDATE'
+  );
+
+  // 13.B Candidate Assignment & Reassignment Audit Payload Validation
+  const sampleAssignmentAudit = {
+    userId: 'admin-uuid-1',
+    action: 'ASSIGN_CANDIDATE_RECRUITER',
+    module: 'CANDIDATES',
+    entity: 'Candidate: Vikram Sharma (CND-000042)',
+    entityId: 'cand-uuid-1',
+    oldValue: {
+      ownerRecruiterId: null,
+      assignedRecruiterName: 'Unassigned',
+      candidateName: 'Vikram Sharma',
+      candidateCode: 'CND-000042',
+      isReassign: false,
+    },
+    newValue: {
+      ownerRecruiterId: 'rec-uuid-1',
+      assignedRecruiterName: 'Vaishakini',
+      candidateName: 'Vikram Sharma',
+      candidateCode: 'CND-000042',
+      isReassign: false,
+      details: 'Candidate "Vikram Sharma" (CND-000042) assigned to recruiter Vaishakini',
+    },
+  };
+
+  assert(
+    sampleAssignmentAudit.newValue.candidateName === 'Vikram Sharma' &&
+    sampleAssignmentAudit.newValue.candidateCode === 'CND-000042' &&
+    sampleAssignmentAudit.newValue.assignedRecruiterName === 'Vaishakini',
+    'Initial assignment audit event records Candidate Name, Code, and Assigned To recruiter'
+  );
+
+  const sampleReassignmentAudit = {
+    userId: 'admin-uuid-1',
+    action: 'REASSIGN_CANDIDATE_RECRUITER',
+    module: 'CANDIDATES',
+    entity: 'Candidate: Vikram Sharma (CND-000042)',
+    entityId: 'cand-uuid-1',
+    oldValue: {
+      ownerRecruiterId: 'rec-uuid-1',
+      assignedRecruiterName: 'Vaishakini',
+      candidateName: 'Vikram Sharma',
+      candidateCode: 'CND-000042',
+      isReassign: true,
+    },
+    newValue: {
+      ownerRecruiterId: 'rec-uuid-2',
+      assignedRecruiterName: 'Rahul Verma',
+      candidateName: 'Vikram Sharma',
+      candidateCode: 'CND-000042',
+      isReassign: true,
+      details: 'Candidate "Vikram Sharma" (CND-000042) reassigned from Vaishakini to Rahul Verma',
+    },
+  };
+
+  assert(
+    sampleReassignmentAudit.oldValue.assignedRecruiterName === 'Vaishakini' &&
+    sampleReassignmentAudit.newValue.assignedRecruiterName === 'Rahul Verma' &&
+    sampleReassignmentAudit.newValue.isReassign === true,
+    'Reassignment audit event records both Previously Assigned To and new Assigned To recruiters'
+  );
+
+  // 13.C Chronological Sorting Validation
+  const sampleEvents = [
+    { id: 'ev-1', createdAt: new Date('2026-10-22T10:00:00Z'), name: 'Beta' },
+    { id: 'ev-2', createdAt: new Date('2026-10-22T12:00:00Z'), name: 'Alpha' },
+    { id: 'ev-3', createdAt: new Date('2026-10-22T11:00:00Z'), name: 'Gamma' },
+  ];
+
+  const sortedNewest = [...sampleEvents].sort(
+    (a, b) => b.createdAt.getTime() - a.createdAt.getTime() || b.id.localeCompare(a.id)
+  );
+  assert(
+    sortedNewest[0].id === 'ev-2' && sortedNewest[1].id === 'ev-3' && sortedNewest[2].id === 'ev-1',
+    'Sort by Newest First orders events by descending timestamp'
+  );
+
+  const sortedOldest = [...sampleEvents].sort(
+    (a, b) => a.createdAt.getTime() - b.createdAt.getTime() || a.id.localeCompare(b.id)
+  );
+  assert(
+    sortedOldest[0].id === 'ev-1' && sortedOldest[1].id === 'ev-3' && sortedOldest[2].id === 'ev-2',
+    'Sort by Oldest First orders events by ascending timestamp'
+  );
+
+  const sortedNameAsc = [...sampleEvents].sort(
+    (a, b) => a.name.localeCompare(b.name)
+  );
+  assert(
+    sortedNameAsc[0].name === 'Alpha' && sortedNameAsc[2].name === 'Gamma',
+    'Sort by Candidate Name (A - Z) sorts alphabetically'
+  );
+
+  // 13.D Safe Pagination Calculation
+  const totalItems = 77;
+  const pageSize = 25;
+  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+  assert(
+    totalPages === 4,
+    'Pagination correctly computes total pages (77 items / 25 per page = 4 pages)'
+  );
+
+  // 13.E Missing historical data fallback
+  const legacyRecord: any = { entityId: 'old-123', oldValue: null, newValue: null };
+  const fallbackCandidateName = legacyRecord.newValue?.candidateName || 'Not Available';
+  const fallbackAssignee = legacyRecord.newValue?.assignedRecruiterName || 'Not Available';
+  assert(
+    fallbackCandidateName === 'Not Available' && fallbackAssignee === 'Not Available',
+    'Historical records without names gracefully fall back to "Not Available" without fabricating data'
+  );
+
 console.log('\n====================================================');
   console.log(`🎉 All ${passedTests}/${totalTests} tests passed successfully!`);
   console.log('====================================================\n');

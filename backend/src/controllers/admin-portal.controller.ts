@@ -159,9 +159,113 @@ export const getAdminPortalData = async (req: Request, res: Response, next: Next
 
 export const getAuditLogs = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
+    const page = Math.max(1, parseInt(String(req.query.page || '1'), 10) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(String(req.query.limit || '25'), 10) || 25));
+    const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
+    const action = typeof req.query.action === 'string' ? req.query.action.trim() : '';
+    const performedBy = typeof req.query.performedBy === 'string' ? req.query.performedBy.trim() : '';
+    const assignedTo = typeof req.query.assignedTo === 'string' ? req.query.assignedTo.trim() : '';
+    const startDate = typeof req.query.startDate === 'string' ? req.query.startDate.trim() : '';
+    const endDate = typeof req.query.endDate === 'string' ? req.query.endDate.trim() : '';
+    const sortBy = typeof req.query.sortBy === 'string' ? req.query.sortBy.trim() : 'newest';
+
+    const where: any = {};
+
+    // 1. Date Range
+    if (startDate || endDate) {
+      where.createdAt = {};
+      if (startDate) {
+        const start = new Date(startDate.includes('T') ? startDate : `${startDate}T00:00:00.000Z`);
+        if (!isNaN(start.getTime())) where.createdAt.gte = start;
+      }
+      if (endDate) {
+        const end = new Date(endDate.includes('T') ? endDate : `${endDate}T23:59:59.999Z`);
+        if (!isNaN(end.getTime())) where.createdAt.lte = end;
+      }
+    }
+
+    // 2. Action Filter
+    if (action && action !== 'ALL') {
+      const actionGroups: Record<string, string[]> = {
+        CANDIDATE_ASSIGNED: ['ASSIGN_CANDIDATE_RECRUITER', 'OWNER_ASSIGNED'],
+        CANDIDATE_REASSIGNED: ['REASSIGN_CANDIDATE_RECRUITER', 'TRANSFER_CANDIDATE_RECRUITER'],
+        CANDIDATE_TRANSFERRED: ['TRANSFER_CANDIDATE_RECRUITER'],
+        CANDIDATE_CREATED: ['CREATE_CANDIDATE', 'PUBLIC_FORM_SUBMITTED', 'Candidate Created'],
+        CANDIDATE_UPDATED: ['UPDATE_CANDIDATE', 'UPDATE_APPLICATION_STAGE', 'Status Changed'],
+        BULK_CANDIDATE_IMPORT: ['BULK_CANDIDATE_IMPORT'],
+      };
+      const matched = actionGroups[action] || [action];
+      where.action = { in: matched };
+    }
+
+    // 3. Performed By Filter
+    if (performedBy && performedBy !== 'ALL') {
+      where.userId = performedBy;
+    }
+
+    // 4. Candidate Search Filter
+    if (search) {
+      const matchedCandidates = await prisma.candidate.findMany({
+        where: {
+          OR: [
+            { fullName: { contains: search, mode: 'insensitive' } },
+            { name: { contains: search, mode: 'insensitive' } },
+            { candidateCode: { contains: search, mode: 'insensitive' } },
+            { id: { contains: search, mode: 'insensitive' } },
+          ],
+        },
+        select: { id: true },
+        take: 300,
+      });
+      const candIds = matchedCandidates.map((c) => c.id);
+
+      where.OR = [
+        { entityId: { in: candIds.length > 0 ? candIds : ['__NO_MATCH__'] } },
+        { entity: { contains: search, mode: 'insensitive' } },
+        { action: { contains: search, mode: 'insensitive' } },
+      ];
+    }
+
+    // 5. Assigned To Filter
+    if (assignedTo && assignedTo !== 'ALL') {
+      // Find candidate IDs currently or previously associated with this recruiter
+      const candidateMatches = await prisma.candidate.findMany({
+        where: {
+          OR: [
+            { ownerRecruiterId: assignedTo },
+            { sourcingRecruiterId: assignedTo },
+          ],
+        },
+        select: { id: true },
+        take: 300,
+      });
+      const candIds = candidateMatches.map((c) => c.id);
+
+      where.AND = [
+        ...(where.AND || []),
+        {
+          OR: [
+            { entityId: { in: candIds } },
+            { newValue: { path: ['ownerRecruiterId'], equals: assignedTo } },
+            { oldValue: { path: ['ownerRecruiterId'], equals: assignedTo } },
+          ],
+        },
+      ];
+    }
+
+    // 6. Chronological Sorting by event timestamp (with stable id tie-breaker)
+    const orderBy: any = sortBy === 'oldest'
+      ? [{ createdAt: 'asc' }, { id: 'asc' }]
+      : [{ createdAt: 'desc' }, { id: 'desc' }];
+
+    const total = await prisma.auditLog.count({ where });
+    const skip = (page - 1) * limit;
+
     const rawLogs = await prisma.auditLog.findMany({
-      orderBy: { createdAt: 'desc' },
-      take: 500,
+      where,
+      orderBy,
+      skip,
+      take: limit,
       include: {
         user: {
           select: {
@@ -174,27 +278,193 @@ export const getAuditLogs = async (req: Request, res: Response, next: NextFuncti
       },
     });
 
-    const auditLogs = rawLogs.map((log: any) => ({
-      id: log.id,
-      userId: log.userId,
-      actorName: log.user?.fullName || log.user?.email || 'System User',
-      actorRole: log.user?.role || 'ADMIN',
-      userName: log.user?.fullName || log.user?.email || 'System User',
-      role: log.user?.role || 'ADMIN',
-      action: log.action,
-      entity: log.entity,
-      entityId: log.entityId,
-      entityType: log.module,
-      entityName: log.entity,
-      previousValue: log.oldValue ? (typeof log.oldValue === 'string' ? log.oldValue : JSON.stringify(log.oldValue)) : '',
-      newValue: log.newValue ? (typeof log.newValue === 'string' ? log.newValue : JSON.stringify(log.newValue)) : '',
-      metadata: log.newValue || log.oldValue || null,
-      timestamp: log.createdAt,
-      createdAt: log.createdAt,
-      ipAddress: log.ipAddress || '127.0.0.1',
-    }));
+    // 7. Batch resolve candidate & recruiter details
+    const candidateIdSet = new Set<string>();
+    const userIdSet = new Set<string>();
 
-    sendSuccess(res, { auditLogs });
+    rawLogs.forEach((log: any) => {
+      const isCandidateModule = log.module === 'CANDIDATES' || (log.entity && String(log.entity).toLowerCase().includes('candidate'));
+      if (isCandidateModule && log.entityId && log.entityId.length > 5 && !log.entityId.startsWith('batch-')) {
+        candidateIdSet.add(log.entityId);
+      }
+      const nv = log.newValue as any;
+      const ov = log.oldValue as any;
+      if (nv?.candidateId) candidateIdSet.add(nv.candidateId);
+      if (ov?.candidateId) candidateIdSet.add(ov.candidateId);
+
+      if (nv?.ownerRecruiterId) userIdSet.add(nv.ownerRecruiterId);
+      if (ov?.ownerRecruiterId) userIdSet.add(ov.ownerRecruiterId);
+      if (nv?.assignedRecruiterId) userIdSet.add(nv.assignedRecruiterId);
+      if (ov?.assignedRecruiterId) userIdSet.add(ov.assignedRecruiterId);
+      if (nv?.recruiterId) userIdSet.add(nv.recruiterId);
+      if (ov?.recruiterId) userIdSet.add(ov.recruiterId);
+    });
+
+    const [resolvedCandidates, resolvedUsers, allRecruiters, allUsers] = await Promise.all([
+      candidateIdSet.size > 0
+        ? prisma.candidate.findMany({
+            where: { id: { in: Array.from(candidateIdSet) } },
+            select: { id: true, candidateCode: true, fullName: true, name: true, ownerRecruiterId: true },
+          })
+        : Promise.resolve([]),
+      userIdSet.size > 0
+        ? prisma.user.findMany({
+            where: { id: { in: Array.from(userIdSet) } },
+            select: { id: true, fullName: true, email: true, role: true },
+          })
+        : Promise.resolve([]),
+      prisma.user.findMany({
+        where: { role: { in: ['RECRUITER', 'FREELANCE_RECRUITER'] }, isActive: true },
+        select: { id: true, fullName: true, email: true },
+        orderBy: { fullName: 'asc' },
+      }),
+      prisma.user.findMany({
+        where: { isActive: true },
+        select: { id: true, fullName: true, email: true, role: true },
+        orderBy: { fullName: 'asc' },
+      }),
+    ]);
+
+    const candidateMap = new Map<string, any>(resolvedCandidates.map((c: any) => [c.id, c]));
+    const userMap = new Map<string, any>(resolvedUsers.map((u: any) => [u.id, u]));
+
+    const formatActionLabel = (act: string): string => {
+      switch (act) {
+        case 'ASSIGN_CANDIDATE_RECRUITER':
+        case 'OWNER_ASSIGNED':
+          return 'Candidate Assigned';
+        case 'REASSIGN_CANDIDATE_RECRUITER':
+          return 'Candidate Reassigned';
+        case 'TRANSFER_CANDIDATE_RECRUITER':
+          return 'Candidate Transferred';
+        case 'CREATE_CANDIDATE':
+        case 'Candidate Created':
+        case 'PUBLIC_FORM_SUBMITTED':
+          return 'Candidate Created';
+        case 'UPDATE_CANDIDATE':
+        case 'Status Changed':
+        case 'UPDATE_APPLICATION_STAGE':
+          return 'Candidate Updated';
+        case 'DELETE_CANDIDATE':
+          return 'Candidate Deleted';
+        case 'BULK_CANDIDATE_IMPORT':
+          return 'Bulk Candidate Import';
+        default:
+          return act.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, (l) => l.toUpperCase());
+      }
+    };
+
+    let auditLogs = rawLogs.map((log: any) => {
+      const nv = (log.newValue && typeof log.newValue === 'object' ? log.newValue : {}) as any;
+      const ov = (log.oldValue && typeof log.oldValue === 'object' ? log.oldValue : {}) as any;
+
+      const candId = nv.candidateId || ov.candidateId || log.entityId;
+      const candidate = candidateMap.get(candId);
+
+      const isCandEvent = log.module === 'CANDIDATES' || (log.entity && String(log.entity).toLowerCase().includes('candidate'));
+
+      const candidateName =
+        nv.candidateName ||
+        ov.candidateName ||
+        candidate?.fullName ||
+        candidate?.name ||
+        (isCandEvent && candidate ? 'Candidate' : isCandEvent ? 'Not Available' : 'N/A');
+
+      const candidateCode =
+        nv.candidateCode ||
+        ov.candidateCode ||
+        candidate?.candidateCode ||
+        (isCandEvent && candidate ? candidate.candidateCode : isCandEvent ? 'Not Available' : 'N/A');
+
+      const candidateId = candidate?.id || (isCandEvent && candId && !candId.startsWith('batch-') ? candId : 'Not Available');
+
+      const prevUser = userMap.get(ov.ownerRecruiterId || ov.assignedRecruiterId || ov.recruiterId);
+      const nextUser = userMap.get(nv.ownerRecruiterId || nv.assignedRecruiterId || nv.recruiterId);
+
+      const previouslyAssignedTo =
+        ov.assignedRecruiterName ||
+        (prevUser ? (prevUser.fullName || prevUser.email) : null) ||
+        (ov.ownerRecruiterId ? 'Not Available' : isCandEvent ? 'Unassigned' : 'N/A');
+
+      const assignedTo =
+        nv.assignedRecruiterName ||
+        (nextUser ? (nextUser.fullName || nextUser.email) : null) ||
+        (nv.ownerRecruiterId ? 'Not Available' : isCandEvent ? 'Unassigned' : 'N/A');
+
+      let details = nv.details || nv.description || ov.details || '';
+      if (!details) {
+        if (log.action === 'ASSIGN_CANDIDATE_RECRUITER' || log.action === 'OWNER_ASSIGNED') {
+          details = `Candidate "${candidateName}" (${candidateCode}) assigned to recruiter ${assignedTo}.`;
+        } else if (log.action === 'REASSIGN_CANDIDATE_RECRUITER') {
+          details = `Candidate "${candidateName}" (${candidateCode}) reassigned from ${previouslyAssignedTo} to ${assignedTo}.`;
+        } else if (log.action === 'TRANSFER_CANDIDATE_RECRUITER') {
+          details = `Candidate "${candidateName}" (${candidateCode}) transferred from ${previouslyAssignedTo} to ${assignedTo}.`;
+        } else if (log.action === 'CREATE_CANDIDATE' || log.action === 'PUBLIC_FORM_SUBMITTED') {
+          details = `New candidate profile created for "${candidateName}" (${candidateCode}).`;
+        } else if (log.action === 'UPDATE_CANDIDATE' || log.action === 'Status Changed') {
+          details = `Candidate profile updated for "${candidateName}" (${candidateCode}).`;
+        } else if (log.action === 'BULK_CANDIDATE_IMPORT') {
+          details = `Bulk imported ${nv.importedCount ?? 0} candidates from file "${nv.fileName || 'Spreadsheet'}".`;
+        } else {
+          details = `Action ${formatActionLabel(log.action)} performed on ${log.entity || 'Record'}.`;
+        }
+      }
+
+      return {
+        id: log.id,
+        userId: log.userId,
+        actorName: log.user?.fullName || log.user?.email || 'System User',
+        actorRole: log.user?.role || 'ADMIN',
+        userName: log.user?.fullName || log.user?.email || 'System User',
+        role: log.user?.role || 'ADMIN',
+        action: log.action,
+        actionLabel: formatActionLabel(log.action),
+        entity: log.entity,
+        entityId: log.entityId,
+        entityType: log.module,
+        entityName: log.entity,
+        candidateName,
+        candidateCode,
+        candidateId,
+        previouslyAssignedTo,
+        assignedTo,
+        details,
+        previousValue: log.oldValue ? (typeof log.oldValue === 'string' ? log.oldValue : JSON.stringify(log.oldValue)) : '',
+        newValue: log.newValue ? (typeof log.newValue === 'string' ? log.newValue : JSON.stringify(log.newValue)) : '',
+        metadata: log.newValue || log.oldValue || null,
+        timestamp: log.createdAt,
+        createdAt: log.createdAt,
+        ipAddress: log.ipAddress || '127.0.0.1',
+      };
+    });
+
+    // In-memory Candidate Name A-Z / Z-A sort if requested
+    if (sortBy === 'name_asc') {
+      auditLogs.sort((a, b) => a.candidateName.localeCompare(b.candidateName) || new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    } else if (sortBy === 'name_desc') {
+      auditLogs.sort((a, b) => b.candidateName.localeCompare(a.candidateName) || new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    }
+
+    sendSuccess(res, {
+      auditLogs,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.max(1, Math.ceil(total / limit)),
+      },
+      filters: {
+        search,
+        action,
+        performedBy,
+        assignedTo,
+        startDate,
+        endDate,
+        sortBy,
+      },
+      recruiters: allRecruiters.map((r: any) => ({ id: r.id, name: r.fullName || r.email })),
+      users: allUsers.map((u: any) => ({ id: u.id, name: u.fullName || u.email, role: u.role })),
+    });
   } catch (err) {
     next(err);
   }

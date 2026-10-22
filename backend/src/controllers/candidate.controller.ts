@@ -864,6 +864,15 @@ export const createCandidate = async (req: Request, res: Response, next: NextFun
       return created;
     });
 
+    let assignedName = 'Unassigned';
+    if (candidate.ownerRecruiterId) {
+      const rec = await prisma.user.findUnique({
+        where: { id: candidate.ownerRecruiterId },
+        select: { fullName: true, email: true },
+      });
+      if (rec) assignedName = rec.fullName || rec.email;
+    }
+
     await logAudit({
       req,
       action: 'CREATE_CANDIDATE',
@@ -871,10 +880,14 @@ export const createCandidate = async (req: Request, res: Response, next: NextFun
       entity: 'Candidate',
       entityId: candidate.id,
       newValue: {
+        candidateName: candidate.fullName || candidate.name,
         candidateCode: candidate.candidateCode,
+        candidateId: candidate.id,
         sourcingRecruiterId: candidate.sourcingRecruiterId,
         teamLeaderId: candidate.teamLeaderId,
         ownerRecruiterId: candidate.ownerRecruiterId,
+        assignedRecruiterName: assignedName,
+        details: `Candidate "${candidate.fullName || candidate.name}" (${candidate.candidateCode}) profile created`,
       },
     });
 
@@ -929,16 +942,34 @@ export const assignCandidate = async (req: Request, res: Response, next: NextFun
       return;
     }
 
+    let recruiter: any = null;
     if (recruiterId) {
-      const recruiter = await prisma.user.findFirst({
+      recruiter = await prisma.user.findFirst({
         where: { id: recruiterId, role: { in: ['RECRUITER', 'FREELANCE_RECRUITER'] }, isActive: true },
-        select: { id: true },
+        select: { id: true, fullName: true, email: true },
       });
       if (!recruiter) {
         sendError(res, 'Recruiter not found or inactive', 400);
         return;
       }
     }
+
+    const previousRecruiter = existing.ownerRecruiterId
+      ? await prisma.user.findUnique({
+          where: { id: existing.ownerRecruiterId },
+          select: { id: true, fullName: true, email: true },
+        })
+      : null;
+
+    const isReassign = Boolean(existing.ownerRecruiterId && existing.ownerRecruiterId !== recruiterId);
+    const candidateName = existing.fullName || existing.name || 'Candidate';
+    const candidateCode = existing.candidateCode || existing.id;
+    const assignedRecruiterName = recruiter ? (recruiter.fullName || recruiter.email) : 'Unassigned';
+    const previousRecruiterName = previousRecruiter ? (previousRecruiter.fullName || previousRecruiter.email) : 'Unassigned';
+    const actionType = isReassign ? 'REASSIGN_CANDIDATE_RECRUITER' : 'ASSIGN_CANDIDATE_RECRUITER';
+    const detailsDescription = isReassign
+      ? `Candidate "${candidateName}" (${candidateCode}) reassigned from ${previousRecruiterName} to ${assignedRecruiterName}`
+      : `Candidate "${candidateName}" (${candidateCode}) assigned to recruiter ${assignedRecruiterName}`;
 
     const updated = await prisma.$transaction(async (tx) => {
       const candidate = await tx.candidate.update({
@@ -956,20 +987,25 @@ export const assignCandidate = async (req: Request, res: Response, next: NextFun
           recruiterId,
           action: 'OWNER_ASSIGNED',
           metadata: {
+            candidateName,
+            candidateCode,
             previousOwnerRecruiterId: existing.ownerRecruiterId,
+            previousOwnerRecruiterName: previousRecruiterName,
             newOwnerRecruiterId: recruiterId,
+            newOwnerRecruiterName: assignedRecruiterName,
+            isReassign,
+            description: detailsDescription,
           },
         },
       });
 
       if (recruiterId) {
-        const candidateName = existing.fullName || existing.name || 'Candidate';
         const jobTitle = existing.applications?.[0]?.job?.title || existing.currentDesignation || 'Job Opening';
         await tx.notification.create({
           data: {
             userId: recruiterId,
-            title: 'Candidate Assigned',
-            message: `A new candidate has been assigned to you. ${candidateName} - ${jobTitle}`,
+            title: isReassign ? 'Candidate Reassigned' : 'Candidate Assigned',
+            message: `A candidate has been ${isReassign ? 'reassigned' : 'assigned'} to you. ${candidateName} - ${jobTitle}`,
             type: 'CANDIDATE_ASSIGNED',
             link: `/candidates/${existing.id}`,
           },
@@ -979,12 +1015,27 @@ export const assignCandidate = async (req: Request, res: Response, next: NextFun
       await tx.auditLog.create({
         data: {
           userId: req.user?.userId || null,
-          action: 'ASSIGN_CANDIDATE_RECRUITER',
+          action: actionType,
           module: 'CANDIDATES',
           entity: 'Candidate',
           entityId: existing.id,
-          oldValue: { ownerRecruiterId: existing.ownerRecruiterId },
-          newValue: { ownerRecruiterId: recruiterId },
+          oldValue: {
+            ownerRecruiterId: existing.ownerRecruiterId,
+            assignedRecruiterName: previousRecruiterName,
+            candidateName,
+            candidateCode,
+            candidateId: existing.id,
+            isReassign,
+          },
+          newValue: {
+            ownerRecruiterId: recruiterId,
+            assignedRecruiterName,
+            candidateName,
+            candidateCode,
+            candidateId: existing.id,
+            isReassign,
+            details: detailsDescription,
+          },
           ipAddress: req.ip || req.socket?.remoteAddress || null,
           userAgent: req.headers['user-agent'] || null,
         },
@@ -1337,14 +1388,54 @@ export const updateCandidate = async (req: Request, res: Response, next: NextFun
       return candidate;
     });
 
+    const isOwnerChanged = existing.ownerRecruiterId !== updated.ownerRecruiterId;
+    let prevRecName = 'Unassigned';
+    let nextRecName = 'Unassigned';
+    if (isOwnerChanged) {
+      if (existing.ownerRecruiterId) {
+        const p = await prisma.user.findUnique({ where: { id: existing.ownerRecruiterId }, select: { fullName: true, email: true } });
+        prevRecName = p?.fullName || p?.email || 'Unassigned';
+      }
+      if (updated.ownerRecruiterId) {
+        const n = await prisma.user.findUnique({ where: { id: updated.ownerRecruiterId }, select: { fullName: true, email: true } });
+        nextRecName = n?.fullName || n?.email || 'Unassigned';
+      }
+    }
+
+    const cName = updated.fullName || updated.name || existing.fullName || existing.name || 'Candidate';
+    const cCode = updated.candidateCode || existing.candidateCode || existing.id;
+    const auditAction = isOwnerChanged
+      ? (existing.ownerRecruiterId ? 'REASSIGN_CANDIDATE_RECRUITER' : 'ASSIGN_CANDIDATE_RECRUITER')
+      : 'UPDATE_CANDIDATE';
+    const auditDetails = isOwnerChanged
+      ? (existing.ownerRecruiterId
+          ? `Candidate "${cName}" (${cCode}) reassigned from ${prevRecName} to ${nextRecName}`
+          : `Candidate "${cName}" (${cCode}) assigned to recruiter ${nextRecName}`)
+      : `Candidate "${cName}" (${cCode}) updated (Status: ${updated.status})`;
+
     await logAudit({
       req,
-      action: 'UPDATE_CANDIDATE',
+      action: auditAction,
       module: 'CANDIDATES',
       entity: 'Candidate',
       entityId: existing.id,
-      oldValue: { status: existing.status, ownerRecruiterId: existing.ownerRecruiterId },
-      newValue: { status: updated.status, ownerRecruiterId: updated.ownerRecruiterId },
+      oldValue: {
+        status: existing.status,
+        ownerRecruiterId: existing.ownerRecruiterId,
+        assignedRecruiterName: prevRecName,
+        candidateName: cName,
+        candidateCode: cCode,
+        candidateId: existing.id,
+      },
+      newValue: {
+        status: updated.status,
+        ownerRecruiterId: updated.ownerRecruiterId,
+        assignedRecruiterName: nextRecName,
+        candidateName: cName,
+        candidateCode: cCode,
+        candidateId: existing.id,
+        details: auditDetails,
+      },
     });
 
     sendSuccess(res, { candidate: updated }, 'Candidate profile updated successfully');
