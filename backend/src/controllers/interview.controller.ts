@@ -72,7 +72,7 @@ export const scheduleInterview = async (req: Request, res: Response, next: NextF
     const application = await prisma.application.findUnique({
       where: { id: data.applicationId },
       include: {
-        job: { select: { id: true, title: true } },
+        job: { select: { id: true, title: true, client: { select: { companyName: true } } } },
         candidate: {
           select: {
             id: true,
@@ -142,13 +142,16 @@ export const scheduleInterview = async (req: Request, res: Response, next: NextF
       return created;
     });
 
+    const companyName = (application.job as any)?.client?.companyName || 'Orrica Edge Partner';
     sendInterviewScheduledEmailAsync(
       application.candidate.fullName,
       application.candidate.email,
       application.job.title,
       data.roundName,
       scheduledDate,
-      data.meetingLink
+      data.meetingLink,
+      data.interviewerName || 'Hiring Manager',
+      companyName
     );
 
     await logAudit({

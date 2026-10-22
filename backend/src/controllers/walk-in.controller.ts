@@ -299,6 +299,7 @@ export const submitWalkInConfirmation = async (req: Request, res: Response, next
 
     const job = application?.job;
     const jobTitle = job?.title || 'Walk-in Interview';
+    const clientName = job?.client?.companyName || 'Orrica Edge Partner';
     const greetingName = formatCandidateGreetingName(candidate);
 
     const hiringProcess = (job?.hiringProcess as any) || {};
@@ -410,6 +411,8 @@ export const submitWalkInConfirmation = async (req: Request, res: Response, next
             candidate_greeting: formatCandidateGreeting(candidate),
             candidate_email: candidate.email,
             job_title: jobTitle,
+            client_name: clientName,
+            company_name: clientName,
             walk_in_date: walkInDateStr,
             walkin_date: walkInDateStr,
             reporting_time: candidate.walkInTime || savedSession.reportingTime || '09:30 AM',

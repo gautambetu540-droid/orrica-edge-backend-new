@@ -2219,6 +2219,7 @@ export const sendWalkInInvitation = async (req: Request, res: Response, next: Ne
       candidate_email: candidate.email,
       job_title: jobTitle,
       client_name: clientName,
+      company_name: clientName,
       walk_in_date: readableInterviewDate,
       walkin_date: readableInterviewDate,
       walk_in_date_formatted: readableInterviewDate,

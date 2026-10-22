@@ -131,7 +131,8 @@ export const sendInterviewScheduledEmailAsync = (
   roundName: string,
   scheduledAt: Date,
   meetingLink: string = '',
-  interviewerName: string = 'Hiring Manager'
+  interviewerName: string = 'Hiring Manager',
+  companyName: string = 'Orrica Edge Partner'
 ) => {
   const dateStr = scheduledAt.toLocaleDateString('en-IN', {
     weekday: 'short',
@@ -148,6 +149,8 @@ export const sendInterviewScheduledEmailAsync = (
     candidate_name: candidateName,
     candidate_email: candidateEmail,
     job_title: jobTitle,
+    company_name: companyName,
+    client_name: companyName,
     interview_round: roundName,
     interview_date: dateStr,
     interview_time: timeStr,
