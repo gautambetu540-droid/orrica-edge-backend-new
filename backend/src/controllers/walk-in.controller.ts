@@ -127,19 +127,53 @@ export const getWalkInConfirmation = async (req: Request, res: Response, next: N
     const job = application?.job;
     const greetingName = formatCandidateGreetingName(candidate);
 
-    // Retrieve configured session details from job.hiringProcess
+    // 1. Fetch latest candidate activity to get the ACTUAL invitation details dispatched
+    const recentActivity = await prisma.candidateActivity.findFirst({
+      where: {
+        candidateId: candidate.id,
+        action: { in: ['WALK_IN_INVITATION_SENT', 'WALK_IN_EMAIL_RESENT', 'WALK_IN_SCHEDULED'] },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    const activityMeta = (recentActivity?.metadata as any) || {};
+
+    // 2. Resolve target session / location ID
+    const targetSessionId = tokenSessionId || activityMeta.sessionId || (candidate as any).walkInSessionId;
+    let locationVenue: WalkInLocation | null = null;
+    if (targetSessionId) {
+      locationVenue = await findWalkInLocationById(targetSessionId);
+    }
+
+    // 3. Match job hiring process session ONLY if it genuinely matches targetSessionId
     const hiringProcess = (job?.hiringProcess as any) || {};
     const savedSession = hiringProcess.walkInSession || {};
+    const isSavedSessionMatch = Boolean(
+      (savedSession.id && (savedSession.id === targetSessionId || savedSession.id === tokenSessionId)) ||
+      (!locationVenue && !activityMeta.venueName)
+    );
 
-    // Format walk-in date using IST date formatter
-    const rawDate = candidate.walkInDate || savedSession.date || savedSession.interviewDate;
-    const dateInfo = formatWalkInDate(rawDate);
-    const walkInDateStr = dateInfo.dateStr;
+    // 4. Resolve venue details strictly from the selected session / invitation
+    const venueNameStr = (
+      locationVenue?.venueName ||
+      locationVenue?.locationName ||
+      activityMeta.venueName ||
+      (isSavedSessionMatch ? savedSession.venueName : '') ||
+      ''
+    ).trim();
 
-    const reportingTimeStr = (candidate.walkInTime || savedSession.reportingTime || '').trim();
-    const venueNameStr = (savedSession.venueName || '').trim();
-    const venueAddressStr = (savedSession.venueAddress || '').trim();
-    let googleMapsLinkStr = (savedSession.googleMapsLink || '').trim();
+    const venueAddressStr = (
+      locationVenue?.venueAddress ||
+      activityMeta.venueAddress ||
+      (isSavedSessionMatch ? savedSession.venueAddress : '') ||
+      ''
+    ).trim();
+
+    let googleMapsLinkStr = (
+      locationVenue?.googleMapsLink ||
+      activityMeta.googleMapsLink ||
+      (isSavedSessionMatch ? savedSession.googleMapsLink : '') ||
+      ''
+    ).trim();
 
     if (!googleMapsLinkStr && venueAddressStr) {
       googleMapsLinkStr = 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(venueAddressStr);
@@ -148,7 +182,25 @@ export const getWalkInConfirmation = async (req: Request, res: Response, next: N
       googleMapsLinkStr = '';
     }
 
-    const instructionsStr = (savedSession.instructions || '').trim();
+    const reportingTimeStr = (
+      activityMeta.reportingTime ||
+      candidate.walkInTime ||
+      locationVenue?.defaultReportingTime ||
+      (isSavedSessionMatch ? savedSession.reportingTime : '') ||
+      '09:30 AM'
+    ).trim();
+
+    const rawDate = candidate.walkInDate || activityMeta.walkInDate || (isSavedSessionMatch ? (savedSession.date || savedSession.interviewDate) : null);
+    const dateInfo = formatWalkInDate(rawDate);
+    const walkInDateStr = dateInfo.dateStr;
+
+    const instructionsStr = (
+      activityMeta.instructions ||
+      locationVenue?.defaultInstructions ||
+      (isSavedSessionMatch ? savedSession.instructions : '') ||
+      ''
+    ).trim();
+
     const venueConfigured = Boolean(venueNameStr && venueAddressStr);
 
     const sanitizedCandidate = {
@@ -302,11 +354,50 @@ export const submitWalkInConfirmation = async (req: Request, res: Response, next
     const clientName = job?.client?.companyName || 'Orrica Edge Partner';
     const greetingName = formatCandidateGreetingName(candidate);
 
+    // Resolve the exact walk-in invitation venue from recent candidate activity or location
+    const recentActivity = await prisma.candidateActivity.findFirst({
+      where: {
+        candidateId: candidate.id,
+        action: { in: ['WALK_IN_INVITATION_SENT', 'WALK_IN_EMAIL_RESENT', 'WALK_IN_SCHEDULED'] },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    const activityMeta = (recentActivity?.metadata as any) || {};
+
+    const targetSessionId = tokenSessionId || activityMeta.sessionId || (candidate as any).walkInSessionId;
+    let locationVenue: WalkInLocation | null = null;
+    if (targetSessionId) {
+      locationVenue = await findWalkInLocationById(targetSessionId);
+    }
+
     const hiringProcess = (job?.hiringProcess as any) || {};
     const savedSession = hiringProcess.walkInSession || {};
-    const venueNameStr = (savedSession.venueName || '').trim();
-    const venueAddressStr = (savedSession.venueAddress || '').trim();
-    let googleMapsLinkStr = (savedSession.googleMapsLink || '').trim();
+    const isSavedSessionMatch = Boolean(
+      (savedSession.id && (savedSession.id === targetSessionId || savedSession.id === tokenSessionId)) ||
+      (!locationVenue && !activityMeta.venueName)
+    );
+
+    const venueNameStr = (
+      locationVenue?.venueName ||
+      locationVenue?.locationName ||
+      activityMeta.venueName ||
+      (isSavedSessionMatch ? savedSession.venueName : '') ||
+      ''
+    ).trim();
+
+    const venueAddressStr = (
+      locationVenue?.venueAddress ||
+      activityMeta.venueAddress ||
+      (isSavedSessionMatch ? savedSession.venueAddress : '') ||
+      ''
+    ).trim();
+
+    let googleMapsLinkStr = (
+      locationVenue?.googleMapsLink ||
+      activityMeta.googleMapsLink ||
+      (isSavedSessionMatch ? savedSession.googleMapsLink : '') ||
+      ''
+    ).trim();
 
     if (!googleMapsLinkStr && venueAddressStr) {
       googleMapsLinkStr = 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(venueAddressStr);
@@ -603,9 +694,81 @@ export interface WalkInLocation {
   updatedAt?: string;
 }
 
-const DEFAULT_WALK_IN_LOCATIONS: WalkInLocation[] = [];
+export const OFFICIAL_HUBS: WalkInLocation[] = [
+  {
+    id: 'loc-indore-hub',
+    locationName: 'Indore Walk-in Center',
+    city: 'Indore',
+    companyName: 'Orrica Edge LLP',
+    venueName: 'Orrica Edge Indore Center',
+    venueAddress: '4th Floor, Brilliant Solitaire, Scheme 78, Vijay Nagar, Indore, Madhya Pradesh 452010',
+    googleMapsLink: 'https://maps.google.com/?q=Brilliant+Solitaire+Indore',
+    defaultReportingTime: '09:30 AM',
+    defaultInterviewStartTime: '10:00 AM',
+    defaultInterviewEndTime: '04:00 PM',
+    defaultInstructions: 'Carry 2 printed copies of resume and original Govt ID. Mention Orrica Edge LLP at the top.',
+    isActive: true,
+  },
+  {
+    id: 'loc-noida-center',
+    locationName: 'Noida Walk-in Center',
+    city: 'Noida',
+    companyName: 'Orrica Edge LLP',
+    venueName: 'Orrica Edge Noida Center',
+    venueAddress: 'Tower B, Logix Cyber Park, Sector 62, Noida, Uttar Pradesh 201309',
+    googleMapsLink: 'https://maps.google.com/?q=Logix+Cyber+Park+Noida',
+    defaultReportingTime: '09:30 AM',
+    defaultInterviewStartTime: '10:00 AM',
+    defaultInterviewEndTime: '04:00 PM',
+    defaultInstructions: 'Carry 2 printed copies of resume and original Govt ID. Mention Orrica Edge LLP at the top.',
+    isActive: true,
+  },
+  {
+    id: 'loc-gurugram-center',
+    locationName: 'Gurugram Walk-in Center',
+    city: 'Gurugram',
+    companyName: 'Orrica Edge LLP',
+    venueName: 'Orrica Edge Gurugram Hub',
+    venueAddress: 'Tower B, 4th Floor, DLF Cyber City, Sector 25, Gurugram, Haryana 122002',
+    googleMapsLink: 'https://maps.google.com/?q=DLF+Cyber+City+Gurugram',
+    defaultReportingTime: '09:30 AM',
+    defaultInterviewStartTime: '10:00 AM',
+    defaultInterviewEndTime: '04:00 PM',
+    defaultInstructions: 'Carry 2 printed copies of resume and original Govt ID. Mention Orrica Edge LLP at the top.',
+    isActive: true,
+  },
+];
+
+
+const DEFAULT_WALK_IN_LOCATIONS: WalkInLocation[] = OFFICIAL_HUBS;
 
 let inMemoryLocations: WalkInLocation[] = [...DEFAULT_WALK_IN_LOCATIONS];
+
+
+export async function findWalkInLocationById(locationIdOrCity?: string): Promise<WalkInLocation | null> {
+  if (!locationIdOrCity) return null;
+  const raw = String(locationIdOrCity).trim();
+  const lower = raw.toLowerCase();
+
+  // 1. Check stored locations in database/universalForm
+  const stored = await getStoredLocations();
+  const foundInStored =
+    stored.find((l) => l.id === raw) ||
+    stored.find((l) => l.city && l.city.toLowerCase() === lower) ||
+    stored.find((l) => l.locationName && l.locationName.toLowerCase().includes(lower)) ||
+    stored.find((l) => l.venueName && l.venueName.toLowerCase().includes(lower));
+  if (foundInStored) return foundInStored;
+
+  // 2. Check official hubs
+  const foundInHubs =
+    OFFICIAL_HUBS.find((l) => l.id === raw) ||
+    OFFICIAL_HUBS.find((l) => l.city.toLowerCase() === lower) ||
+    OFFICIAL_HUBS.find((l) => l.locationName.toLowerCase().includes(lower)) ||
+    OFFICIAL_HUBS.find((l) => l.venueName.toLowerCase().includes(lower));
+  if (foundInHubs) return foundInHubs;
+
+  return null;
+}
 
 async function getStoredLocations(): Promise<WalkInLocation[]> {
   try {

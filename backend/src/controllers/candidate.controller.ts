@@ -1981,7 +1981,7 @@ export const resendWalkInEmail = async (req: Request, res: Response, next: NextF
       c: candidate.id,
       j: job?.id,
       a: application?.id,
-      s: savedSession.id || req.body?.sessionId,
+      s: selectedSessionId || savedSession.id,
     };
     const token = 'wic_' + Buffer.from(JSON.stringify(tokenPayload)).toString('base64url');
 
@@ -2040,7 +2040,7 @@ export const resendWalkInEmail = async (req: Request, res: Response, next: NextF
           recipient: candidate.email,
           jobId: job?.id,
           applicationId: application?.id,
-          sessionId: savedSession.id || req.body?.sessionId,
+          sessionId: selectedSessionId || savedSession.id,
           walkInDate: walkInDateStr,
           reportingTime: reportingTimeStr,
           venueName: venueNameStr,
@@ -2165,10 +2165,42 @@ export const sendWalkInInvitation = async (req: Request, res: Response, next: Ne
 
     const readableInterviewDate = formatReadableInterviewDate(rawDate) || dateInfo.displayDate;
 
-    const reportingTime = (req.body?.reportingTime || req.body?.walkInTime || candidate.walkInTime || savedSession.reportingTime || '').trim();
-    const venueNameStr = (req.body?.venueName || savedSession.venueName || '').trim();
-    const venueAddressStr = (req.body?.venueAddress || savedSession.venueAddress || '').trim();
-    let googleMapsLinkStr = (req.body?.googleMapsLink || savedSession.googleMapsLink || '').trim();
+    const selectedSessionId = (req.body?.sessionId || req.body?.locationId || '').trim();
+    let locationVenue: any = null;
+    if (selectedSessionId) {
+      locationVenue = await findWalkInLocationById(selectedSessionId);
+    }
+
+    const reportingTime = (
+      req.body?.reportingTime ||
+      req.body?.walkInTime ||
+      candidate.walkInTime ||
+      locationVenue?.defaultReportingTime ||
+      savedSession.reportingTime ||
+      '09:30 AM'
+    ).trim();
+
+    const venueNameStr = (
+      req.body?.venueName ||
+      locationVenue?.venueName ||
+      locationVenue?.locationName ||
+      savedSession.venueName ||
+      ''
+    ).trim();
+
+    const venueAddressStr = (
+      req.body?.venueAddress ||
+      locationVenue?.venueAddress ||
+      savedSession.venueAddress ||
+      ''
+    ).trim();
+
+    let googleMapsLinkStr = (
+      req.body?.googleMapsLink ||
+      locationVenue?.googleMapsLink ||
+      savedSession.googleMapsLink ||
+      ''
+    ).trim();
 
     if (!googleMapsLinkStr && venueAddressStr) {
       googleMapsLinkStr = 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(venueAddressStr);
@@ -2203,7 +2235,7 @@ export const sendWalkInInvitation = async (req: Request, res: Response, next: Ne
       c: candidate.id,
       j: job?.id,
       a: application?.id,
-      s: savedSession.id || req.body?.sessionId,
+      s: targetSessionId || savedSession.id,
     };
     const token = 'wic_' + Buffer.from(JSON.stringify(tokenPayload)).toString('base64url');
 
@@ -2296,7 +2328,7 @@ export const sendWalkInInvitation = async (req: Request, res: Response, next: Ne
           recipient: candidate.email,
           jobId: job?.id,
           applicationId: application?.id,
-          sessionId: savedSession.id || req.body?.sessionId,
+          sessionId: targetSessionId || savedSession.id,
           walkInDate: walkInDateStr,
           interviewDate: readableInterviewDate,
           reportingTime,
