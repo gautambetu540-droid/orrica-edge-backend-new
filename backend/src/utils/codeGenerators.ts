@@ -4,7 +4,15 @@ import { prisma as defaultPrisma } from '../prisma/client';
 type DbClient = PrismaClient | Prisma.TransactionClient;
 
 /**
- * Generates an auto-incrementing Candidate Code in the format: CND-XXXXXX (e.g. CND-000184)
+ * Standardizes Candidate Code formatting to canonical: OE-CAND-XXXX (e.g. OE-CAND-0001, OE-CAND-0173, OE-CAND-0185)
+ * Padded to at least 4 digits.
+ */
+export const formatCandidateCode = (seqNum: number): string => {
+  return `OE-CAND-${String(seqNum).padStart(4, '0')}`;
+};
+
+/**
+ * Generates an auto-incrementing Candidate Code in the format: OE-CAND-XXXX (e.g. OE-CAND-0001, OE-CAND-0185)
  * Uses atomic PostgreSQL sequence when available, with resilient fallback for unit tests and unmigrated environments.
  */
 export const generateCandidateCode = async (client?: DbClient): Promise<string> => {
@@ -17,7 +25,7 @@ export const generateCandidateCode = async (client?: DbClient): Promise<string> 
       if (Array.isArray(result) && result.length > 0 && result[0]?.next_val) {
         const seqNum = parseInt(result[0].next_val, 10);
         if (!isNaN(seqNum) && seqNum > 0) {
-          return `CND-${String(seqNum).padStart(6, '0')}`;
+          return formatCandidateCode(seqNum);
         }
       }
     } catch {
@@ -30,7 +38,7 @@ export const generateCandidateCode = async (client?: DbClient): Promise<string> 
     const latestCandidates = await db.candidate.findMany({
       select: { candidateCode: true },
       orderBy: { createdAt: 'desc' },
-      take: 50,
+      take: 100,
     });
 
     let maxSeq = 0;
@@ -38,7 +46,16 @@ export const generateCandidateCode = async (client?: DbClient): Promise<string> 
     for (const c of latestCandidates) {
       if (!c.candidateCode) continue;
 
-      // Check for CND-XXXXXX
+      // Check for canonical OE-CAND-XXXX
+      const oeMatch = c.candidateCode.match(/^OE-CAND-(\d+)$/i);
+      if (oeMatch) {
+        const num = parseInt(oeMatch[1], 10);
+        if (!isNaN(num) && num > maxSeq) {
+          maxSeq = num;
+        }
+      }
+
+      // Check for legacy CND-XXXXXX format
       const cndMatch = c.candidateCode.match(/^CND-(\d+)$/i);
       if (cndMatch) {
         const num = parseInt(cndMatch[1], 10);
@@ -46,22 +63,13 @@ export const generateCandidateCode = async (client?: DbClient): Promise<string> 
           maxSeq = num;
         }
       }
-
-      // Also support legacy OE-CAND-XXXX format
-      const legacyMatch = c.candidateCode.match(/^OE-CAND-(\d+)$/i);
-      if (legacyMatch) {
-        const num = parseInt(legacyMatch[1], 10);
-        if (!isNaN(num) && num > maxSeq) {
-          maxSeq = num;
-        }
-      }
     }
 
     const nextSeq = maxSeq + 1;
-    return `CND-${String(nextSeq).padStart(6, '0')}`;
+    return formatCandidateCode(nextSeq);
   }
 
-  return 'CND-000001';
+  return 'OE-CAND-0001';
 };
 
 /**
@@ -90,7 +98,7 @@ export const generateCandidateCodesBatch = async (
           }
           const codes: string[] = [];
           for (let i = 0; i < count; i++) {
-            codes.push(`CND-${String(startVal + i).padStart(6, '0')}`);
+            codes.push(formatCandidateCode(startVal + i));
           }
           return codes;
         }
@@ -102,11 +110,11 @@ export const generateCandidateCodesBatch = async (
 
   // 2. Resilient fallback: obtain initial code and increment
   const firstCode = await generateCandidateCode(db);
-  const match = firstCode.match(/^CND-(\d+)$/i);
+  const match = firstCode.match(/^OE-CAND-(\d+)$/i) || firstCode.match(/^CND-(\d+)$/i);
   const startNum = match ? parseInt(match[1], 10) : 1;
   const codes: string[] = [];
   for (let i = 0; i < count; i++) {
-    codes.push(`CND-${String(startNum + i).padStart(6, '0')}`);
+    codes.push(formatCandidateCode(startNum + i));
   }
   return codes;
 };

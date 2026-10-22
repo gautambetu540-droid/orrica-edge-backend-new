@@ -780,7 +780,7 @@ export const createCandidate = async (req: Request, res: Response, next: NextFun
           skills: data.skills,
           languages: data.languages,
           resumeUrl: data.resumeUrl || '',
-          source: data.source || (userRole === 'RECRUITER' ? 'Recruiter Added' : 'Direct Entry'),
+          source: data.source || (userRole === 'RECRUITER' ? 'Recruiter Added' : 'Admin Created'),
           tags: data.tags,
           notes: candidateNotes,
           feedback: data.feedback,
@@ -2689,6 +2689,7 @@ export const bulkImportCandidates = async (
       if (['source', 'sourcingchannel'].includes(lower)) return 'source';
       if (['tags', 'tag'].includes(lower)) return 'tags';
       if (['notes', 'remarks', 'feedback', 'comments'].includes(lower)) return 'notes';
+      if (['candidateid', 'candidatecode', 'candcode', 'candid', 'referenceid'].includes(lower)) return 'candidateCode';
       return lower;
     };
 
@@ -2707,6 +2708,7 @@ export const bulkImportCandidates = async (
 
     const candidatePhonesForDbCheck = new Set<string>();
     const candidateEmailsForDbCheck = new Set<string>();
+    const candidateCodesForDbCheck = new Set<string>();
 
     for (let index = 0; index < rawRows.length; index++) {
       const raw = rawRows[index];
@@ -2800,7 +2802,13 @@ export const bulkImportCandidates = async (
         }
       }
 
+      const candidateCodeRef = (rowNormalized.candidateCode || '').trim();
+      if (candidateCodeRef) {
+        candidateCodesForDbCheck.add(candidateCodeRef);
+      }
+
       const candidateData = {
+        candidateCodeRef,
         fullName,
         name: fullName,
         phone: normalizedPhone,
@@ -2845,12 +2853,15 @@ export const bulkImportCandidates = async (
       });
     }
 
-    // 4. Second pass: Check existing duplicates against the PostgreSQL database
+    // 4. Second pass: Query existing candidates and perform verified identity matching
     const existingDbCandidates = await prisma.candidate.findMany({
       where: {
         OR: [
           { phone: { in: Array.from(candidatePhonesForDbCheck) } },
           { email: { in: Array.from(candidateEmailsForDbCheck) } },
+          ...(candidateCodesForDbCheck.size > 0
+            ? [{ candidateCode: { in: Array.from(candidateCodesForDbCheck) } }]
+            : []),
         ],
       },
       select: {
@@ -2858,21 +2869,28 @@ export const bulkImportCandidates = async (
         candidateCode: true,
         phone: true,
         email: true,
+        status: true,
+        walkInStatus: true,
+        fullName: true,
       },
     });
 
-    const existingDbPhoneMap = new Map<string, string>();
-    const existingDbEmailMap = new Map<string, string>();
+    const phoneToCandidateMap = new Map<string, any>();
+    const emailToCandidateMap = new Map<string, any>();
+    const codeToCandidateMap = new Map<string, any>();
+
     for (const ec of existingDbCandidates) {
-      if (ec.phone) existingDbPhoneMap.set(ec.phone, ec.candidateCode);
-      if (ec.email) existingDbEmailMap.set(ec.email.toLowerCase(), ec.candidateCode);
+      if (ec.phone) phoneToCandidateMap.set(ec.phone, ec);
+      if (ec.email) emailToCandidateMap.set(ec.email.toLowerCase(), ec);
+      if (ec.candidateCode) codeToCandidateMap.set(ec.candidateCode.toUpperCase(), ec);
     }
 
     const errorReport: { row: number; candidateName: string; phone: string; email: string; reason: string }[] = [];
     const validRowsToInsert: ProcessedRow[] = [];
-    let duplicateDbCount = 0;
+    const matchedRowsToUpdate: { row: ProcessedRow; existing: any }[] = [];
     let duplicateSheetCount = 0;
     let invalidFieldCount = 0;
+    let ambiguousConflictCount = 0;
 
     for (const row of processedRows) {
       if (!row.isValid) {
@@ -2891,38 +2909,56 @@ export const bulkImportCandidates = async (
         continue;
       }
 
-      const existingPhoneCode = existingDbPhoneMap.get(row.data.phone);
-      const existingEmailCode = existingDbEmailMap.get(row.data.email);
+      // Check verified identity matches
+      const matchedByPhone = phoneToCandidateMap.get(row.data.phone);
+      const matchedByEmail = emailToCandidateMap.get(row.data.email);
+      const matchedByCode = row.data.candidateCodeRef
+        ? codeToCandidateMap.get(row.data.candidateCodeRef.toUpperCase())
+        : null;
 
-      if (existingPhoneCode || existingEmailCode) {
-        duplicateDbCount++;
-        const conflictReason = existingPhoneCode
-          ? `Phone number already registered in database under Candidate ID ${existingPhoneCode}.`
-          : `Email already registered in database under Candidate ID ${existingEmailCode}.`;
+      // Identity conflict detection (e.g. Phone belongs to Candidate A, but Email belongs to Candidate B)
+      const matchedCandidates = [matchedByPhone, matchedByEmail, matchedByCode].filter(Boolean);
+      const uniqueMatchedIds = new Set(matchedCandidates.map((c) => c.id));
+
+      if (uniqueMatchedIds.size > 1) {
+        ambiguousConflictCount++;
+        const conflictDesc = `Ambiguous Identity Conflict: Phone matched ${matchedByPhone?.candidateCode || 'N/A'}, Email matched ${matchedByEmail?.candidateCode || 'N/A'}. Manual review required.`;
         errorReport.push({
           row: row.rowNumber,
           candidateName: row.data.fullName,
           phone: row.data.phone,
           email: row.data.email,
-          reason: conflictReason,
+          reason: conflictDesc,
         });
         continue;
       }
 
-      validRowsToInsert.push(row);
-    }
+      const confidentMatch = matchedCandidates[0] || null;
 
-    const totalDuplicates = duplicateDbCount + duplicateSheetCount;
+      if (confidentMatch) {
+        // Match found: Safe non-destructive update while preserving permanent ID and protected statuses
+        matchedRowsToUpdate.push({
+          row,
+          existing: confidentMatch,
+        });
+      } else {
+        // No existing record found: Queue for canonical candidate code allocation & insertion
+        validRowsToInsert.push(row);
+      }
+    }
 
     // 5. If dryRun is requested, return preview analysis without writing to DB
     if (isDryRun) {
       sendSuccess(res, {
         isDryRun: true,
         totalRows: rawRows.length,
-        validCount: validRowsToInsert.length,
-        duplicateCount: totalDuplicates,
-        duplicateDbCount,
+        createdCount: validRowsToInsert.length,
+        updatedCount: matchedRowsToUpdate.length,
+        matchedCount: matchedRowsToUpdate.length,
+        validCount: validRowsToInsert.length + matchedRowsToUpdate.length,
+        duplicateCount: duplicateSheetCount,
         duplicateSheetCount,
+        conflictCount: ambiguousConflictCount,
         invalidCount: invalidFieldCount,
         previewRows: validRowsToInsert.slice(0, 10).map((r) => ({
           row: r.rowNumber,
@@ -2933,65 +2969,115 @@ export const bulkImportCandidates = async (
           totalExperience: r.data.totalExperience,
           currentCompany: r.data.currentCompany,
         })),
-        errors: errorReport.slice(0, 100), // First 100 errors for preview
+        errors: errorReport.slice(0, 100),
       }, 'Spreadsheet validation completed successfully.');
       return;
     }
 
-    // 6. Execute atomic batch insertion in transactions
-    if (validRowsToInsert.length === 0) {
-      sendSuccess(res, {
-        totalProcessed: rawRows.length,
-        importedCount: 0,
-        skippedCount: totalDuplicates,
-        failedCount: invalidFieldCount,
-        generatedCodes: [],
-        errors: errorReport,
-        message: 'No new valid candidates were imported. All rows were either duplicates or contained validation errors.',
-      }, 'Import completed with 0 records inserted.');
-      return;
-    }
-
-    // Reserve candidate codes in a single atomic sequence call
-    const candidateCodes = await generateCandidateCodesBatch(validRowsToInsert.length);
-
+    // 6. Execute atomic batch operations in transactions
     const insertedCodes: string[] = [];
+    const updatedIds: string[] = [];
     const CHUNK_SIZE = 50;
 
-    for (let i = 0; i < validRowsToInsert.length; i += CHUNK_SIZE) {
-      const chunk = validRowsToInsert.slice(i, i + CHUNK_SIZE);
-      const codesChunk = candidateCodes.slice(i, i + CHUNK_SIZE);
+    // A. Insert New Candidates
+    if (validRowsToInsert.length > 0) {
+      const candidateCodes = await generateCandidateCodesBatch(validRowsToInsert.length);
 
-      await prisma.$transaction(async (tx) => {
-        for (let j = 0; j < chunk.length; j++) {
-          const rowItem = chunk[j];
-          const code = codesChunk[j];
+      for (let i = 0; i < validRowsToInsert.length; i += CHUNK_SIZE) {
+        const chunk = validRowsToInsert.slice(i, i + CHUNK_SIZE);
+        const codesChunk = candidateCodes.slice(i, i + CHUNK_SIZE);
 
-          const created = await tx.candidate.create({
-            data: {
-              ...rowItem.data,
-              candidateCode: code,
-            },
-            select: { id: true, candidateCode: true },
-          });
+        await prisma.$transaction(async (tx) => {
+          for (let j = 0; j < chunk.length; j++) {
+            const rowItem = chunk[j];
+            const code = codesChunk[j];
 
-          insertedCodes.push(created.candidateCode);
-
-          // Timeline entry
-          try {
-            await logCandidateTimeline({
-              candidateId: created.id,
-              userId: currentUserId || null,
-              userName: (req.user as any)?.email,
-              userRole: (req.user as any)?.role,
-              action: 'Candidate Imported',
-              newStatus: 'New',
-              remarks: `Candidate profile created (${created.candidateCode}) via Bulk Excel Import by ${(req.user as any)?.email || 'Admin'}`,
-              client: tx,
+            const { candidateCodeRef, ...dataToInsert } = rowItem.data;
+            const created = await tx.candidate.create({
+              data: {
+                ...dataToInsert,
+                candidateCode: code,
+                source: dataToInsert.source || 'Excel Import',
+              },
+              select: { id: true, candidateCode: true },
             });
-          } catch {}
-        }
-      });
+
+            insertedCodes.push(created.candidateCode);
+
+            try {
+              await logCandidateTimeline({
+                candidateId: created.id,
+                userId: currentUserId || null,
+                userName: (req.user as any)?.email,
+                userRole: (req.user as any)?.role,
+                action: 'Candidate Imported',
+                newStatus: 'New',
+                remarks: `Candidate profile created (${created.candidateCode}) via Excel Import by ${(req.user as any)?.email || 'Admin'}`,
+                client: tx,
+              });
+            } catch {}
+          }
+        });
+      }
+    }
+
+    // B. Safely Update Matched Candidates (Preserve permanent Candidate ID & protected recruitment statuses)
+    if (matchedRowsToUpdate.length > 0) {
+      for (let i = 0; i < matchedRowsToUpdate.length; i += CHUNK_SIZE) {
+        const chunk = matchedRowsToUpdate.slice(i, i + CHUNK_SIZE);
+
+        await prisma.$transaction(async (tx) => {
+          for (const item of chunk) {
+            const existing = item.existing;
+            const rowData = item.row.data;
+
+            // Protect critical statuses (e.g. REJECTED, CONFIRMED, INTERVIEW_SCHEDULED) from being silently overwritten
+            const isProtectedStatus = [
+              'REJECTED',
+              'CONFIRMED',
+              'INTERVIEW_SCHEDULED',
+              'INTERVIEW SCHEDULED',
+              'SELECTED',
+              'JOINED',
+              'OFFER',
+            ].includes(String(existing.status || '').toUpperCase()) || existing.walkInStatus === 'REJECTED';
+
+            const statusToApply = isProtectedStatus ? existing.status : (rowData.status || existing.status);
+
+            await tx.candidate.update({
+              where: { id: existing.id },
+              data: {
+                currentCompany: rowData.currentCompany || undefined,
+                currentDesignation: rowData.currentDesignation || undefined,
+                previousCompany: rowData.previousCompany || undefined,
+                totalExperience: rowData.totalExperience || undefined,
+                relevantExperience: rowData.relevantExperience || undefined,
+                highestQualification: rowData.highestQualification || undefined,
+                currentSalary: rowData.currentSalary || undefined,
+                expectedSalary: rowData.expectedSalary || undefined,
+                resumeUrl: rowData.resumeUrl || undefined,
+                skills: rowData.skills?.length ? rowData.skills : undefined,
+                status: statusToApply,
+              },
+            });
+
+            updatedIds.push(existing.id);
+
+            try {
+              await logCandidateTimeline({
+                candidateId: existing.id,
+                userId: currentUserId || null,
+                userName: (req.user as any)?.email,
+                userRole: (req.user as any)?.role,
+                action: 'Candidate Details Updated via Excel Import',
+                newStatus: statusToApply,
+                remarks: `Candidate details matched and updated via Excel import. Permanent ID ${existing.candidateCode} preserved.`,
+                client: tx,
+              });
+            } catch {}
+          }
+        });
+      }
     }
 
     // Audit log for the import batch
@@ -3003,8 +3089,11 @@ export const bulkImportCandidates = async (
         entity: 'Candidate',
         entityId: `batch-${Date.now()}`,
         newValue: {
-          importedCount: insertedCodes.length,
-          skippedDuplicates: totalDuplicates,
+          createdCount: insertedCodes.length,
+          updatedCount: updatedIds.length,
+          matchedCount: matchedRowsToUpdate.length,
+          skippedDuplicates: duplicateSheetCount,
+          ambiguousConflicts: ambiguousConflictCount,
           invalidRows: invalidFieldCount,
           fileName: file.originalname,
         },
@@ -3013,12 +3102,18 @@ export const bulkImportCandidates = async (
 
     sendSuccess(res, {
       totalProcessed: rawRows.length,
+      totalRows: rawRows.length,
+      createdCount: insertedCodes.length,
       importedCount: insertedCodes.length,
-      skippedCount: totalDuplicates,
-      failedCount: invalidFieldCount,
+      updatedCount: updatedIds.length,
+      matchedCount: matchedRowsToUpdate.length,
+      duplicateCount: duplicateSheetCount,
+      conflictCount: ambiguousConflictCount,
+      invalidCount: invalidFieldCount,
+      failedCount: errorReport.length,
       generatedCodes: insertedCodes,
       errors: errorReport,
-      message: `Successfully imported ${insertedCodes.length} candidates into the database. ${totalDuplicates} duplicate records skipped. ${invalidFieldCount} invalid rows skipped.`,
+      message: `Bulk candidate import processed: ${insertedCodes.length} created, ${updatedIds.length} matched & updated, ${errorReport.length} skipped/conflicts.`,
     }, 'Bulk candidate import processed successfully.');
   } catch (err) {
     next(err);

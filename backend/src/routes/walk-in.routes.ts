@@ -10,6 +10,7 @@ import {
   updateWalkInLocation,
   deactivateWalkInLocation,
   deleteWalkInLocation,
+  rejectWalkInCandidate,
 } from '../controllers/walk-in.controller';
 import { authenticateJwt, requireRoles } from '../middlewares/auth.middleware';
 
@@ -20,6 +21,7 @@ router.get('/confirm/:token', getWalkInConfirmation);
 router.post('/confirm/:token', submitWalkInConfirmation);
 
 // Admin/recruiter session management routes
+router.post('/candidates/:id/reject', authenticateJwt, requireRoles('SUPER_ADMIN', 'ADMIN', 'TEAM_LEADER', 'RECRUITER'), rejectWalkInCandidate);
 router.get('/sessions', authenticateJwt, getWalkInSessions);
 router.delete('/sessions/:id', authenticateJwt, requireRoles('SUPER_ADMIN', 'ADMIN'), deleteWalkInSession);
 router.put('/sessions/:id', authenticateJwt, requireRoles('SUPER_ADMIN', 'ADMIN', 'TEAM_LEADER'), updateWalkInSession);

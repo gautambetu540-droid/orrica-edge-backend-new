@@ -314,6 +314,22 @@ export const submitWalkInConfirmation = async (req: Request, res: Response, next
       googleMapsLinkStr = '';
     }
 
+    // Email Deduplication & Idempotent check
+    const isAlreadyConfirmed = candidate.walkInStatus === 'CONFIRMED' || candidate.walkInResponse === 'COMING_TODAY';
+    if (action === 'CONFIRM' && isAlreadyConfirmed) {
+      const resultData = {
+        candidate,
+        alreadyConfirmed: true,
+        message: 'Your attendance is already confirmed. We look forward to welcoming you at the interview.',
+      };
+      res.status(200).json({
+        success: true,
+        ...resultData,
+        data: resultData,
+      });
+      return;
+    }
+
     let newWalkInStatus = candidate.walkInStatus || 'EXPECTED';
     let newWalkInResponse = candidate.walkInResponse || 'NO_RESPONSE';
     let timelineAction = 'Walk-in Response';
@@ -875,6 +891,118 @@ export const deleteWalkInSession = async (req: Request, res: Response, next: Nex
     } catch {}
 
     sendSuccess(res, { id: sessionIdOrJobId, jobId: job.id }, 'Walk-in session deleted successfully.');
+  } catch (err) {
+    next(err);
+  }
+};
+
+
+/**
+ * Admin/Recruiter: Reject candidate from active walk-in session.
+ * Removes candidate from the active session participant list while strictly preserving master record,
+ * resume, applications, and historical invitations.
+ * POST /api/v1/walk-in/candidates/:id/reject
+ */
+export const rejectWalkInCandidate = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const candidateId = req.params.id;
+    const { reason, jobId, sessionId } = req.body || {};
+    const currentUserId = (req as any).user?.id || (req as any).user?.userId;
+    const currentUserName = (req as any).user?.name || (req as any).user?.fullName || 'Authorized User';
+    const currentUserRole = (req as any).user?.role || 'ADMIN';
+
+    const candidate = await prisma.candidate.findFirst({
+      where: {
+        OR: [
+          { id: candidateId },
+          { candidateCode: candidateId },
+        ],
+      },
+      include: {
+        applications: {
+          include: { job: true },
+        },
+      },
+    });
+
+    if (!candidate) {
+      sendError(res, 'Candidate not found', 404);
+      return;
+    }
+
+    // 1. Update session-level walk-in status to REJECTED (Preserves master recruitment status)
+    const updated = await prisma.candidate.update({
+      where: { id: candidate.id },
+      data: {
+        walkInStatus: 'REJECTED',
+        walkInResponse: 'REJECTED',
+        feedback: reason ? `[Walk-in Rejection]: ${reason}` : candidate.feedback,
+      },
+    });
+
+    // 2. Remove candidate from active participant list of the walk-in session on the job
+    const targetJobId = jobId || candidate.targetJobId || candidate.applications?.[0]?.jobId;
+    if (targetJobId) {
+      const job = await prisma.job.findUnique({ where: { id: targetJobId } });
+      if (job && job.hiringProcess) {
+        const hp = job.hiringProcess as any;
+        if (hp.walkInSession && Array.isArray(hp.walkInSession.alignedCandidateIds)) {
+          hp.walkInSession.alignedCandidateIds = hp.walkInSession.alignedCandidateIds.filter(
+            (id: string) => id !== candidate.id && id !== candidate.candidateCode
+          );
+          await prisma.job.update({
+            where: { id: job.id },
+            data: { hiringProcess: hp },
+          });
+        }
+      }
+    }
+
+    // 3. Record Activity and Timeline for complete auditability
+    await prisma.candidateActivity.create({
+      data: {
+        candidateId: candidate.id,
+        action: 'WALK_IN_REJECTED',
+        notes: `Candidate rejected from walk-in session. Reason: ${reason || 'Administrative rejection'}. By: ${currentUserName}`,
+        metadata: {
+          reason,
+          sessionId,
+          jobId: targetJobId,
+          rejectedBy: currentUserId,
+          rejectedByName: currentUserName,
+          rejectedAt: new Date().toISOString(),
+        },
+      },
+    });
+
+    await logCandidateTimeline({
+      candidateId: candidate.id,
+      userId: currentUserId,
+      userName: currentUserName,
+      userRole: currentUserRole,
+      action: 'Candidate Rejected from Walk-in Session',
+      newStatus: candidate.status,
+      remarks: `Candidate rejected from walk-in session. Master candidate record & resume preserved. Reason: ${reason || 'Administrative decision'}.`,
+    });
+
+    await logAudit({
+      req,
+      action: 'REJECT_WALK_IN_CANDIDATE',
+      module: 'WALK_IN_MANAGEMENT',
+      entity: 'Candidate',
+      entityId: candidate.id,
+      details: {
+        candidateCode: candidate.candidateCode,
+        candidateName: candidate.fullName,
+        reason,
+        jobId: targetJobId,
+      },
+    });
+
+    sendSuccess(res, {
+      candidate: updated,
+      message: 'Candidate rejected from walk-in session. Master candidate record is preserved.',
+    });
   } catch (err) {
     next(err);
   }

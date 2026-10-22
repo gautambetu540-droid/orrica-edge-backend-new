@@ -4,6 +4,7 @@ import { prisma } from '../prisma/client';
 import { uploadResumeFile } from '../services/storage.service';
 import { sendSuccess, sendError } from '../utils/response';
 import { createNotification, createNotifications } from '../services/notification.service';
+import { generateCandidateCode } from '../utils/codeGenerators';
 
 const universalFormBodySchema = z.object({
   name: z.string().min(2).max(120).optional(),
@@ -127,17 +128,8 @@ const parseOptionalNumber = (value: unknown): number | undefined => {
   return Number.isFinite(parsed) ? parsed : undefined;
 };
 
-const buildNextCandidateCode = async (): Promise<string> => {
-  const lastCandidate = await prisma.candidate.findFirst({
-    orderBy: { candidateCode: 'desc' },
-    select: { candidateCode: true },
-  });
-
-  const current = lastCandidate?.candidateCode
-    ? Number(lastCandidate.candidateCode.replace('OE-CAND-', ''))
-    : 0;
-
-  return `OE-CAND-${String((Number.isFinite(current) ? current : 0) + 1).padStart(4, '0')}`;
+const buildNextCandidateCode = async (client?: any): Promise<string> => {
+  return generateCandidateCode(client);
 };
 
 const validateConfiguredFields = (fields: Array<Record<string, unknown>>): string | null => {
@@ -193,6 +185,9 @@ export const ensureDefaultUniversalForm = async (): Promise<void> => {
 export const getUniversalForms = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const forms = await prisma.universalForm.findMany({
+      where: {
+        slug: { not: 'system-walk-in-locations' },
+      },
       orderBy: { createdAt: 'desc' },
       include: {
         _count: { select: { submissions: true } },
@@ -537,7 +532,7 @@ export const submitPublicUniversalForm = async (req: Request, res: Response, nex
       noticePeriodDays: noticeDays,
       skills: parseList(body.skills),
       languages: parseList(body.languages).length ? parseList(body.languages) : ['English', 'Hindi'],
-      source: String(body.source || '').trim() || `Universal Form: ${form.slug}`,
+      source: String(body.source || '').trim() || 'Candidate Registration Form',
       tags: parseList(body.tags),
       notes: String(body.notes || body.recruiterRemarks || '').trim() || undefined,
       feedback: String(body.feedback || '').trim() || undefined,
@@ -574,7 +569,7 @@ export const submitPublicUniversalForm = async (req: Request, res: Response, nex
           },
         });
       } else {
-        const candidateCode = await buildNextCandidateCode();
+        const candidateCode = await generateCandidateCode(tx);
 
         candidate = await tx.candidate.create({
           data: {

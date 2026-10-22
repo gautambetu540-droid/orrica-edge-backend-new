@@ -63,7 +63,7 @@ async function testRecruitmentOS() {
   // Test 3: Code Generators regex validation
   console.log('3. Verifying Code Generators format:');
   // Mock DB test or regex verification
-  const candidateCodePattern = /^CND-\d{6}$/;
+  const candidateCodePattern = /^OE-CAND-\d{4,}$/;
   const appCodePattern = /^APP-\d{6}$/;
   const currentYear = new Date().getFullYear();
   const jobCodePattern = new RegExp(`^OE-${currentYear}-\\d{5}$`);
@@ -83,7 +83,7 @@ async function testRecruitmentOS() {
 
   const nextCandCode = await generateCandidateCode(mockDb);
   console.log('   Generated Candidate Code:', nextCandCode);
-  if (nextCandCode !== 'CND-000184' || !candidateCodePattern.test(nextCandCode)) {
+  if (nextCandCode !== 'OE-CAND-0184' || !candidateCodePattern.test(nextCandCode)) {
     throw new Error(`Unexpected candidate code: ${nextCandCode}`);
   }
 

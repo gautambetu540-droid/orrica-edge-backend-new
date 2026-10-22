@@ -204,8 +204,8 @@ async function runTestSuite() {
 
   const nextCand = await generateCandidateCode(mockDb);
   assert(
-    nextCand === 'CND-000043',
-    'Candidate code increments sequentially (CND-000042 -> CND-000043)'
+    nextCand === 'OE-CAND-0043',
+    'Candidate code increments sequentially to canonical format (CND-000042 -> OE-CAND-0043)'
   );
 
   const nextApp = await generateApplicationCode(mockDb);
@@ -566,8 +566,8 @@ async function runTestSuite() {
     'generateCandidateCodesBatch reserves exact requested count (5)'
   );
   assert(
-    batchCodes[0] === 'CND-000043' && batchCodes[4] === 'CND-000047',
-    'Batch codes are sequential and formatted properly (CND-000043 to CND-000047)'
+    batchCodes[0] === 'OE-CAND-0043' && batchCodes[4] === 'OE-CAND-0047',
+    'Batch codes are sequential and formatted properly (OE-CAND-0043 to OE-CAND-0047)'
   );
 
   // 12.B Route Matching for Bulk Import and Template Download
