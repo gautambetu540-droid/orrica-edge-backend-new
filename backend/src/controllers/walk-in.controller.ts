@@ -530,3 +530,305 @@ export const updateWalkInSession = async (req: Request, res: Response, next: Nex
     next(err);
   }
 };
+
+
+export interface WalkInLocation {
+  id: string;
+  locationName: string;
+  city: string;
+  companyName: string;
+  venueName: string;
+  venueAddress: string;
+  googleMapsLink?: string;
+  contactPersonName?: string;
+  contactPersonPhone?: string;
+  defaultReportingTime?: string;
+  defaultInterviewStartTime?: string;
+  defaultInterviewEndTime?: string;
+  defaultInstructions?: string;
+  defaultRequiredDocuments?: string[];
+  dressCode?: string;
+  weeklyOffDays?: string[];
+  blockedDates?: string[];
+  isActive: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+const DEFAULT_WALK_IN_LOCATIONS: WalkInLocation[] = [
+  {
+    id: 'loc-noida-hub',
+    locationName: 'Noida Interview Hub',
+    city: 'Noida',
+    companyName: 'Orrica Partner Center',
+    venueName: 'Orrica Edge Assessment Center',
+    venueAddress: 'Sector 62, Electronic City, Noida, Uttar Pradesh 201309',
+    googleMapsLink: 'https://www.google.com/maps/search/?api=1&query=Sector+62+Noida+Uttar+Pradesh',
+    contactPersonName: 'Front Desk Coordinator',
+    contactPersonPhone: '+91 98765 43210',
+    defaultReportingTime: '09:30 AM',
+    defaultInterviewStartTime: '10:00 AM',
+    defaultInterviewEndTime: '02:00 PM',
+    defaultInstructions: 'Please report 15 minutes before scheduled time with physical copies of resume and ID proof.',
+    defaultRequiredDocuments: ['Updated Resume (2 copies)', 'Government Photo ID (Aadhaar/PAN)', 'Educational Certificates'],
+    dressCode: 'Business Formal / Smart Casual',
+    weeklyOffDays: ['Sunday'],
+    blockedDates: [],
+    isActive: true,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  },
+  {
+    id: 'loc-gurugram-hub',
+    locationName: 'Gurugram Interview Hub',
+    city: 'Gurugram',
+    companyName: 'Orrica Partner Center',
+    venueName: 'Orrica Corporate Tower',
+    venueAddress: 'Cyber City, DLF Phase 2, Gurugram, Haryana 122002',
+    googleMapsLink: 'https://www.google.com/maps/search/?api=1&query=Cyber+City+Gurugram+Haryana',
+    contactPersonName: 'HR Helpdesk',
+    contactPersonPhone: '+91 98765 43211',
+    defaultReportingTime: '09:30 AM',
+    defaultInterviewStartTime: '10:00 AM',
+    defaultInterviewEndTime: '02:00 PM',
+    defaultInstructions: 'Carry photo ID for visitor pass entry at building reception.',
+    defaultRequiredDocuments: ['Updated Resume (2 copies)', 'Government Photo ID', 'Past Experience Letters'],
+    dressCode: 'Business Formal / Smart Casual',
+    weeklyOffDays: ['Sunday'],
+    blockedDates: [],
+    isActive: true,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  },
+  {
+    id: 'loc-bengaluru-hub',
+    locationName: 'Bengaluru Tech Hub',
+    city: 'Bengaluru',
+    companyName: 'Orrica Partner Center',
+    venueName: 'Prestige Tech Park Venue',
+    venueAddress: 'Marathahalli - Sarjapur Outer Ring Rd, Kadubeesanahalli, Bengaluru, Karnataka 560103',
+    googleMapsLink: 'https://www.google.com/maps/search/?api=1&query=Prestige+Tech+Park+Bengaluru',
+    contactPersonName: 'Talent Acquisition Team',
+    contactPersonPhone: '+91 98765 43212',
+    defaultReportingTime: '09:30 AM',
+    defaultInterviewStartTime: '10:00 AM',
+    defaultInterviewEndTime: '02:00 PM',
+    defaultInstructions: 'Register at Tower B security desk with original photo ID.',
+    defaultRequiredDocuments: ['Updated Resume (2 copies)', 'Government Photo ID', 'Last 3 Months Salary Slips'],
+    dressCode: 'Smart Casual',
+    weeklyOffDays: ['Sunday'],
+    blockedDates: [],
+    isActive: true,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  },
+];
+
+let inMemoryLocations: WalkInLocation[] = [...DEFAULT_WALK_IN_LOCATIONS];
+
+async function getStoredLocations(): Promise<WalkInLocation[]> {
+  try {
+    const record = await prisma.universalForm.findUnique({
+      where: { slug: 'system-walk-in-locations' },
+    });
+    if (record && record.fields && typeof record.fields === 'object') {
+      const f = record.fields as any;
+      if (Array.isArray(f.locations) && f.locations.length > 0) {
+        inMemoryLocations = f.locations;
+        return inMemoryLocations;
+      }
+    }
+  } catch (err: any) {
+    console.warn('[WALK-IN LOCATIONS DB READ]:', err.message);
+  }
+  return inMemoryLocations;
+}
+
+async function saveStoredLocations(locations: WalkInLocation[]): Promise<void> {
+  inMemoryLocations = locations;
+  try {
+    await prisma.universalForm.upsert({
+      where: { slug: 'system-walk-in-locations' },
+      update: {
+        fields: { locations } as any,
+        updatedAt: new Date(),
+      },
+      create: {
+        slug: 'system-walk-in-locations',
+        name: 'System Walk-in Locations',
+        description: 'Physical walk-in interview venues and hub locations',
+        fields: { locations } as any,
+        isActive: true,
+      },
+    });
+  } catch (err: any) {
+    console.warn('[WALK-IN LOCATIONS DB WRITE]:', err.message);
+  }
+}
+
+/**
+ * Get all walk-in locations
+ * GET /api/v1/walk-in/locations
+ */
+export const getWalkInLocations = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const locations = await getStoredLocations();
+    sendSuccess(res, locations, 'Walk-in locations retrieved successfully');
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * Create a new walk-in location
+ * POST /api/v1/walk-in/locations
+ */
+export const createWalkInLocation = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const data = req.body;
+    if (!data || !data.locationName?.trim() || !data.city?.trim() || !data.venueAddress?.trim()) {
+      sendError(res, 'Location Name, City, and Complete Venue Address are required.', 400);
+      return;
+    }
+
+    const currentLocations = await getStoredLocations();
+
+    let mapsUrl = (data.googleMapsLink || '').trim();
+    if (!mapsUrl && data.venueAddress?.trim()) {
+      mapsUrl = 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(data.venueAddress.trim());
+    }
+
+    const newLocation: WalkInLocation = {
+      id: data.id || ('loc-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6)),
+      locationName: data.locationName.trim(),
+      city: data.city.trim(),
+      companyName: (data.companyName || 'Orrica Partner Center').trim(),
+      venueName: (data.venueName || data.locationName).trim(),
+      venueAddress: data.venueAddress.trim(),
+      googleMapsLink: mapsUrl,
+      contactPersonName: (data.contactPersonName || '').trim(),
+      contactPersonPhone: (data.contactPersonPhone || '').trim(),
+      defaultReportingTime: data.defaultReportingTime || '09:30 AM',
+      defaultInterviewStartTime: data.defaultInterviewStartTime || '10:00 AM',
+      defaultInterviewEndTime: data.defaultInterviewEndTime || '02:00 PM',
+      defaultInstructions: data.defaultInstructions || '',
+      defaultRequiredDocuments: Array.isArray(data.defaultRequiredDocuments)
+        ? data.defaultRequiredDocuments
+        : ['Updated Resume (2 copies)', 'Government Photo ID', 'Educational Certificates'],
+      dressCode: data.dressCode || 'Business Formal / Smart Casual',
+      weeklyOffDays: Array.isArray(data.weeklyOffDays) ? data.weeklyOffDays : ['Sunday'],
+      blockedDates: Array.isArray(data.blockedDates) ? data.blockedDates : [],
+      isActive: data.isActive !== undefined ? Boolean(data.isActive) : true,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    const updatedList = [...currentLocations, newLocation];
+    await saveStoredLocations(updatedList);
+
+    sendSuccess(res, newLocation, 'Walk-in location created successfully.', 201);
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * Update a walk-in location
+ * PUT /api/v1/walk-in/locations/:id
+ */
+export const updateWalkInLocation = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const locId = req.params.id;
+    const data = req.body;
+
+    const currentLocations = await getStoredLocations();
+    const index = currentLocations.findIndex((l) => l.id === locId);
+
+    if (index === -1) {
+      sendError(res, 'Walk-in location not found.', 404);
+      return;
+    }
+
+    let mapsUrl = data.googleMapsLink !== undefined ? String(data.googleMapsLink).trim() : currentLocations[index].googleMapsLink;
+    if (!mapsUrl && data.venueAddress?.trim()) {
+      mapsUrl = 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(data.venueAddress.trim());
+    }
+
+    const updatedLocation: WalkInLocation = {
+      ...currentLocations[index],
+      locationName: data.locationName !== undefined ? data.locationName.trim() : currentLocations[index].locationName,
+      city: data.city !== undefined ? data.city.trim() : currentLocations[index].city,
+      companyName: data.companyName !== undefined ? data.companyName.trim() : currentLocations[index].companyName,
+      venueName: data.venueName !== undefined ? data.venueName.trim() : currentLocations[index].venueName,
+      venueAddress: data.venueAddress !== undefined ? data.venueAddress.trim() : currentLocations[index].venueAddress,
+      googleMapsLink: mapsUrl,
+      contactPersonName: data.contactPersonName !== undefined ? data.contactPersonName.trim() : currentLocations[index].contactPersonName,
+      contactPersonPhone: data.contactPersonPhone !== undefined ? data.contactPersonPhone.trim() : currentLocations[index].contactPersonPhone,
+      defaultReportingTime: data.defaultReportingTime !== undefined ? data.defaultReportingTime : currentLocations[index].defaultReportingTime,
+      defaultInterviewStartTime: data.defaultInterviewStartTime !== undefined ? data.defaultInterviewStartTime : currentLocations[index].defaultInterviewStartTime,
+      defaultInterviewEndTime: data.defaultInterviewEndTime !== undefined ? data.defaultInterviewEndTime : currentLocations[index].defaultInterviewEndTime,
+      defaultInstructions: data.defaultInstructions !== undefined ? data.defaultInstructions : currentLocations[index].defaultInstructions,
+      defaultRequiredDocuments: Array.isArray(data.defaultRequiredDocuments) ? data.defaultRequiredDocuments : currentLocations[index].defaultRequiredDocuments,
+      dressCode: data.dressCode !== undefined ? data.dressCode : currentLocations[index].dressCode,
+      weeklyOffDays: Array.isArray(data.weeklyOffDays) ? data.weeklyOffDays : currentLocations[index].weeklyOffDays,
+      blockedDates: Array.isArray(data.blockedDates) ? data.blockedDates : currentLocations[index].blockedDates,
+      isActive: data.isActive !== undefined ? Boolean(data.isActive) : currentLocations[index].isActive,
+      updatedAt: new Date().toISOString(),
+    };
+
+    currentLocations[index] = updatedLocation;
+    await saveStoredLocations(currentLocations);
+
+    sendSuccess(res, updatedLocation, 'Walk-in location updated successfully.');
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * Deactivate or toggle status of walk-in location
+ * PATCH /api/v1/walk-in/locations/:id/deactivate
+ * PUT /api/v1/walk-in/locations/:id/deactivate
+ */
+export const deactivateWalkInLocation = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const locId = req.params.id;
+    const currentLocations = await getStoredLocations();
+    const index = currentLocations.findIndex((l) => l.id === locId);
+
+    if (index === -1) {
+      sendError(res, 'Walk-in location not found.', 404);
+      return;
+    }
+
+    const nextActive = req.body?.isActive !== undefined ? Boolean(req.body.isActive) : !currentLocations[index].isActive;
+    currentLocations[index] = {
+      ...currentLocations[index],
+      isActive: nextActive,
+      updatedAt: new Date().toISOString(),
+    };
+
+    await saveStoredLocations(currentLocations);
+
+    sendSuccess(res, currentLocations[index], 'Walk-in location status updated successfully.');
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * Delete walk-in location
+ * DELETE /api/v1/walk-in/locations/:id
+ */
+export const deleteWalkInLocation = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const locId = req.params.id;
+    const currentLocations = await getStoredLocations();
+    const filtered = currentLocations.filter((l) => l.id !== locId);
+
+    await saveStoredLocations(filtered);
+    sendSuccess(res, { id: locId }, 'Walk-in location deleted successfully.');
+  } catch (err) {
+    next(err);
+  }
+};

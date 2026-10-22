@@ -4,6 +4,11 @@ import {
   submitWalkInConfirmation,
   getWalkInSessions,
   updateWalkInSession,
+  getWalkInLocations,
+  createWalkInLocation,
+  updateWalkInLocation,
+  deactivateWalkInLocation,
+  deleteWalkInLocation,
 } from '../controllers/walk-in.controller';
 import { authenticateJwt, requireRoles } from '../middlewares/auth.middleware';
 
@@ -16,5 +21,39 @@ router.post('/confirm/:token', submitWalkInConfirmation);
 // Admin/recruiter session management routes
 router.get('/sessions', authenticateJwt, getWalkInSessions);
 router.put('/sessions/:id', authenticateJwt, requireRoles('SUPER_ADMIN', 'ADMIN', 'TEAM_LEADER'), updateWalkInSession);
+
+
+// Walk-in Location Management Routes
+router.get('/locations', getWalkInLocations);
+router.post(
+  '/locations',
+  authenticateJwt,
+  requireRoles('SUPER_ADMIN', 'ADMIN', 'TEAM_LEADER', 'RECRUITER'),
+  createWalkInLocation
+);
+router.put(
+  '/locations/:id',
+  authenticateJwt,
+  requireRoles('SUPER_ADMIN', 'ADMIN', 'TEAM_LEADER', 'RECRUITER'),
+  updateWalkInLocation
+);
+router.patch(
+  '/locations/:id/deactivate',
+  authenticateJwt,
+  requireRoles('SUPER_ADMIN', 'ADMIN', 'TEAM_LEADER', 'RECRUITER'),
+  deactivateWalkInLocation
+);
+router.put(
+  '/locations/:id/deactivate',
+  authenticateJwt,
+  requireRoles('SUPER_ADMIN', 'ADMIN', 'TEAM_LEADER', 'RECRUITER'),
+  deactivateWalkInLocation
+);
+router.delete(
+  '/locations/:id',
+  authenticateJwt,
+  requireRoles('SUPER_ADMIN', 'ADMIN'),
+  deleteWalkInLocation
+);
 
 export default router;
