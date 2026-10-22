@@ -10,10 +10,11 @@ export interface RecordAuditOptions {
   entityId: string;
   oldValue?: any;
   newValue?: any;
+  details?: any;
 }
 
 export const logAudit = async (options: RecordAuditOptions): Promise<void> => {
-  const { req, userId, action, module, entity, entityId, oldValue, newValue } = options;
+  const { req, userId, action, module, entity, entityId, oldValue, newValue, details } = options;
 
   const resolvedUserId = userId || req?.user?.userId || null;
   const ipAddress = req?.ip || req?.socket?.remoteAddress || null;
@@ -28,7 +29,7 @@ export const logAudit = async (options: RecordAuditOptions): Promise<void> => {
         entity,
         entityId,
         oldValue: oldValue ? oldValue : null,
-        newValue: newValue ? newValue : null,
+        newValue: newValue ? newValue : (details ? details : null),
         ipAddress: typeof ipAddress === 'string' ? ipAddress : null,
         userAgent,
       },

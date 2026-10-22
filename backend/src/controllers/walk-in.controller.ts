@@ -1107,7 +1107,7 @@ export const rejectWalkInCandidate = async (req: Request, res: Response, next: N
     });
 
     // 2. Remove candidate from active participant list of the walk-in session on the job
-    const targetJobId = jobId || candidate.targetJobId || candidate.applications?.[0]?.jobId;
+    const targetJobId = jobId || candidate.applications?.[0]?.jobId || candidate.applications?.[0]?.job?.id;
     if (targetJobId) {
       const job = await prisma.job.findUnique({ where: { id: targetJobId } });
       if (job && job.hiringProcess) {

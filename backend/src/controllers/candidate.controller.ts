@@ -11,6 +11,7 @@ import { logCandidateTimeline } from '../services/timeline.service';
 import { sendDynamicEmail } from '../services/email.service';
 import { formatCandidateGreetingName, formatCandidateGreeting } from '../utils/nameFormatter';
 import { formatWalkInDate, formatReadableInterviewDate } from '../utils/dateFormatter';
+import { findWalkInLocationById } from './walk-in.controller';
 
 export const CANONICAL_PIPELINE_STAGES = [
   'New',
@@ -1975,6 +1976,7 @@ export const resendWalkInEmail = async (req: Request, res: Response, next: NextF
     const clientName = req.body?.clientName || job?.client?.companyName || 'Orrica Edge Partner';
     const walkInDateStr = dateInfo.dateStr;
     const greetingName = formatCandidateGreetingName(candidate);
+    const selectedSessionId = (req.body?.sessionId || req.body?.locationId || (candidate as any).walkInSessionId || savedSession.id || '').trim();
 
     // Encode structured token containing exact candidate, job, application, and session signature
     const tokenPayload = {
@@ -2166,6 +2168,7 @@ export const sendWalkInInvitation = async (req: Request, res: Response, next: Ne
     const readableInterviewDate = formatReadableInterviewDate(rawDate) || dateInfo.displayDate;
 
     const selectedSessionId = (req.body?.sessionId || req.body?.locationId || '').trim();
+    const targetSessionId = selectedSessionId || savedSession.id || '';
     let locationVenue: any = null;
     if (selectedSessionId) {
       locationVenue = await findWalkInLocationById(selectedSessionId);
