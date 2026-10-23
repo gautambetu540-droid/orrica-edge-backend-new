@@ -541,31 +541,33 @@ export const submitWalkInConfirmation = async (req: Request, res: Response, next
  */
 export const getWalkInSessions = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
+    const { page, limit } = req.query;
+    const pageNum = page ? Math.max(1, parseInt(page as string, 10) || 1) : undefined;
+    const limitNum = limit ? Math.min(200, Math.max(1, parseInt(limit as string, 10) || 50)) : undefined;
+
     const jobs = await prisma.job.findMany({
+      where: {
+        status: { in: ['PUBLISHED', 'DRAFT', 'PAUSED'] },
+      },
       include: { client: true },
       orderBy: { createdAt: 'desc' },
-      take: 50,
+      ...(pageNum && limitNum ? { skip: (pageNum - 1) * limitNum, take: limitNum } : {}),
     });
 
     const sessions = jobs
       .map((job) => {
         const hp = (job.hiringProcess as any) || {};
-        if (hp.walkInSession) {
+        if (hp.walkInSession && hp.walkInSession.venueName && hp.walkInSession.venueAddress) {
           const s = {
             ...hp.walkInSession,
             jobId: job.id,
+            jobCode: job.jobCode,
             jobTitle: job.title,
             clientName: job.client?.companyName,
           };
-          const text = `${s.id || ''} ${s.jobTitle || ''} ${s.venueName || ''} ${s.venueAddress || ''} ${s.clientName || ''}`.toLowerCase();
-          if (
-            text.includes('noida interview') ||
-            text.includes('gurugram interview') ||
-            text.includes('biotech hub') ||
-            text.includes('season end') ||
-            text.includes('dummy') ||
-            text.includes('test')
-          ) {
+          // Filter out explicitly flagged mock test sessions
+          const id = String(s.id || '').toLowerCase();
+          if (id === 'dummy' || id === 'test-session') {
             return null;
           }
           return s;
@@ -596,7 +598,7 @@ export const updateWalkInSession = async (req: Request, res: Response, next: Nex
 
     // Locate job by ID or jobId in sessionData
     const targetJobId = sessionData.jobId || sessionIdOrJobId;
-    const job = await prisma.job.findFirst({
+    let job = await prisma.job.findFirst({
       where: {
         OR: [
           { id: targetJobId },
@@ -605,49 +607,77 @@ export const updateWalkInSession = async (req: Request, res: Response, next: Nex
       },
     });
 
-    if (job) {
-      const existingHp = (job.hiringProcess as any) || {};
-      const rawDate = sessionData.date || sessionData.interviewDate;
-      const dateInfo = formatWalkInDate(rawDate);
-
-      let mapsUrl = (sessionData.googleMapsLink || '').trim();
-      if (!mapsUrl && sessionData.venueAddress?.trim()) {
-        mapsUrl = 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(sessionData.venueAddress.trim());
-      }
-      if (mapsUrl && !mapsUrl.startsWith('http://') && !mapsUrl.startsWith('https://')) {
-        mapsUrl = '';
-      }
-
-      const updatedHp = {
-        ...existingHp,
-        walkInSession: {
-          id: sessionData.id || sessionIdOrJobId,
-          jobId: job.id,
-          date: dateInfo.dateStr,
-          interviewDate: dateInfo.dateStr,
-          reportingTime: sessionData.reportingTime || '09:30 AM',
-          interviewStartTime: sessionData.interviewStartTime || '10:00 AM',
-          interviewEndTime: sessionData.interviewEndTime || '02:00 PM',
-          venueName: sessionData.venueName.trim(),
-          venueAddress: sessionData.venueAddress.trim(),
-          googleMapsLink: mapsUrl,
-          instructions: sessionData.instructions || '',
-          requiredDocuments: sessionData.requiredDocuments || [],
-          status: sessionData.status || 'SCHEDULED',
-          updatedAt: new Date().toISOString(),
-        },
-      };
-
-      await prisma.job.update({
-        where: { id: job.id },
-        data: {
-          hiringProcess: updatedHp,
-        },
+    if (!job) {
+      const allJobs = await prisma.job.findMany({
+        select: { id: true, jobCode: true, title: true, hiringProcess: true },
       });
+      job = (allJobs.find((j) => {
+        const hp = (j.hiringProcess as any) || {};
+        return hp.walkInSession?.id === sessionIdOrJobId || hp.walkInSession?.id === sessionData.id;
+      }) as any) || null;
     }
 
+    if (!job) {
+      sendError(res, 'Target job or walk-in session record not found in database.', 404);
+      return;
+    }
+
+    const existingHp = (job.hiringProcess as any) || {};
+    const rawDate = sessionData.date || sessionData.interviewDate;
+    const dateInfo = formatWalkInDate(rawDate);
+
+    let mapsUrl = (sessionData.googleMapsLink || '').trim();
+    if (!mapsUrl && sessionData.venueAddress?.trim()) {
+      mapsUrl = 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(sessionData.venueAddress.trim());
+    }
+    if (mapsUrl && !mapsUrl.startsWith('http://') && !mapsUrl.startsWith('https://')) {
+      mapsUrl = '';
+    }
+
+    const updatedSession = {
+      id: sessionData.id || sessionIdOrJobId,
+      jobId: job.id,
+      date: dateInfo.dateStr,
+      interviewDate: dateInfo.dateStr,
+      reportingTime: sessionData.reportingTime || '09:30 AM',
+      interviewStartTime: sessionData.interviewStartTime || '10:00 AM',
+      interviewEndTime: sessionData.interviewEndTime || '02:00 PM',
+      venueName: sessionData.venueName.trim(),
+      venueAddress: sessionData.venueAddress.trim(),
+      googleMapsLink: mapsUrl,
+      instructions: sessionData.instructions || '',
+      requiredDocuments: sessionData.requiredDocuments || [],
+      status: sessionData.status || 'SCHEDULED',
+      updatedAt: new Date().toISOString(),
+    };
+
+    const updatedHp = {
+      ...existingHp,
+      walkInSession: updatedSession,
+    };
+
+    await prisma.job.update({
+      where: { id: job.id },
+      data: {
+        hiringProcess: updatedHp,
+      },
+    });
+
+    try {
+      await logAudit({
+        req,
+        action: 'UPDATE_WALK_IN_SESSION',
+        module: 'WALK_IN_OPERATIONS',
+        entity: 'Job',
+        entityId: job.id,
+        oldValue: existingHp.walkInSession || null,
+        newValue: updatedSession,
+      });
+    } catch {}
+
     sendSuccess(res, {
-      session: sessionData,
+      session: updatedSession,
+      jobId: job.id,
       message: 'Walk-in session details saved successfully.',
     });
   } catch (err) {
@@ -659,16 +689,15 @@ export const updateWalkInSession = async (req: Request, res: Response, next: Nex
 
 export function isFakeWalkInLocation(l: any): boolean {
   if (!l) return true;
-  const str = `${l.id || ''} ${l.locationName || ''} ${l.venueName || ''} ${l.venueAddress || ''} ${l.city || ''} ${l.companyName || ''}`.toLowerCase();
+  const id = String(l.id || '').toLowerCase();
+  const name = String(l.locationName || l.venueName || '').toLowerCase();
   return (
-    str.includes('noida interview') ||
-    str.includes('gurugram interview') ||
-    str.includes('biotech hub') ||
-    str.includes('season end') ||
-    str.includes('dummy') ||
-    str.includes('test entry') ||
-    str.includes('loc-noida-hub') ||
-    str.includes('loc-gurugram-hub')
+    id === 'dummy' ||
+    id === 'test-entry' ||
+    id === 'loc-noida-hub' ||
+    id === 'loc-gurugram-hub' ||
+    name.includes('dummy location') ||
+    name.includes('test entry')
   );
 }
 

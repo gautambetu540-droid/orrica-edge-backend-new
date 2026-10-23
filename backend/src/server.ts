@@ -47,6 +47,7 @@ app.use(
     origin: (origin, callback) => {
       const isAllowedOrigin =
         config.corsOrigin.includes(origin || '') ||
+        (origin && /\.vercel\.app$/.test(new URL(origin).hostname)) ||
         (config.nodeEnv !== 'production' && config.corsOrigin.includes('*'));
 
       if (!origin || isAllowedOrigin) {
@@ -84,14 +85,63 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 // Static file serving for uploaded resumes
 app.use('/uploads', express.static(path.resolve(config.upload.dir)));
 
-// Production Health Check Endpoints
-app.get(['/health', '/api/health'], (req, res) => {
+// Request timeout middleware (30s)
+app.use((req, res, next) => {
+  res.setTimeout(30000, () => {
+    if (!res.headersSent) {
+      res.status(504).json({
+        success: false,
+        message: 'Request timed out waiting for server processing.',
+        error: { code: 'GATEWAY_TIMEOUT', message: 'Request processing exceeded 30 seconds.' },
+      });
+    }
+  });
+  next();
+});
+
+// Production Health Check Endpoints: Liveness vs Deep Database Readiness
+app.get(['/health/live', '/api/health/live'], (_req, res) => {
   res.json({
     status: 'ok',
     timestamp: new Date().toISOString(),
     service: 'Orrica Edge ATS API Server',
     environment: config.nodeEnv,
     uptime: process.uptime(),
+  });
+});
+
+app.get(['/health', '/api/health', '/health/ready', '/api/health/ready'], async (req, res) => {
+  const start = Date.now();
+  let dbStatus: 'connected' | 'disconnected' = 'disconnected';
+  let dbLatencyMs: number | null = null;
+  let dbError: string | null = null;
+
+  try {
+    await Promise.race([
+      prisma.$queryRawUnsafe('SELECT 1'),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('Database ping timed out')), 3000)),
+    ]);
+    dbStatus = 'connected';
+    dbLatencyMs = Date.now() - start;
+  } catch (err: any) {
+    dbStatus = 'disconnected';
+    dbError = config.nodeEnv === 'production' ? 'Database connection check failed' : err?.message || 'Database error';
+  }
+
+  const isHealthy = dbStatus === 'connected';
+  const statusCode = isHealthy ? 200 : 503;
+
+  res.status(statusCode).json({
+    status: isHealthy ? 'ok' : 'degraded',
+    service: 'Orrica Edge ATS API Server',
+    timestamp: new Date().toISOString(),
+    environment: config.nodeEnv,
+    uptime: process.uptime(),
+    database: {
+      status: dbStatus,
+      latencyMs: dbLatencyMs,
+      ...(dbError ? { error: dbError } : {}),
+    },
   });
 });
 
