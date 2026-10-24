@@ -87,8 +87,18 @@ export const ensureDatabaseSchema = async () => {
       ADD COLUMN IF NOT EXISTS "nextActionType" TEXT,
       ADD COLUMN IF NOT EXISTS "nextActionRemarks" TEXT,
       ADD COLUMN IF NOT EXISTS "sourcingRecruiterId" TEXT,
-      ADD COLUMN IF NOT EXISTS "teamLeaderId" TEXT;
+      ADD COLUMN IF NOT EXISTS "teamLeaderId" TEXT,
+      ADD COLUMN IF NOT EXISTS "isArchived" BOOLEAN NOT NULL DEFAULT false,
+      ADD COLUMN IF NOT EXISTS "archivedAt" TIMESTAMP(3),
+      ADD COLUMN IF NOT EXISTS "archivedById" TEXT,
+      ADD COLUMN IF NOT EXISTS "archiveReason" TEXT,
+      ADD COLUMN IF NOT EXISTS "previousStatus" TEXT;
   `, 'Add candidate columns');
+
+  await executeSafe(`
+    CREATE INDEX IF NOT EXISTS "candidates_isArchived_idx" ON "candidates"("isArchived");
+    CREATE INDEX IF NOT EXISTS "candidates_isArchived_archivedAt_idx" ON "candidates"("isArchived", "archivedAt");
+  `, 'Index candidate archive columns');
 
   // Safely migrate candidates.status to TEXT if it is still CandidateStatus enum
   await executeSafe(`

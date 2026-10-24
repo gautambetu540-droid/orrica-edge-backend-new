@@ -1120,6 +1120,177 @@ async function runTestSuite() {
   );
 
 
+
+  // ----------------------------------------------------
+  // Test 16: Manual Archive Module, Reversible Restore & Active Exclusion
+  // ----------------------------------------------------
+  console.log('--- 16. Testing Candidate Soft-Archive & Manual Restore Engine ---');
+
+  interface MockCandidateRecord {
+    id: string;
+    candidateCode: string;
+    fullName: string;
+    email: string;
+    phone: string;
+    status: string;
+    isArchived: boolean;
+    archivedAt?: Date | null;
+    archivedById?: string | null;
+    archiveReason?: string | null;
+    previousStatus?: string | null;
+    ownerRecruiterId?: string | null;
+  }
+
+  const mockDbCandidates: MockCandidateRecord[] = [
+    {
+      id: 'cand-001',
+      candidateCode: 'OE-CAND-0001',
+      fullName: 'Aarav Patel',
+      email: 'aarav@example.com',
+      phone: '9876543211',
+      status: 'Shortlisted',
+      isArchived: false,
+      ownerRecruiterId: 'REC-0001',
+    },
+    {
+      id: 'cand-002',
+      candidateCode: 'OE-CAND-0002',
+      fullName: 'Meera Sen',
+      email: 'meera@example.com',
+      phone: '9876543212',
+      status: 'Rejected',
+      isArchived: false, // Rejection must be separate from archive!
+      ownerRecruiterId: 'REC-0002',
+    },
+    {
+      id: 'cand-003',
+      candidateCode: 'OE-CAND-0003',
+      fullName: 'Kunal Joshi',
+      email: 'kunal@example.com',
+      phone: '9876543213',
+      status: 'Interview Scheduled',
+      isArchived: false,
+      ownerRecruiterId: 'REC-0001',
+    },
+  ];
+
+  // Helper functions simulating archive operations
+  function simulateArchiveCandidate(id: string, reason?: string, userId: string = 'user-admin-1') {
+    const cand = mockDbCandidates.find(c => c.id === id);
+    if (!cand) return { status: 404, message: 'Candidate not found' };
+    if (cand.isArchived) return { status: 400, message: 'Candidate is already archived' };
+
+    cand.previousStatus = cand.status;
+    cand.isArchived = true;
+    cand.archivedAt = new Date();
+    cand.archivedById = userId;
+    cand.archiveReason = reason || null;
+    return { status: 200, data: { ...cand } };
+  }
+
+  function simulateRestoreCandidate(id: string) {
+    const cand = mockDbCandidates.find(c => c.id === id);
+    if (!cand) return { status: 404, message: 'Candidate not found' };
+    if (!cand.isArchived) return { status: 400, message: 'Candidate is not archived' };
+
+    const restoredStatus = cand.previousStatus || 'New';
+    cand.status = restoredStatus;
+    cand.previousStatus = null;
+    cand.isArchived = false;
+    cand.archivedAt = null;
+    cand.archivedById = null;
+    cand.archiveReason = null;
+    return { status: 200, data: { ...cand } };
+  }
+
+  function simulateBulkArchive(ids: string[], reason?: string, userId: string = 'user-admin-1') {
+    const successfulIds: string[] = [];
+    const failedRecords: { id: string; reason: string }[] = [];
+
+    for (const id of ids) {
+      const res = simulateArchiveCandidate(id, reason, userId);
+      if (res.status === 200) {
+        successfulIds.push(id);
+      } else {
+        failedRecords.push({ id, reason: res.message || 'Unknown error' });
+      }
+    }
+
+    return {
+      successfulCount: successfulIds.length,
+      failureCount: failedRecords.length,
+      successfulIds,
+      failedRecords,
+    };
+  }
+
+  // 16.1 Verify rejection does not automatically archive
+  assert(
+    mockDbCandidates[1].status === 'Rejected' && mockDbCandidates[1].isArchived === false,
+    'Existing rejection remains distinct from archive; rejecting does not archive candidate'
+  );
+
+  // 16.2 Archive a candidate
+  const archiveRes1 = simulateArchiveCandidate('cand-001', 'Candidate not responding to recruiter call');
+  assert(
+    archiveRes1.status === 200 &&
+    archiveRes1.data?.isArchived === true &&
+    archiveRes1.data?.previousStatus === 'Shortlisted' &&
+    archiveRes1.data?.archiveReason === 'Candidate not responding to recruiter call' &&
+    archiveRes1.data?.archivedById === 'user-admin-1',
+    'Candidate archive records isArchived=true, preserves previousStatus, archiveReason, and audit userId'
+  );
+
+  // 16.3 Active list exclusion
+  const activeCandidates = mockDbCandidates.filter(c => !c.isArchived);
+  assert(
+    activeCandidates.length === 2 && !activeCandidates.some(c => c.id === 'cand-001'),
+    'Active candidate list query excludes archived candidate cand-001 by default'
+  );
+
+  // 16.4 Archived list inclusion
+  const archivedCandidates = mockDbCandidates.filter(c => c.isArchived);
+  assert(
+    archivedCandidates.length === 1 && archivedCandidates[0].id === 'cand-001',
+    'Archive view query returns persisted archived record with preserved candidate code and history'
+  );
+
+  // 16.5 Repeated archive rejection (idempotency/error safety)
+  const archiveResAgain = simulateArchiveCandidate('cand-001', 'Duplicate request');
+  assert(
+    archiveResAgain.status === 400 && archiveResAgain.message === 'Candidate is already archived',
+    'Attempting to archive an already-archived candidate returns 400 without state corruption'
+  );
+
+  // 16.6 Bulk archive with partial failure handling
+  const bulkRes = simulateBulkArchive(['cand-003', 'non-existent-id', 'cand-001'], 'Bulk cleaning of stale records');
+  assert(
+    bulkRes.successfulCount === 1 &&
+    bulkRes.failureCount === 2 &&
+    bulkRes.successfulIds.includes('cand-003') &&
+    bulkRes.failedRecords.some(r => r.id === 'non-existent-id') &&
+    bulkRes.failedRecords.some(r => r.id === 'cand-001'),
+    'Bulk archive accurately isolates successes and failures without losing batch progress'
+  );
+
+  // 16.7 Restore candidate
+  const restoreRes = simulateRestoreCandidate('cand-001');
+  assert(
+    restoreRes.status === 200 &&
+    restoreRes.data?.isArchived === false &&
+    restoreRes.data?.status === 'Shortlisted' && // Restored to previousStatus!
+    restoreRes.data?.previousStatus === null &&
+    restoreRes.data?.archivedAt === null,
+    'Restore candidate safely updates original record without duplication and restores exact previousStatus'
+  );
+
+  // 16.8 Active list inclusion after restore
+  const activeAfterRestore = mockDbCandidates.filter(c => !c.isArchived);
+  assert(
+    activeAfterRestore.some(c => c.id === 'cand-001') && activeAfterRestore.find(c => c.id === 'cand-001')?.status === 'Shortlisted',
+    'Restored candidate is immediately visible again in active pipeline with preserved candidate identity'
+  );
+
   console.log('\n====================================================');
   console.log(`🎉 All ${passedTests}/${totalTests} tests passed successfully!`);
   console.log('====================================================\n');

@@ -19,6 +19,10 @@ import {
   approveWalkInReschedule,
   bulkImportCandidates,
   downloadCandidateImportTemplate,
+  archiveCandidate,
+  bulkArchiveCandidates,
+  restoreCandidate,
+  getArchivedCandidatesCount,
 } from '../controllers/candidate.controller';
 import { uploadResume, uploadSpreadsheet } from '../middlewares/upload.middleware';
 import {
@@ -85,6 +89,43 @@ router.post(
   addCandidateActivity
 );
 
+
+
+// Archived Candidates Real Count (Must precede /:id)
+router.get(
+  '/archived/count',
+  authenticateJwt,
+  requireRoles('SUPER_ADMIN', 'ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
+  requireRecruiterPermission('candidates'),
+  getArchivedCandidatesCount
+);
+
+// Bulk Archive Candidates API (Must precede /:id)
+router.post(
+  '/bulk-archive',
+  authenticateJwt,
+  requireRoles('SUPER_ADMIN', 'ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
+  requireRecruiterPermission('candidates'),
+  bulkArchiveCandidates
+);
+
+// Single Candidate Archive API
+router.post(
+  '/:id/archive',
+  authenticateJwt,
+  requireRoles('SUPER_ADMIN', 'ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
+  requireRecruiterPermission('candidates'),
+  archiveCandidate
+);
+
+// Single Candidate Restore API
+router.post(
+  '/:id/restore',
+  authenticateJwt,
+  requireRoles('SUPER_ADMIN', 'ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
+  requireRecruiterPermission('candidates'),
+  restoreCandidate
+);
 
 // Bulk Job Assignment API (Must be before /:id routes)
 router.post(
