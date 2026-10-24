@@ -176,6 +176,17 @@ export const ensureDatabaseSchema = async () => {
   await executeSafe(`CREATE INDEX IF NOT EXISTS "recruiter_applications_status_idx" ON "recruiter_applications"("status");`, 'Index recruiter_applications.status');
   await executeSafe(`CREATE INDEX IF NOT EXISTS "recruiter_applications_createdAt_idx" ON "recruiter_applications"("createdAt");`, 'Index recruiter_applications.createdAt');
 
+    // 8. PostgreSQL Sequence for Candidate Codes
+  await executeSafe(
+    'CREATE SEQUENCE IF NOT EXISTS candidate_code_seq START WITH 1 INCREMENT BY 1;',
+    'Ensure candidate_code_seq exists'
+  );
+
+  await executeSafe(
+    'SELECT setval(\'candidate_code_seq\', GREATEST(1, COALESCE((SELECT MAX(NULLIF(regexp_replace("candidateCode", \'^[^0-9]+\', \'\'), \'\')::INTEGER) FROM "candidates"), 0) + 1), false);',
+    'Synchronize candidate_code_seq'
+  );
+
   console.log('[SCHEMA] Verified and ensured all PostgreSQL enums, tables, and columns exist.');
 
 };

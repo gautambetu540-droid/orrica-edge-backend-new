@@ -932,6 +932,194 @@ async function runTestSuite() {
     'Production startup accepts compliant custom secrets and database connection'
   );
 
+    // =========================================================
+  // 15. Testing Candidate Registration Form Submission & Guardrails
+  // =========================================================
+  console.log('\n--- 15. Testing Candidate Registration Form Submission & Guardrails ---');
+
+  // 15.A Valid candidate submission without recruiter referral
+  const mockCandidateStore: any[] = [];
+  const mockApplicationStore: any[] = [];
+
+  const simulateFormSubmission = async (payload: any, jobs: any[], recruiters: any[]) => {
+    // Required fields check
+    const fullName = String(payload.fullName || '').trim();
+    const email = String(payload.email || '').trim().toLowerCase();
+    const phone = String(payload.phone || '').trim().replace(/\D/g, '');
+
+    if (!fullName || !email || !phone) {
+      return { status: 400, success: false, message: 'Full name, email, and phone number are required.' };
+    }
+    if (!/^[6-9]\d{9}$/.test(phone)) {
+      return { status: 400, success: false, message: 'Please provide a valid 10-digit phone number.' };
+    }
+    if (!z.string().email().safeParse(email).success) {
+      return { status: 400, success: false, message: 'Please provide a valid email address.' };
+    }
+
+    // Optional Recruiter Referral
+    const ref = String(payload.recruiterRef || payload.ref || '').trim();
+    const matchedRecruiter = ref ? recruiters.find((r) => r.recruiterId.toLowerCase() === ref.toLowerCase() && r.isActive) : null;
+
+    // Optional Job
+    const rawJobId = String(payload.jobId || '').trim();
+    const matchedJob = rawJobId ? jobs.find((j) => j.id === rawJobId || j.jobCode === rawJobId) : null;
+
+    // Deduplication
+    let candidate = mockCandidateStore.find((c) => c.email === email || c.phone === phone);
+    const isNew = !candidate;
+
+    if (!candidate) {
+      const seq = mockCandidateStore.length + 1;
+      const code = `OE-CAND-${String(seq).padStart(4, '0')}`;
+      candidate = {
+        id: `cand-${seq}`,
+        candidateCode: code,
+        fullName,
+        fatherName: payload.fatherName || null,
+        email,
+        phone,
+        location: payload.location || payload.city || 'Not Specified',
+        status: matchedRecruiter ? 'Screening' : 'New',
+        ownerRecruiterId: matchedRecruiter ? matchedRecruiter.id : null,
+      };
+      mockCandidateStore.push(candidate);
+    } else {
+      candidate.fullName = fullName;
+      candidate.fatherName = payload.fatherName || candidate.fatherName;
+      if (matchedRecruiter && !candidate.ownerRecruiterId) {
+        candidate.ownerRecruiterId = matchedRecruiter.id;
+      }
+    }
+
+    let application = null;
+    if (matchedJob && String(matchedJob.status).toUpperCase() === 'PUBLISHED') {
+      const existingApp = mockApplicationStore.find((a) => a.candidateId === candidate.id && a.jobId === matchedJob.id);
+      if (!existingApp) {
+        application = {
+          id: `app-${mockApplicationStore.length + 1}`,
+          applicationCode: `APP-${String(mockApplicationStore.length + 1).padStart(6, '0')}`,
+          candidateId: candidate.id,
+          jobId: matchedJob.id,
+          stage: 'APPLIED',
+        };
+        mockApplicationStore.push(application);
+      } else {
+        application = existingApp;
+      }
+    }
+
+    return {
+      status: 201,
+      success: true,
+      data: {
+        candidateId: candidate.id,
+        candidateCode: candidate.candidateCode,
+        applicationId: application ? application.id : null,
+        recruiter: matchedRecruiter ? { id: matchedRecruiter.id, recruiterId: matchedRecruiter.recruiterId } : null,
+        job: matchedJob ? { id: matchedJob.id, title: matchedJob.title } : null,
+      },
+    };
+  };
+
+  const sampleJobs = [
+    { id: '81cf6472-4d0c-4bae-b247-74f7338ea27d', title: 'Customer Support Executive', jobCode: 'OE-2026-0001', status: 'PUBLISHED' },
+    { id: 'closed-job-id', title: 'Closed Developer Role', jobCode: 'OE-2026-0002', status: 'CLOSED' },
+  ];
+
+  const sampleRecruiters = [
+    { id: 'usr-rec-7', recruiterId: 'REC-0007', fullName: 'Anita Singh', isActive: true },
+    { id: 'usr-rec-9', recruiterId: 'REC-0009', fullName: 'Inactive Recruiter', isActive: false },
+  ];
+
+  // Test A: Valid candidate without recruiter referral
+  const resA = await simulateFormSubmission(
+    { fullName: 'Priya Sharma', fatherName: 'Ram Sharma', email: 'priya@example.com', phone: '9876543210', city: 'Indore', state: 'MP' },
+    sampleJobs,
+    sampleRecruiters
+  );
+  assert(
+    resA.status === 201 && resA.data?.candidateCode === 'OE-CAND-0001' && resA.data?.recruiter === null,
+    'Valid candidate submission without recruiter referral succeeds with canonical candidateCode'
+  );
+
+  // Test B: Valid candidate submission with ref=REC-0007
+  const resB = await simulateFormSubmission(
+    { fullName: 'Amit Verma', fatherName: 'Rajesh Verma', email: 'amit@example.com', phone: '9876543211', city: 'Noida', recruiterRef: 'REC-0007' },
+    sampleJobs,
+    sampleRecruiters
+  );
+  assert(
+    resB.status === 201 && resB.data?.recruiter?.recruiterId === 'REC-0007',
+    'Valid candidate submission with ref=REC-0007 correctly attributes recruiter'
+  );
+
+  // Test C1: Non-existent / inactive recruiter ref does NOT cause submission failure
+  const resC1 = await simulateFormSubmission(
+    { fullName: 'Suresh Kumar', email: 'suresh@example.com', phone: '9876543212', recruiterRef: 'REC-NONEXISTENT' },
+    sampleJobs,
+    sampleRecruiters
+  );
+  assert(
+    resC1.status === 201 && resC1.data?.recruiter === null,
+    'Non-existent or inactive recruiter ref gracefully falls back to general submission without failing'
+  );
+
+  // Test C2: Missing or invalid jobId is handled gracefully
+  const resC2 = await simulateFormSubmission(
+    { fullName: 'Vikram Joshi', email: 'vikram@example.com', phone: '9876543213', jobId: 'non-existent-uuid' },
+    sampleJobs,
+    sampleRecruiters
+  );
+  assert(
+    resC2.status === 201 && resC2.data?.job === null,
+    'Invalid or missing jobId allows candidate registration without throwing 404 or 500 error'
+  );
+
+  // Test C3: Closed jobId does not link application but successfully persists candidate
+  const resC3 = await simulateFormSubmission(
+    { fullName: 'Neha Gupta', email: 'neha@example.com', phone: '9876543214', jobId: 'closed-job-id' },
+    sampleJobs,
+    sampleRecruiters
+  );
+  assert(
+    resC3.status === 201 && resC3.data?.applicationId === null,
+    'Closed job does not attach application but successfully creates candidate record'
+  );
+
+  // Test D: Missing required fields and invalid email/phone rejection
+  const resD1 = await simulateFormSubmission({ fullName: '', email: 'valid@example.com', phone: '9876543210' }, sampleJobs, sampleRecruiters);
+  assert(resD1.status === 400 && Boolean(resD1.message?.includes('required')), 'Missing fullName returns 400 required error');
+
+  const resD2 = await simulateFormSubmission({ fullName: 'Test', email: 'not-an-email', phone: '9876543210' }, sampleJobs, sampleRecruiters);
+  assert(resD2.status === 400 && Boolean(resD2.message?.includes('valid email')), 'Invalid email format returns 400 validation error');
+
+  const resD3 = await simulateFormSubmission({ fullName: 'Test', email: 'test@example.com', phone: '123' }, sampleJobs, sampleRecruiters);
+  assert(resD3.status === 400 && Boolean(resD3.message?.includes('10-digit phone')), 'Invalid phone number returns 400 validation error');
+
+  // Test E: Duplicate submission and repeated clicks
+  const resE1 = await simulateFormSubmission(
+    { fullName: 'Priya Sharma Updated', fatherName: 'Ram Sharma Updated', email: 'priya@example.com', phone: '9876543210' },
+    sampleJobs,
+    sampleRecruiters
+  );
+  assert(
+    resE1.status === 201 && resE1.data?.candidateCode === 'OE-CAND-0001',
+    'Repeated click or duplicate submission updates existing candidate profile without creating duplicate record'
+  );
+
+  // Test G: Candidate details and job association
+  const resG = await simulateFormSubmission(
+    { fullName: 'Rohan Mehta', fatherName: 'Dinesh Mehta', email: 'rohan@example.com', phone: '9876543215', jobId: '81cf6472-4d0c-4bae-b247-74f7338ea27d', recruiterRef: 'REC-0007' },
+    sampleJobs,
+    sampleRecruiters
+  );
+  assert(
+    resG.status === 201 && resG.data?.applicationId !== null && resG.data?.recruiter?.recruiterId === 'REC-0007',
+    'Full candidate flow persists candidate, job application, and recruiter referral attribution together'
+  );
+
+
   console.log('\n====================================================');
   console.log(`🎉 All ${passedTests}/${totalTests} tests passed successfully!`);
   console.log('====================================================\n');

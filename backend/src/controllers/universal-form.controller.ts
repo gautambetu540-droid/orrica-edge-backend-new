@@ -4,7 +4,7 @@ import { prisma } from '../prisma/client';
 import { uploadResumeFile } from '../services/storage.service';
 import { sendSuccess, sendError } from '../utils/response';
 import { createNotification, createNotifications } from '../services/notification.service';
-import { generateCandidateCode } from '../utils/codeGenerators';
+import { generateCandidateCode, generateApplicationCode } from '../utils/codeGenerators';
 
 const universalFormBodySchema = z.object({
   name: z.string().min(2).max(120).optional(),
@@ -93,24 +93,29 @@ const resolveRecruiterRef = async (value: unknown) => {
   const ref = String(value ?? '').trim();
   if (!ref) return null;
 
-  const recruiter = await prisma.user.findFirst({
-    where: {
-      role: { in: ['RECRUITER', 'FREELANCE_RECRUITER'] },
-      isActive: true,
-      OR: [
-        { recruiterId: ref },
-        { id: ref },
-      ],
-    },
-    select: {
-      id: true,
-      recruiterId: true,
-      fullName: true,
-      recruiterType: true,
-    },
-  });
+  try {
+    const recruiter = await prisma.user.findFirst({
+      where: {
+        role: { in: ['RECRUITER', 'FREELANCE_RECRUITER', 'TEAM_LEADER', 'ADMIN', 'SUPER_ADMIN'] },
+        isActive: true,
+        OR: [
+          { recruiterId: { equals: ref, mode: 'insensitive' } },
+          { id: ref },
+        ],
+      },
+      select: {
+        id: true,
+        recruiterId: true,
+        fullName: true,
+        recruiterType: true,
+      },
+    });
 
-  return recruiter || null;
+    return recruiter || null;
+  } catch (error: any) {
+    console.warn('[RECRUITER REF LOOKUP NOTICE]:', error?.message || error);
+    return null;
+  }
 };
 
 const parseDate = (value: unknown): Date | undefined => {
@@ -407,9 +412,14 @@ export const submitPublicUniversalForm = async (req: Request, res: Response, nex
   try {
     const slug = normalizeSlug(req.params.slug);
 
-    const form = await prisma.universalForm.findFirst({
-      where: { slug, isActive: true },
-    });
+    // Support slug lookup with safe fallback to default 'candidates-form'
+    const form =
+      (await prisma.universalForm.findFirst({
+        where: { slug, isActive: true },
+      })) ||
+      (await prisma.universalForm.findFirst({
+        where: { slug: 'candidates-form', isActive: true },
+      }));
 
     if (!form) {
       sendError(res, 'Candidate form not found or inactive', 404);
@@ -417,40 +427,53 @@ export const submitPublicUniversalForm = async (req: Request, res: Response, nex
     }
 
     const body = req.body || {};
-    const recruiter = await resolveRecruiterRef(body.recruiterRef || body.recruiterId);
-    const jobId = String(body.jobId || '').trim() || null;
 
-    if ((body.recruiterRef || body.recruiterId) && !recruiter) {
-      sendError(res, 'The recruiter link is invalid or the recruiter account is inactive.', 400);
-      return;
+    // 1. Recruiter Referral Attribution (Optional: non-blocking)
+    const recruiterRef = String(
+      body.recruiterRef || body.recruiterId || body.ref || body.sourcingRecruiterId || req.query.ref || req.query.recruiterRef || ''
+    ).trim();
+
+    const recruiter = recruiterRef ? await resolveRecruiterRef(recruiterRef) : null;
+    if (recruiterRef && !recruiter) {
+      console.log(`[UNIVERSAL FORM] Recruiter referral "${recruiterRef}" not found or inactive. Proceeding with registration without blocking candidate.`);
     }
 
+    // 2. Job Resolution (Optional / Graceful: handle invalid, inactive, deleted gracefully)
+    const rawJobId = String(body.jobId || body.targetJobId || req.query.jobId || req.query.targetJobId || '').trim();
     let targetJob: { id: string; title: string; status: string } | null = null;
-    if (jobId) {
-      targetJob = await prisma.job.findUnique({
-        where: { id: jobId },
-        select: { id: true, title: true, status: true },
-      });
+    let jobNotice: string | null = null;
 
-      if (!targetJob) {
-        sendError(res, 'The selected job is no longer available.', 404);
-        return;
-      }
+    if (rawJobId) {
+      try {
+        targetJob = await prisma.job.findFirst({
+          where: {
+            OR: [
+              { id: rawJobId },
+              { jobCode: { equals: rawJobId, mode: 'insensitive' } },
+              { slug: { equals: rawJobId, mode: 'insensitive' } },
+            ],
+          },
+          select: { id: true, title: true, status: true },
+        });
 
-      if (String(targetJob.status).toUpperCase() !== 'PUBLISHED') {
-        sendError(res, 'The selected job is not currently open for submissions.', 400);
-        return;
+        if (!targetJob) {
+          jobNotice = `Referenced job "${rawJobId}" is no longer available. Candidate registered under general talent pool.`;
+          console.log(`[UNIVERSAL FORM] ${jobNotice}`);
+        } else if (String(targetJob.status).toUpperCase() !== 'PUBLISHED') {
+          jobNotice = `Referenced job "${targetJob.title}" is ${targetJob.status}. Candidate registered under general talent pool.`;
+          console.log(`[UNIVERSAL FORM] ${jobNotice}`);
+        }
+      } catch (jobErr: any) {
+        console.warn('[UNIVERSAL FORM] Job lookup warning:', jobErr?.message || jobErr);
       }
     }
 
+    // 3. Validation
     const fullName = String(body.fullName || '').trim();
     const email = String(body.email || '').trim().toLowerCase();
     const phone = String(body.phone || '').trim();
 
-    // The current public candidate form collects address as separate fields.
-    // Keep the legacy location field supported, but derive it from city/state
-    // when the new form is used.
-    const fullAddress = String(body.fullAddress || '').trim();
+    const fullAddress = String(body.fullAddress || body.address || '').trim();
     const city = String(body.city || '').trim();
     const state = String(body.state || '').trim();
     const legacyLocation = String(body.location || body.currentLocation || '').trim();
@@ -481,13 +504,12 @@ export const submitPublicUniversalForm = async (req: Request, res: Response, nex
       return;
     }
 
+    // Validate configured mandatory fields
     const configuredFields = Array.isArray(form.fields) ? (form.fields as Array<Record<string, unknown>>) : [];
     for (const field of configuredFields) {
       const key = String(field.key || '').trim();
       if (key === 'resume' || !field.required) continue;
 
-      // "location" is a legacy field. The current public form collects
-      // fullAddress/city/state, so validate the derived location value.
       const value = key === 'location'
         ? location
         : body[key];
@@ -514,8 +536,10 @@ export const submitPublicUniversalForm = async (req: Request, res: Response, nex
       name: fullName,
       fullName,
       phone: phoneDigits,
+      fatherName: String(body.fatherName || '').trim() || undefined,
       location,
       currentLocation: location,
+      preferredLocation: String(body.preferredLocation || '').trim() || undefined,
       highestQualification: highestQual,
       education: highestQual,
       totalExperience: totalExp,
@@ -539,6 +563,7 @@ export const submitPublicUniversalForm = async (req: Request, res: Response, nex
       dateOfJoin: parseDate(body.dateOfJoin),
     };
 
+    // 4. Persistence within Transaction
     const result = await prisma.$transaction(async (tx) => {
       const existingByEmail = await tx.candidate.findUnique({
         where: { email },
@@ -564,6 +589,7 @@ export const submitPublicUniversalForm = async (req: Request, res: Response, nex
               ? {
                   ownerRecruiterId: recruiter.id,
                   createdById: existing.createdById || recruiter.id,
+                  sourcingRecruiterId: existing.sourcingRecruiterId || recruiter.id,
                 }
               : {}),
           },
@@ -579,14 +605,16 @@ export const submitPublicUniversalForm = async (req: Request, res: Response, nex
             ...candidateData,
             ownerRecruiterId: recruiter?.id || null,
             createdById: recruiter?.id || null,
-            status: recruiter ? 'SCREENING' : 'NEW',
+            sourcingRecruiterId: recruiter?.id || null,
+            status: recruiter ? 'Screening' : 'New',
           },
         });
       }
 
       let application = null;
+      const isJobActive = targetJob && String(targetJob.status).toUpperCase() === 'PUBLISHED';
 
-      if (targetJob) {
+      if (isJobActive && targetJob) {
         const existingApplication = await tx.application.findUnique({
           where: {
             jobId_candidateId: {
@@ -598,12 +626,15 @@ export const submitPublicUniversalForm = async (req: Request, res: Response, nex
         });
 
         if (!existingApplication) {
+          const appCode = await generateApplicationCode(tx);
           application = await tx.application.create({
             data: {
+              applicationCode: appCode,
               candidateId: candidate.id,
               jobId: targetJob.id,
               recruiterId: recruiter?.id || null,
               stage: 'APPLIED',
+              status: 'Submitted',
               timeline: [{
                 stage: 'APPLIED',
                 at: new Date().toISOString(),
@@ -622,13 +653,15 @@ export const submitPublicUniversalForm = async (req: Request, res: Response, nex
           userId: recruiter?.id || null,
           recruiterId: recruiter?.id || null,
           applicationId: application?.id || null,
-          jobId: targetJob?.id || null,
+          jobId: isJobActive && targetJob ? targetJob.id : null,
           action: 'PUBLIC_FORM_SUBMITTED',
-          notes: String(body.feedback || body.notes || '').trim() || null,
+          notes: String(body.feedback || body.notes || jobNotice || '').trim() || null,
           metadata: {
             formSlug: form.slug,
-            recruiterRef: recruiter?.recruiterId || null,
-            jobTitle: targetJob?.title || null,
+            recruiterRef: recruiter?.recruiterId || recruiterRef || null,
+            jobTitle: targetJob?.title || body.jobTitle || body.targetJobTitle || null,
+            rawJobId: rawJobId || null,
+            jobNotice: jobNotice || null,
             source: 'UNIVERSAL_PUBLIC_FORM',
           },
         },
@@ -640,8 +673,10 @@ export const submitPublicUniversalForm = async (req: Request, res: Response, nex
           candidateId: candidate.id,
           payload: {
             ...body,
-            recruiterRef: recruiter?.recruiterId || body.recruiterRef || null,
-            jobId: targetJob?.id || null,
+            recruiterRef: recruiter?.recruiterId || recruiterRef || null,
+            jobId: targetJob?.id || rawJobId || null,
+            jobTitle: targetJob?.title || body.jobTitle || body.targetJobTitle || null,
+            jobNotice: jobNotice || null,
             resumeFileName: uploadResult?.key || req.file?.originalname || null,
           },
           resumeUrl: uploadResult?.fileUrl || null,
@@ -652,6 +687,7 @@ export const submitPublicUniversalForm = async (req: Request, res: Response, nex
       return { candidate, submission, application, activity };
     });
 
+    // 5. Post-Submission Notification (Safe)
     try {
       const adminUsers = await prisma.user.findMany({
         where: {
@@ -699,6 +735,7 @@ export const submitPublicUniversalForm = async (req: Request, res: Response, nex
           ? { id: targetJob.id, title: targetJob.title }
           : null,
         formSlug: form.slug,
+        jobNotice: jobNotice || undefined,
       },
       form.successMessage || 'Your candidate profile has been submitted successfully.',
       201
@@ -708,6 +745,11 @@ export const submitPublicUniversalForm = async (req: Request, res: Response, nex
       sendError(res, 'A candidate with these details already exists. Please verify your email and phone number.', 409);
       return;
     }
+    console.error('[UNIVERSAL FORM SUBMIT ERROR]:', {
+      name: err?.name,
+      code: err?.code,
+      message: err?.message,
+    });
     next(err);
   }
 };
