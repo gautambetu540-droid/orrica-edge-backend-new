@@ -172,6 +172,17 @@ const createCandidateSchema = z.object({
 
 const updateCandidateSchema = createCandidateSchema.partial().extend({
   candidateCode: z.string().optional(),
+  clientName: z.string().trim().max(160).optional(),
+  clientId: z.string().optional().nullable(),
+  selectionDate: safeDate,
+  selectedAt: safeDate,
+  actualJoiningStatus: z.string().trim().max(64).optional(),
+  lastWorkingDate: safeDate,
+  totalWorkingDays: z.coerce.number().nullable().optional(),
+  remarks: z.string().max(10000).optional(),
+  assignedRecruiters: z.any().optional(),
+  assignedRecruiterIds: z.array(z.string()).optional(),
+  assignedRecruiterName: z.string().optional(),
 });
 
 const parseDate = (value: unknown): Date | undefined => {
@@ -1291,7 +1302,140 @@ export const updateCandidate = async (req: Request, res: Response, next: NextFun
     }
 
     const nextStatus = data.status !== undefined ? normalizeCandidateStatus(data.status) : undefined;
-    const { rescheduleReason, ...candidateData } = data;
+    const {
+      rescheduleReason,
+      recruiterRemarks,
+      assignedRecruiterId,
+      jobId,
+      targetJobId,
+      clientName,
+      clientId,
+      selectionDate,
+      selectedAt,
+      actualJoiningStatus,
+      lastWorkingDate,
+      totalWorkingDays,
+      assignedRecruiters,
+      assignedRecruiterIds,
+      assignedRecruiterName,
+      remarks,
+      ...rawCandidateData
+    } = data as any;
+
+    // Whitelist valid Prisma columns on model Candidate to prevent PrismaClientValidationError (HTTP 500)
+    const allowedCandidateFields = new Set([
+      'name',
+      'fullName',
+      'email',
+      'phone',
+      'fatherName',
+      'dateOfBirth',
+      'gender',
+      'currentLocation',
+      'location',
+      'preferredLocation',
+      'totalExperience',
+      'relevantExperience',
+      'experienceYears',
+      'highestQualification',
+      'education',
+      'currentCompany',
+      'currentDesignation',
+      'previousCompany',
+      'noticePeriod',
+      'noticePeriodDays',
+      'currentSalary',
+      'expectedSalary',
+      'currentCtc',
+      'expectedCtc',
+      'skills',
+      'languages',
+      'resumeUrl',
+      'resumeText',
+      'source',
+      'tags',
+      'notes',
+      'feedback',
+      'dateOfJoin',
+      'walkInStatus',
+      'walkInResponse',
+      'walkInDate',
+      'walkInTime',
+      'followUpAt',
+      'followUpCompletedAt',
+      'rescheduleCount',
+      'status',
+      'nextActionDate',
+      'nextActionType',
+      'nextActionRemarks',
+      'sourcingRecruiterId',
+      'teamLeaderId',
+      'ownerRecruiterId',
+      'createdById',
+      'isArchived',
+      'archivedAt',
+      'archivedById',
+      'archiveReason',
+      'previousStatus',
+    ]);
+
+    const candidateData: Record<string, any> = {};
+    for (const [key, val] of Object.entries(rawCandidateData)) {
+      if (allowedCandidateFields.has(key) && val !== undefined) {
+        candidateData[key] = val;
+      }
+    }
+
+    // Safely map recruiter remarks to feedback and notes columns
+    const finalRemarks = String(recruiterRemarks || remarks || '').trim();
+    if (finalRemarks) {
+      if (!candidateData.feedback) candidateData.feedback = finalRemarks;
+      if (!candidateData.notes) candidateData.notes = finalRemarks;
+    }
+
+    // Safely map recruiter assignment
+    const targetRecruiterId = candidateData.ownerRecruiterId || assignedRecruiterId;
+    if (targetRecruiterId && typeof targetRecruiterId === 'string') {
+      const recUser = await prisma.user.findFirst({
+        where: { id: targetRecruiterId },
+        select: { id: true },
+      });
+      if (recUser) {
+        candidateData.ownerRecruiterId = recUser.id;
+      }
+    }
+
+    // Persist selection details, client, and multi-recruiter IDs into tags
+    let updatedTags = Array.isArray(candidateData.tags)
+      ? [...candidateData.tags]
+      : Array.isArray(existing.tags)
+      ? [...existing.tags]
+      : [];
+
+    if (clientName) {
+      updatedTags = updatedTags.filter((t: string) => !t.startsWith('client:'));
+      updatedTags.push(`client:${clientName}`);
+    }
+    if (selectionDate) {
+      const sDateStr = selectionDate instanceof Date ? selectionDate.toISOString().split('T')[0] : String(selectionDate).split('T')[0];
+      updatedTags = updatedTags.filter((t: string) => !t.startsWith('selectionDate:'));
+      updatedTags.push(`selectionDate:${sDateStr}`);
+    }
+    if (actualJoiningStatus) {
+      updatedTags = updatedTags.filter((t: string) => !t.startsWith('actualJoiningStatus:'));
+      updatedTags.push(`actualJoiningStatus:${actualJoiningStatus}`);
+    }
+    if (lastWorkingDate) {
+      const lDateStr = lastWorkingDate instanceof Date ? lastWorkingDate.toISOString().split('T')[0] : String(lastWorkingDate).split('T')[0];
+      updatedTags = updatedTags.filter((t: string) => !t.startsWith('lastWorkingDate:'));
+      updatedTags.push(`lastWorkingDate:${lDateStr}`);
+    }
+    if (Array.isArray(assignedRecruiterIds) && assignedRecruiterIds.length > 0) {
+      updatedTags = updatedTags.filter((t: string) => !t.startsWith('assignedRecruiters:'));
+      updatedTags.push(`assignedRecruiters:${assignedRecruiterIds.join(',')}`);
+    }
+    candidateData.tags = updatedTags;
+
     const walkInWasRescheduled =
       existing.walkInDate !== null &&
       ((data.walkInDate != null && data.walkInDate.getTime() !== existing.walkInDate.getTime()) ||
