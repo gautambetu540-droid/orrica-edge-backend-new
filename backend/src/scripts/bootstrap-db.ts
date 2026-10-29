@@ -92,13 +92,26 @@ export const ensureDatabaseSchema = async () => {
       ADD COLUMN IF NOT EXISTS "archivedAt" TIMESTAMP(3),
       ADD COLUMN IF NOT EXISTS "archivedById" TEXT,
       ADD COLUMN IF NOT EXISTS "archiveReason" TEXT,
-      ADD COLUMN IF NOT EXISTS "previousStatus" TEXT;
+      ADD COLUMN IF NOT EXISTS "previousStatus" TEXT,
+      ADD COLUMN IF NOT EXISTS "clientId" TEXT,
+      ADD COLUMN IF NOT EXISTS "clientName" TEXT,
+      ADD COLUMN IF NOT EXISTS "selectionDate" TIMESTAMP(3),
+      ADD COLUMN IF NOT EXISTS "actualJoiningStatus" TEXT,
+      ADD COLUMN IF NOT EXISTS "totalWorkingDays" INTEGER,
+      ADD COLUMN IF NOT EXISTS "lastWorkingDate" TIMESTAMP(3),
+      ADD COLUMN IF NOT EXISTS "assignedRecruiterIds" TEXT[] DEFAULT ARRAY[]::TEXT[];
   `, 'Add candidate columns');
 
   await executeSafe(`
     CREATE INDEX IF NOT EXISTS "candidates_isArchived_idx" ON "candidates"("isArchived");
     CREATE INDEX IF NOT EXISTS "candidates_isArchived_archivedAt_idx" ON "candidates"("isArchived", "archivedAt");
   `, 'Index candidate archive columns');
+
+  await executeSafe(`
+    CREATE INDEX IF NOT EXISTS "candidates_clientId_idx" ON "candidates"("clientId");
+    CREATE INDEX IF NOT EXISTS "candidates_actualJoiningStatus_idx" ON "candidates"("actualJoiningStatus");
+    CREATE INDEX IF NOT EXISTS "candidates_selectionDate_idx" ON "candidates"("selectionDate");
+  `, 'Index candidate selection columns');
 
   // Safely migrate candidates.status to TEXT if it is still CandidateStatus enum
   await executeSafe(`

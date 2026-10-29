@@ -1,3 +1,5 @@
+import { computeWorkingDays, normalizeClientName, validateSelectionDates } from '../utils/workingDays';
+import ExcelJS from 'exceljs';
 import * as XLSX from 'xlsx';
 import { Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
@@ -120,7 +122,7 @@ const safeDate = z
 const createCandidateSchema = z.object({
   name: z.string().trim().min(2).max(160).optional(),
   fullName: z.string().trim().min(2).max(160).optional(),
-  email: z.string().trim().email().max(180),
+  email: z.string().trim().email().max(180).optional().or(z.literal('')),
   phone: z.string().trim().min(7).max(30),
   fatherName: z.string().trim().max(160).nullable().optional(),
   dateOfBirth: safeDate,
@@ -242,6 +244,8 @@ const canAccessCandidate = async (req: Request, candidateIdentifier: string): Pr
             { ownerRecruiterId: user.userId },
             { createdById: user.userId },
             { applications: { some: { recruiterId: user.userId } } },
+            { assignedRecruiterIds: { has: user.userId } },
+            { tags: { has: `assignedRecruiter:${user.userId}` } },
           ],
         },
       },
@@ -389,15 +393,56 @@ export const getCandidates = async (req: Request, res: Response, next: NextFunct
     if (to) to.setHours(23, 59, 59, 999);
 
     const andFilters: any[] = [];
+    const SELECTED_STATUSES = ['Selected', 'Joined', 'SELECTED', 'JOINED', 'selected', 'joined'];
+
     const isArchivedRequested = String(archived).toLowerCase() === 'true' || String(archived) === '1';
-    andFilters.push({ isArchived: isArchivedRequested });
+    const isSelectedBucketRequested = String(req.query.selectedBucket).toLowerCase() === 'true';
+
     if (isArchivedRequested) {
+      // 1. ARCHIVE: Archive wins! Shows all candidates with isArchived = true
+      andFilters.push({ isArchived: true });
       const archivedAt = buildDateFilter(parseDate(archivedFrom), parseDate(archivedTo));
       if (archivedAt) andFilters.push({ archivedAt });
       if (previousStatus) andFilters.push({ previousStatus: String(previousStatus) });
-    }
+    } else if (isSelectedBucketRequested) {
+      // 2. SELECTED BUCKET: isArchived is false (or null) AND status in Selected/Joined
+      andFilters.push({
+        OR: [
+          { isArchived: false },
+          { isArchived: null },
+        ],
+      });
+      andFilters.push({
+        status: { in: SELECTED_STATUSES },
+      });
+    } else {
+      // 3. CANDIDATE MASTER DIRECTORY: Single source of truth
+      // MUST show every candidate that is NOT Archived AND NOT Selected!
+      andFilters.push({
+        OR: [
+          { isArchived: false },
+          { isArchived: null },
+        ],
+      });
 
-    if (status) andFilters.push({ status });
+      if (status && status !== 'ALL') {
+        const statusStr = String(status).trim();
+        if (statusStr.includes(',')) {
+          const statuses = statusStr.split(',').map((s) => s.trim()).filter(Boolean);
+          andFilters.push({ status: { in: statuses } });
+        } else {
+          andFilters.push({ status: statusStr });
+        }
+      } else {
+        // Explicit exclusion of Selected/Joined so unknown, legacy, null, and empty statuses NEVER disappear!
+        andFilters.push({
+          OR: [
+            { status: null },
+            { status: { notIn: SELECTED_STATUSES } },
+          ],
+        });
+      }
+    }
     if (location) andFilters.push({ location: { contains: String(location), mode: 'insensitive' } });
     if (skill) andFilters.push({ skills: { has: String(skill) } });
     if (language) andFilters.push({ languages: { has: String(language) } });
@@ -435,6 +480,8 @@ export const getCandidates = async (req: Request, res: Response, next: NextFunct
           { ownerRecruiterId: currentUserId },
           { createdById: currentUserId },
           { applications: { some: { recruiterId: currentUserId } } },
+          { assignedRecruiterIds: { has: currentUserId } },
+          { tags: { has: `assignedRecruiter:${currentUserId}` } },
         ],
       });
     } else if (userRole === 'TEAM_LEADER') {
@@ -450,7 +497,19 @@ export const getCandidates = async (req: Request, res: Response, next: NextFunct
     // Admins and Super Admins have global visibility across all candidates.
 
     const applicationSome: any = {};
-    if (recruiterId) applicationSome.recruiterId = String(recruiterId);
+    if (recruiterId) {
+      const recIdStr = String(recruiterId);
+      andFilters.push({
+        OR: [
+          { ownerRecruiterId: recIdStr },
+          { sourcingRecruiterId: recIdStr },
+          { createdById: recIdStr },
+          { applications: { some: { recruiterId: recIdStr } } },
+          { assignedRecruiterIds: { has: recIdStr } },
+          { tags: { has: `assignedRecruiter:${recIdStr}` } },
+        ],
+      });
+    }
     if (jobId) applicationSome.jobId = String(jobId);
 
     const jobFilter: any = {};
@@ -495,16 +554,27 @@ export const getCandidates = async (req: Request, res: Response, next: NextFunct
 
     if (search) {
       const q = String(search).trim();
+      const phoneDigits = q.replace(/\D/g, '');
+      const searchConditions: any[] = [
+        { candidateCode: { contains: q, mode: 'insensitive' } },
+        { name: { contains: q, mode: 'insensitive' } },
+        { fullName: { contains: q, mode: 'insensitive' } },
+        { email: { contains: q, mode: 'insensitive' } },
+        { phone: { contains: q, mode: 'insensitive' } },
+        { currentCompany: { contains: q, mode: 'insensitive' } },
+        { currentDesignation: { contains: q, mode: 'insensitive' } },
+      ];
+
+      // If search query contains digits, normalize phone number for partial match
+      if (phoneDigits.length >= 4) {
+        searchConditions.push({ phone: { contains: phoneDigits } });
+        if (phoneDigits.length >= 10) {
+          searchConditions.push({ phone: { contains: phoneDigits.slice(-10) } });
+        }
+      }
+
       andFilters.push({
-        OR: [
-          { candidateCode: { contains: q, mode: 'insensitive' } },
-          { name: { contains: q, mode: 'insensitive' } },
-          { fullName: { contains: q, mode: 'insensitive' } },
-          { email: { contains: q, mode: 'insensitive' } },
-          { phone: { contains: q, mode: 'insensitive' } },
-          { currentCompany: { contains: q, mode: 'insensitive' } },
-          { currentDesignation: { contains: q, mode: 'insensitive' } },
-        ],
+        OR: searchConditions,
       });
     }
 
@@ -518,7 +588,7 @@ export const getCandidates = async (req: Request, res: Response, next: NextFunct
         where,
         skip,
         take: limitNum,
-        orderBy: { createdAt: 'desc' },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         include: {
           sourcingRecruiter: {
             select: {
@@ -666,7 +736,7 @@ export const createCandidate = async (req: Request, res: Response, next: NextFun
     const currentUserId = req.user?.userId;
 
     const cleanPhone = data.phone.trim();
-    const cleanEmail = data.email.trim().toLowerCase();
+    const cleanEmail = (data.email && data.email.trim()) ? data.email.trim().toLowerCase() : ('bulk.' + cleanPhone.replace(/\D/g, '') + '@orricaedge.internal');
 
     // 2. Hard server-side duplicate check (Critical Requirement)
     const existingCandidate = await prisma.candidate.findFirst({
@@ -1285,6 +1355,16 @@ export const updateCandidate = async (req: Request, res: Response, next: NextFun
           { candidateCode: identifier },
         ],
       },
+      include: {
+        applications: {
+          include: {
+            job: {
+              include: { client: true },
+            },
+          },
+          orderBy: { appliedDate: 'desc' },
+        },
+      },
     });
 
     if (!existing || !(await canAccessCandidate(req, identifier))) {
@@ -1377,6 +1457,13 @@ export const updateCandidate = async (req: Request, res: Response, next: NextFun
       'archivedById',
       'archiveReason',
       'previousStatus',
+      'clientId',
+      'clientName',
+      'selectionDate',
+      'actualJoiningStatus',
+      'totalWorkingDays',
+      'lastWorkingDate',
+      'assignedRecruiterIds',
     ]);
 
     const candidateData: Record<string, any> = {};
@@ -1405,36 +1492,102 @@ export const updateCandidate = async (req: Request, res: Response, next: NextFun
       }
     }
 
-    // Persist selection details, client, and multi-recruiter IDs into tags
-    let updatedTags = Array.isArray(candidateData.tags)
-      ? [...candidateData.tags]
-      : Array.isArray(existing.tags)
-      ? [...existing.tags]
-      : [];
+    // Selection Workflow Validation & Preparation
+    const isExplicitSelectionWorkflow =
+      selectionDate !== undefined ||
+      selectedAt !== undefined ||
+      actualJoiningStatus !== undefined ||
+      clientName !== undefined ||
+      clientId !== undefined ||
+      (Array.isArray(assignedRecruiterIds) && assignedRecruiterIds.length > 0) ||
+      lastWorkingDate !== undefined;
 
-    if (clientName) {
-      updatedTags = updatedTags.filter((t: string) => !t.startsWith('client:'));
-      updatedTags.push(`client:${clientName}`);
+    const isMovingToSelected = nextStatus === 'Selected' || nextStatus === 'Joined';
+    const isSelectionWorkflow = isExplicitSelectionWorkflow || isMovingToSelected;
+
+    let computedTotalWorkingDays: number | null | undefined = undefined;
+    let resolvedCanonicalClientName: string | null | undefined = undefined;
+    let finalAssignedRecruiterIds: string[] = [];
+    let effectiveSelDate: string | undefined = undefined;
+    let effectiveJoiningStatus: string = 'Selected (Not Joined Yet)';
+
+    if (isSelectionWorkflow) {
+      // 1. Client check & resolution (Keep existing client; default to application client or canonical client if missing)
+      let effectiveClientName = String(clientName || existing.clientName || '').trim();
+      let effectiveClientId = clientId || existing.clientId;
+      if (!effectiveClientName && !effectiveClientId) {
+        if (isMovingToSelected) {
+          const appClient = (existing as any).applications?.[0]?.job?.client?.companyName;
+          effectiveClientName = appClient ? String(appClient).trim() : 'Digitide Solutions';
+        } else {
+          sendError(res, 'Client organization is required.', 400);
+          return;
+        }
+      }
+
+      // 2. Recruiter assignment check & resolution (Keep existing recruiters; default to owner/creator if missing)
+      let effectiveRecruiterIds = Array.isArray(assignedRecruiterIds) && assignedRecruiterIds.length > 0
+        ? assignedRecruiterIds
+        : (existing.assignedRecruiterIds && existing.assignedRecruiterIds.length > 0)
+        ? existing.assignedRecruiterIds
+        : (existing.ownerRecruiterId ? [existing.ownerRecruiterId] : []);
+      if (!effectiveRecruiterIds || effectiveRecruiterIds.length === 0) {
+        if (isMovingToSelected) {
+          const defaultRecruiterId = existing.sourcingRecruiterId || (req.user?.role === 'RECRUITER' || req.user?.role === 'FREELANCE_RECRUITER' ? req.user.userId : null) || existing.id;
+          effectiveRecruiterIds = [defaultRecruiterId];
+        } else {
+          sendError(res, 'At least one assigned recruiter is required.', 400);
+          return;
+        }
+      }
+
+      // 3. Status and Last Working Date check
+      effectiveJoiningStatus = actualJoiningStatus || existing.actualJoiningStatus || (nextStatus === 'Joined' ? 'Joined' : 'Selected (Not Joined Yet)');
+      const effectiveDoj = data.dateOfJoin !== undefined ? data.dateOfJoin : existing.dateOfJoin;
+      const effectiveLwd = lastWorkingDate !== undefined ? lastWorkingDate : existing.lastWorkingDate;
+      const todayIso = new Date().toISOString().split('T')[0];
+      effectiveSelDate = selectionDate || selectedAt || (existing.selectionDate ? String(existing.selectionDate).split('T')[0] : (isMovingToSelected ? todayIso : undefined));
+
+      if (effectiveJoiningStatus === 'Exited' && !effectiveLwd) {
+        sendError(res, 'Last Working Date is required when status is marked as Exited.', 400);
+        return;
+      }
+
+      // 4. Date chronology validation (Requirement D: LWD earlier than DOJ rejected)
+      if (effectiveSelDate || effectiveDoj || effectiveLwd) {
+        const dateValidation = validateSelectionDates({
+          selectionDate: effectiveSelDate,
+          dateOfJoin: effectiveDoj,
+          lastWorkingDate: effectiveLwd,
+        });
+
+        if (!dateValidation.isValid) {
+          sendError(res, dateValidation.error || 'Invalid date selection.', 400);
+          return;
+        }
+      }
+
+      // 5. Compute backend working days (Source of Truth)
+      if (effectiveDoj) {
+        const wdResult = computeWorkingDays(
+          effectiveJoiningStatus,
+          effectiveDoj,
+          effectiveLwd,
+          new Date()
+        );
+        computedTotalWorkingDays = wdResult.totalWorkingDays;
+      } else if (existing.totalWorkingDays !== null && existing.totalWorkingDays !== undefined && !data.dateOfJoin && !lastWorkingDate) {
+        computedTotalWorkingDays = existing.totalWorkingDays;
+      } else {
+        computedTotalWorkingDays = 0;
+      }
+
+      // 6. Normalize Client Name
+      resolvedCanonicalClientName = normalizeClientName(effectiveClientName);
+
+      // 7. De-duplicate recruiter IDs
+      finalAssignedRecruiterIds = Array.from(new Set(effectiveRecruiterIds.filter(Boolean)));
     }
-    if (selectionDate) {
-      const sDateStr = selectionDate instanceof Date ? selectionDate.toISOString().split('T')[0] : String(selectionDate).split('T')[0];
-      updatedTags = updatedTags.filter((t: string) => !t.startsWith('selectionDate:'));
-      updatedTags.push(`selectionDate:${sDateStr}`);
-    }
-    if (actualJoiningStatus) {
-      updatedTags = updatedTags.filter((t: string) => !t.startsWith('actualJoiningStatus:'));
-      updatedTags.push(`actualJoiningStatus:${actualJoiningStatus}`);
-    }
-    if (lastWorkingDate) {
-      const lDateStr = lastWorkingDate instanceof Date ? lastWorkingDate.toISOString().split('T')[0] : String(lastWorkingDate).split('T')[0];
-      updatedTags = updatedTags.filter((t: string) => !t.startsWith('lastWorkingDate:'));
-      updatedTags.push(`lastWorkingDate:${lDateStr}`);
-    }
-    if (Array.isArray(assignedRecruiterIds) && assignedRecruiterIds.length > 0) {
-      updatedTags = updatedTags.filter((t: string) => !t.startsWith('assignedRecruiters:'));
-      updatedTags.push(`assignedRecruiters:${assignedRecruiterIds.join(',')}`);
-    }
-    candidateData.tags = updatedTags;
 
     const walkInWasRescheduled =
       existing.walkInDate !== null &&
@@ -1444,7 +1597,119 @@ export const updateCandidate = async (req: Request, res: Response, next: NextFun
       sendError(res, 'A reason is required when rescheduling a walk-in.', 400);
       return;
     }
+
     const updated = await prisma.$transaction(async (tx) => {
+      if (isSelectionWorkflow && resolvedCanonicalClientName) {
+        let dbClient = await tx.client.findFirst({
+          where: {
+            OR: [
+              { companyName: { equals: resolvedCanonicalClientName, mode: 'insensitive' } },
+              ...(clientId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(clientId) ? [{ id: clientId }] : []),
+            ],
+          },
+        });
+
+        if (!dbClient) {
+          const clientDefaults: Record<string, any> = {
+            'Digitide Solutions': {
+              industry: 'IT Services & Consulting',
+              contactPerson: 'Operations Lead',
+              contactEmail: 'contact@digitidesolutions.com',
+              contactPhone: '+91 98765 43210',
+              location: 'Patna, Bihar, India',
+            },
+            'Radical Minds': {
+              industry: 'BPO / IT Enabled Services',
+              contactPerson: 'Talent Acquisition Lead',
+              contactEmail: 'careers@radicalminds.net',
+              contactPhone: '+91 98765 43211',
+              location: 'Gurugram / Patna, India',
+            },
+          };
+
+          const defaults = clientDefaults[resolvedCanonicalClientName] || {
+            industry: 'Enterprise Technology & Services',
+            contactPerson: 'Corporate Account Manager',
+            contactEmail: `contact@${resolvedCanonicalClientName.toLowerCase().replace(/[^a-z0-9]/g, '')}.com`,
+            contactPhone: '+91 98765 43210',
+            location: 'Corporate HQ',
+          };
+
+          dbClient = await tx.client.create({
+            data: {
+              companyName: resolvedCanonicalClientName,
+              industry: defaults.industry,
+              contactPerson: defaults.contactPerson,
+              contactEmail: defaults.contactEmail,
+              contactPhone: defaults.contactPhone,
+              status: 'ACTIVE',
+              address: defaults.location,
+            },
+          });
+        }
+
+        candidateData.clientId = dbClient.id;
+        candidateData.clientName = resolvedCanonicalClientName;
+      }
+
+      if (isSelectionWorkflow) {
+        if (effectiveSelDate) {
+          candidateData.selectionDate = effectiveSelDate;
+        }
+        candidateData.actualJoiningStatus = effectiveJoiningStatus;
+        if (lastWorkingDate !== undefined || existing.lastWorkingDate) {
+          candidateData.lastWorkingDate = lastWorkingDate !== undefined ? lastWorkingDate : existing.lastWorkingDate;
+        }
+        candidateData.totalWorkingDays = computedTotalWorkingDays !== undefined ? computedTotalWorkingDays : (existing.totalWorkingDays ?? 0);
+        if (finalAssignedRecruiterIds.length > 0) {
+          candidateData.assignedRecruiterIds = finalAssignedRecruiterIds;
+          candidateData.ownerRecruiterId = finalAssignedRecruiterIds[0];
+        }
+
+        // Build clean tags
+        let updatedTags = Array.isArray(candidateData.tags)
+          ? [...candidateData.tags]
+          : Array.isArray(existing.tags)
+          ? [...existing.tags]
+          : [];
+
+        updatedTags = updatedTags.filter((t: string) =>
+          !t.startsWith('client:') &&
+          !t.startsWith('clientId:') &&
+          !t.startsWith('selectionDate:') &&
+          !t.startsWith('actualJoiningStatus:') &&
+          !t.startsWith('lastWorkingDate:') &&
+          !t.startsWith('totalWorkingDays:') &&
+          !t.startsWith('assignedRecruiters:') &&
+          !t.startsWith('assignedRecruiter:')
+        );
+
+        if (resolvedCanonicalClientName) updatedTags.push(`client:${resolvedCanonicalClientName}`);
+        if (candidateData.clientId) updatedTags.push(`clientId:${candidateData.clientId}`);
+        const effectiveSel = candidateData.selectionDate || existing.selectionDate;
+        if (effectiveSel) {
+          const sDateStr = effectiveSel instanceof Date ? effectiveSel.toISOString().split('T')[0] : String(effectiveSel).split('T')[0];
+          updatedTags.push(`selectionDate:${sDateStr}`);
+        }
+        if (candidateData.actualJoiningStatus) {
+          updatedTags.push(`actualJoiningStatus:${candidateData.actualJoiningStatus}`);
+        }
+        if (candidateData.lastWorkingDate) {
+          const lDateStr = candidateData.lastWorkingDate instanceof Date ? candidateData.lastWorkingDate.toISOString().split('T')[0] : String(candidateData.lastWorkingDate).split('T')[0];
+          updatedTags.push(`lastWorkingDate:${lDateStr}`);
+        }
+        if (computedTotalWorkingDays !== null && computedTotalWorkingDays !== undefined) {
+          updatedTags.push(`totalWorkingDays:${computedTotalWorkingDays}`);
+        }
+        if (finalAssignedRecruiterIds.length > 0) {
+          updatedTags.push(`assignedRecruiters:${finalAssignedRecruiterIds.join(',')}`);
+          for (const recId of finalAssignedRecruiterIds) {
+            updatedTags.push(`assignedRecruiter:${recId}`);
+          }
+        }
+        candidateData.tags = updatedTags;
+      }
+
       const candidate = await tx.candidate.update({
         where: { id: existing.id },
         data: {
@@ -2699,22 +2964,141 @@ const sanitizeCellValue = (val: any): string => {
 };
 
 /**
- * Normalizes 10-digit Indian phone number
+ * Canonical 27 Universal Headers for Candidate Bulk Import
  */
-const normalizePhoneNumber = (raw: any): { phone: string; isValid: boolean } => {
-  if (!raw) return { phone: '', isValid: false };
-  let cleaned = String(raw).replace(/\D/g, '');
+export const CANONICAL_BULK_IMPORT_HEADERS = [
+  'Full Name',
+  'Phone',
+  'Email',
+  'Father Name',
+  'Date of Birth (YYYY-MM-DD)',
+  'Gender (Male/Female/Other)',
+  'Current Location',
+  'Preferred Location',
+  'Total Experience (Years)',
+  'Relevant Experience (Years)',
+  'Highest Qualification',
+  'Education',
+  'Current Company',
+  'Current Designation',
+  'Previous Company',
+  'Notice Period',
+  'Notice Period Days',
+  'Current Monthly Salary',
+  'Expected Monthly Salary',
+  'Current CTC',
+  'Expected CTC',
+  'Skills (comma-separated)',
+  'Languages (comma-separated)',
+  'Resume URL',
+  'Source',
+  'Tags (comma-separated)',
+  'Notes',
+] as const;
+
+/**
+ * Normalizes 10-digit Indian phone number and guards against scientific notation corruption
+ */
+export const normalizePhoneNumber = (raw: any): { phone: string; isValid: boolean; error?: string } => {
+  if (!raw) return { phone: '', isValid: false, error: 'Phone number is required.' };
+  const rawStr = String(raw).trim();
+
+  // Guard against scientific notation (e.g. 7.86E+09 or 9.87e+09)
+  if (/[eE]\+?[0-9]/.test(rawStr)) {
+    return {
+      phone: rawStr,
+      isValid: false,
+      error: `Invalid phone number format: scientific notation detected ('${rawStr}'). Ensure Phone column is formatted as Text in Excel.`,
+    };
+  }
+
+  let cleaned = rawStr.replace(/\D/g, '');
   if (cleaned.length === 12 && cleaned.startsWith('91')) {
     cleaned = cleaned.slice(2);
   } else if (cleaned.length === 11 && cleaned.startsWith('0')) {
     cleaned = cleaned.slice(1);
   }
+
   const isValid = /^[6-9]\d{9}$/.test(cleaned);
-  return { phone: cleaned, isValid };
+  return {
+    phone: cleaned,
+    isValid,
+    error: isValid ? undefined : `Invalid phone number '${rawStr}'. Must be a valid 10-digit Indian mobile number.`,
+  };
 };
 
 /**
- * Download standard Excel import template
+ * Parses and validates Date of Birth (YYYY-MM-DD or Excel serial, past date, age 18+)
+ */
+export const parseDateOfBirth = (val: any): { date: Date | null; error?: string } => {
+  if (!val) return { date: null };
+  const str = String(val).trim();
+  if (!str) return { date: null };
+
+  let date: Date | null = null;
+
+  // Check for Excel serial number (typically 10000 - 60000)
+  const numVal = Number(str);
+  if (!isNaN(numVal) && numVal > 1000 && numVal < 100000) {
+    const utcDays = numVal - 25569;
+    const utcValue = utcDays * 86400 * 1000;
+    date = new Date(utcValue);
+  } else if (/^\d{2}[-/.]\d{2}[-/.]\d{4}$/.test(str)) {
+    // DD-MM-YYYY format
+    const parts = str.split(/[-/.]/);
+    const day = parseInt(parts[0], 10);
+    const month = parseInt(parts[1], 10) - 1;
+    const year = parseInt(parts[2], 10);
+    date = new Date(Date.UTC(year, month, day));
+  } else if (/^\d{4}[-/.]\d{2}[-/.]\d{2}$/.test(str)) {
+    // YYYY-MM-DD format
+    const parts = str.split(/[-/.]/);
+    const year = parseInt(parts[0], 10);
+    const month = parseInt(parts[1], 10) - 1;
+    const day = parseInt(parts[2], 10);
+    date = new Date(Date.UTC(year, month, day));
+  } else {
+    date = new Date(str);
+  }
+
+  if (!date || isNaN(date.getTime())) {
+    return { date: null, error: `Invalid Date of Birth format '${str}'. Use YYYY-MM-DD.` };
+  }
+
+  const now = new Date();
+  if (date > now) {
+    return { date: null, error: 'Date of Birth cannot be in the future.' };
+  }
+
+  // Age 18+ verification
+  const ageYears = (now.getTime() - date.getTime()) / (365.25 * 24 * 60 * 60 * 1000);
+  if (ageYears < 18) {
+    return { date: null, error: 'Candidate must be at least 18 years old.' };
+  }
+
+  return { date };
+};
+
+/**
+ * Normalizes Gender (case-insensitive Male/Female/Other, accepts M/F/O variants)
+ */
+export const parseGender = (val: any): { gender: 'MALE' | 'FEMALE' | 'OTHER' | null; error?: string } => {
+  if (!val) return { gender: null };
+  const raw = String(val).trim().toUpperCase();
+  if (!raw) return { gender: null };
+
+  if (['MALE', 'M', 'MAN'].includes(raw)) return { gender: 'MALE' };
+  if (['FEMALE', 'F', 'WOMAN'].includes(raw)) return { gender: 'FEMALE' };
+  if (['OTHER', 'O', 'NON-BINARY'].includes(raw)) return { gender: 'OTHER' };
+
+  return {
+    gender: null,
+    error: `Invalid Gender '${val}'. Allowed values: Male, Female, Other.`,
+  };
+};
+
+/**
+ * Download standard Excel (.xlsx) or CSV import template with true Excel data validation dropdown
  * GET /api/v1/candidates/template/download
  */
 export const downloadCandidateImportTemplate = async (
@@ -2723,79 +3107,213 @@ export const downloadCandidateImportTemplate = async (
   next: NextFunction
 ): Promise<void> => {
   try {
-    const headers = [
-      'Full Name',
-      'Phone',
-      'Email',
-      'Father Name',
-      'Date of Birth (YYYY-MM-DD)',
-      'Gender (Male/Female/Other)',
-      'Current Location',
-      'Preferred Location',
-      'Total Experience (Years)',
-      'Relevant Experience (Years)',
-      'Highest Qualification',
-      'Education',
-      'Current Company',
-      'Current Designation',
-      'Previous Company',
-      'Notice Period',
-      'Notice Period Days',
-      'Current Monthly Salary',
-      'Expected Monthly Salary',
-      'Current CTC',
-      'Expected CTC',
-      'Skills (comma-separated)',
-      'Languages (comma-separated)',
-      'Resume URL',
-      'Source',
-      'Tags (comma-separated)',
-      'Notes'
+    const isCsv = req.query.format === 'csv';
+
+    const sampleRowData = {
+      'Full Name': 'Aarav Sharma (Example Row - DO NOT EDIT)',
+      'Phone': '9876543210',
+      'Email': 'aarav.sharma@example.com',
+      'Father Name': 'Rajesh Sharma',
+      'Date of Birth (YYYY-MM-DD)': '1996-05-15',
+      'Gender (Male/Female/Other)': 'Male',
+      'Current Location': 'Bengaluru, Karnataka',
+      'Preferred Location': 'Bengaluru, Hyderabad',
+      'Total Experience (Years)': '4.5',
+      'Relevant Experience (Years)': '3.5',
+      'Highest Qualification': 'B.Tech in Computer Science',
+      'Education': 'B.Tech',
+      'Current Company': 'Infosys Ltd',
+      'Current Designation': 'Senior Software Engineer',
+      'Previous Company': 'TCS',
+      'Notice Period': '30 Days',
+      'Notice Period Days': '30',
+      'Current Monthly Salary': '65000',
+      'Expected Monthly Salary': '85000',
+      'Current CTC': '780000',
+      'Expected CTC': '1020000',
+      'Skills (comma-separated)': 'React, TypeScript, Node.js',
+      'Languages (comma-separated)': 'English, Hindi',
+      'Resume URL': 'https://example.com/resumes/aarav.pdf',
+      'Source': 'Bulk Import',
+      'Tags (comma-separated)': 'Frontend, Immediate Joiner',
+      'Notes': 'Cleared technical round with strong coding assessment.',
+    };
+
+    if (isCsv) {
+      const headers = [...CANONICAL_BULK_IMPORT_HEADERS];
+      const row = headers.map(h => `"${(sampleRowData as any)[h] || ''}"`);
+      const csvContent = [headers.join(','), row.join(',')].join('\n');
+
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', 'attachment; filename="Orrica_Edge_Candidate_Import_Template.csv"');
+      res.send(csvContent);
+      return;
+    }
+
+    // Build real Excel (.xlsx) using ExcelJS
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = 'Orrica Edge LLP ATS';
+    workbook.created = new Date();
+    workbook.modified = new Date();
+
+    // Sheet 1: Candidates
+    const candidatesSheet = workbook.addWorksheet('Candidates', {
+      views: [{ state: 'frozen', ySplit: 1 }],
+    });
+
+    candidatesSheet.columns = [
+      { header: 'Full Name', key: 'fullName', width: 26 },
+      { header: 'Phone', key: 'phone', width: 18, style: { numFmt: '@' } }, // Phone column as Text
+      { header: 'Email', key: 'email', width: 30 },
+      { header: 'Father Name', key: 'fatherName', width: 22 },
+      { header: 'Date of Birth (YYYY-MM-DD)', key: 'dateOfBirth', width: 26 },
+      { header: 'Gender (Male/Female/Other)', key: 'gender', width: 26 },
+      { header: 'Current Location', key: 'currentLocation', width: 24 },
+      { header: 'Preferred Location', key: 'preferredLocation', width: 24 },
+      { header: 'Total Experience (Years)', key: 'totalExperience', width: 24 },
+      { header: 'Relevant Experience (Years)', key: 'relevantExperience', width: 24 },
+      { header: 'Highest Qualification', key: 'highestQualification', width: 24 },
+      { header: 'Education', key: 'education', width: 22 },
+      { header: 'Current Company', key: 'currentCompany', width: 24 },
+      { header: 'Current Designation', key: 'currentDesignation', width: 24 },
+      { header: 'Previous Company', key: 'previousCompany', width: 24 },
+      { header: 'Notice Period', key: 'noticePeriod', width: 20 },
+      { header: 'Notice Period Days', key: 'noticePeriodDays', width: 20 },
+      { header: 'Current Monthly Salary', key: 'currentSalary', width: 22 },
+      { header: 'Expected Monthly Salary', key: 'expectedSalary', width: 22 },
+      { header: 'Current CTC', key: 'currentCtc', width: 20 },
+      { header: 'Expected CTC', key: 'expectedCtc', width: 20 },
+      { header: 'Skills (comma-separated)', key: 'skills', width: 32 },
+      { header: 'Languages (comma-separated)', key: 'languages', width: 26 },
+      { header: 'Resume URL', key: 'resumeUrl', width: 34 },
+      { header: 'Source', key: 'source', width: 20 },
+      { header: 'Tags (comma-separated)', key: 'tags', width: 26 },
+      { header: 'Notes', key: 'notes', width: 38 },
     ];
 
-    const sampleRow = [
-      'Aarav Sharma',
-      '9876543210',
-      'aarav.sharma@example.com',
-      'Rajesh Sharma',
-      '1996-05-15',
-      'Male',
-      'Bengaluru, Karnataka',
-      'Bengaluru, Hyderabad',
-      '3.5',
-      '3.0',
-      'B.Tech in Computer Science',
-      'B.Tech',
-      'Infosys Ltd',
-      'Software Engineer',
-      'TCS',
-      '30 Days',
-      '30',
-      '65000',
-      '85000',
-      '780000',
-      '1020000',
-      'React, TypeScript, Node.js',
-      'English, Hindi',
-      'https://example.com/resumes/aarav.pdf',
-      'Excel Bulk Import',
-      'Frontend, Verified',
-      'Immediate joiner with hands-on enterprise experience.'
+    // Style Header Row (Bold, Slate Background, White Text)
+    const headerRow = candidatesSheet.getRow(1);
+    headerRow.height = 28;
+    headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    headerRow.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FF1E293B' },
+    };
+    headerRow.alignment = { vertical: 'middle', horizontal: 'center' };
+
+    // Add Clearly Marked Example Row (Row 2)
+    const exampleRow = candidatesSheet.addRow({
+      fullName: 'Aarav Sharma (Example Row - DO NOT EDIT)',
+      phone: '9876543210',
+      email: 'aarav.sharma@example.com',
+      fatherName: 'Rajesh Sharma',
+      dateOfBirth: '1996-05-15',
+      gender: 'Male',
+      currentLocation: 'Bengaluru, Karnataka',
+      preferredLocation: 'Bengaluru, Hyderabad',
+      totalExperience: '4.5',
+      relevantExperience: '3.5',
+      highestQualification: 'B.Tech in Computer Science',
+      education: 'B.Tech',
+      currentCompany: 'Infosys Ltd',
+      currentDesignation: 'Senior Software Engineer',
+      previousCompany: 'TCS',
+      noticePeriod: '30 Days',
+      noticePeriodDays: '30',
+      currentSalary: '65000',
+      expectedSalary: '85000',
+      currentCtc: '780000',
+      expectedCtc: '1020000',
+      skills: 'React, TypeScript, Node.js',
+      languages: 'English, Hindi',
+      resumeUrl: 'https://example.com/resumes/aarav.pdf',
+      source: 'Bulk Import',
+      tags: 'Frontend, Immediate Joiner',
+      notes: 'Cleared technical round with strong coding assessment.',
+    });
+    exampleRow.font = { italic: true, color: { argb: 'FF475569' } };
+
+    // Gender column Data Validation Dropdown for rows 2 to 5000 (Column F is index 6)
+    (candidatesSheet as any).dataValidations.add('F2:F5000', {
+      type: 'list',
+      allowBlank: true,
+      formulae: ['"Male,Female,Other"'],
+      showErrorMessage: true,
+      errorStyle: 'stop',
+      errorTitle: 'Invalid Gender',
+      error: 'Please select Male, Female, or Other from the dropdown list.',
+      showInputMessage: true,
+      promptTitle: 'Gender Dropdown',
+      prompt: 'Select Gender: Male, Female, or Other',
+    });
+
+    // DOB column input message hint (Column E is index 5)
+    (candidatesSheet as any).dataValidations.add('E2:E5000', {
+      type: 'custom',
+      allowBlank: true,
+      formulae: ['ISNUMBER(E2)'],
+      showInputMessage: true,
+      promptTitle: 'DOB Format (YYYY-MM-DD)',
+      prompt: 'Enter date in ISO format YYYY-MM-DD (e.g. 1996-05-15). Age must be 18+.',
+    });
+
+    // Sheet 2: Instructions
+    const instructionsSheet = workbook.addWorksheet('Instructions');
+    instructionsSheet.columns = [
+      { header: 'Column Name', key: 'column', width: 28 },
+      { header: 'Mandatory?', key: 'required', width: 16 },
+      { header: 'Allowed Format / Values', key: 'format', width: 40 },
+      { header: 'Example', key: 'example', width: 35 },
+      { header: 'Important Instructions', key: 'notes', width: 50 },
     ];
 
-    const ws = XLSX.utils.aoa_to_sheet([headers, sampleRow]);
-    
-    // Set column widths for comfortable reading
-    ws['!cols'] = headers.map(() => ({ wch: 22 }));
+    const instHeaderRow = instructionsSheet.getRow(1);
+    instHeaderRow.height = 26;
+    instHeaderRow.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    instHeaderRow.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FF2563EB' },
+    };
 
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Candidate Import Template');
+    const instructionsData = [
+      { column: 'Full Name', required: 'YES', format: 'Text (up to 150 chars)', example: 'Aarav Sharma', notes: 'Required field. Candidate legal name.' },
+      { column: 'Phone', required: 'YES', format: '10-digit Indian Mobile', example: '9876543210', notes: 'Must start with 6, 7, 8, or 9. Formatted as Text.' },
+      { column: 'Email', required: 'Optional', format: 'Valid Email address', example: 'aarav@example.com', notes: 'Lowercased automatically. Deduplicated if present.' },
+      { column: 'Father Name', required: 'Optional', format: 'Text', example: 'Rajesh Sharma', notes: 'Father or Guardian name.' },
+      { column: 'Date of Birth (YYYY-MM-DD)', required: 'Optional', format: 'ISO YYYY-MM-DD', example: '1996-05-15', notes: 'Must be a past date. Age must be at least 18.' },
+      { column: 'Gender (Male/Female/Other)', required: 'Optional', format: 'Male, Female, or Other', example: 'Male', notes: 'Select from dropdown in Column F.' },
+      { column: 'Current Location', required: 'Optional', format: 'City, State', example: 'Bengaluru, Karnataka', notes: 'Current residential location.' },
+      { column: 'Preferred Location', required: 'Optional', format: 'City or Region', example: 'Hyderabad, Bengaluru', notes: 'Preferred work city.' },
+      { column: 'Total Experience (Years)', required: 'Optional', format: 'Decimal number (e.g. 4.5)', example: '4.5', notes: 'Total professional experience in years.' },
+      { column: 'Relevant Experience (Years)', required: 'Optional', format: 'Decimal number (e.g. 3.0)', example: '3.0', notes: 'Cannot exceed Total Experience.' },
+      { column: 'Highest Qualification', required: 'Optional', format: 'Degree / Diploma', example: 'B.Tech in Computer Science', notes: 'Highest completed degree.' },
+      { column: 'Education', required: 'Optional', format: 'Level (B.Tech, MBA, etc.)', example: 'B.Tech', notes: 'Educational level.' },
+      { column: 'Current Company', required: 'Optional', format: 'Company Name', example: 'Infosys Ltd', notes: 'Present employer.' },
+      { column: 'Current Designation', required: 'Optional', format: 'Job Title', example: 'Senior Software Engineer', notes: 'Present designation.' },
+      { column: 'Previous Company', required: 'Optional', format: 'Company Name', example: 'TCS', notes: 'Prior employer.' },
+      { column: 'Notice Period', required: 'Optional', format: 'Text (e.g. 30 Days)', example: '30 Days', notes: 'Notice period description.' },
+      { column: 'Notice Period Days', required: 'Optional', format: 'Integer (0 to 180)', example: '30', notes: 'Days between 0 and 180.' },
+      { column: 'Current Monthly Salary', required: 'Optional', format: 'INR Monthly', example: '65000', notes: 'Monthly in-hand salary.' },
+      { column: 'Expected Monthly Salary', required: 'Optional', format: 'INR Monthly', example: '85000', notes: 'Expected monthly compensation.' },
+      { column: 'Current CTC', required: 'Optional', format: 'INR Annual', example: '780000', notes: 'Annual cost to company.' },
+      { column: 'Expected CTC', required: 'Optional', format: 'INR Annual', example: '1020000', notes: 'Expected annual CTC.' },
+      { column: 'Skills (comma-separated)', required: 'Optional', format: 'Comma-separated skills', example: 'React, TypeScript, Node.js', notes: 'Cleaned and deduplicated.' },
+      { column: 'Languages (comma-separated)', required: 'Optional', format: 'Comma-separated languages', example: 'English, Hindi', notes: 'Languages spoken.' },
+      { column: 'Resume URL', required: 'Optional', format: 'Valid URL (http/https)', example: 'https://example.com/cv.pdf', notes: 'Direct link to resume document.' },
+      { column: 'Source', required: 'Optional', format: 'Sourcing Channel', example: 'Bulk Import', notes: 'Defaults to Bulk Import.' },
+      { column: 'Tags (comma-separated)', required: 'Optional', format: 'Comma-separated tags', example: 'Frontend, Verified', notes: 'Categorization tags.' },
+      { column: 'Notes', required: 'Optional', format: 'Free text notes', example: 'Candidate ready for immediate onboarding.', notes: 'Screening or interview notes.' },
+    ];
 
-    const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+    instructionsData.forEach(row => instructionsSheet.addRow(row));
+
+    const buffer = await workbook.xlsx.writeBuffer();
 
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', 'attachment; filename="Orrica_Edge_Candidate_Import_Template.xlsx"');
-    res.setHeader('Content-Length', buffer.length.toString());
+    res.setHeader('Content-Length', buffer.byteLength.toString());
     res.end(buffer);
   } catch (err) {
     next(err);
@@ -2805,6 +3323,7 @@ export const downloadCandidateImportTemplate = async (
 /**
  * Bulk Candidate Import from Excel/CSV
  * POST /api/v1/candidates/bulk-import
+ * POST /api/v1/candidates/bulk-import-validate
  */
 export const bulkImportCandidates = async (
   req: Request,
@@ -2818,10 +3337,27 @@ export const bulkImportCandidates = async (
       return;
     }
 
+    // 5MB file size limit enforcement
+    const MAX_FILE_SIZE = 5 * 1024 * 1024;
+    if (file.size > MAX_FILE_SIZE) {
+      sendError(res, 'File size exceeds the 5MB limit. Please upload a smaller file.', 400);
+      return;
+    }
+
     const isDryRun = req.body?.dryRun === true || req.body?.dryRun === 'true' || req.query?.dryRun === 'true';
-    const defaultSource = sanitizeCellValue(req.body?.source || 'Bulk Excel Import');
-    const assignedRecruiterId = req.body?.assignedRecruiterId ? String(req.body.assignedRecruiterId).trim() : null;
+    const defaultSource = sanitizeCellValue(req.body?.source || 'Bulk Import');
+    const userRole = (req.user as any)?.role;
+    const isRecruiter = userRole === 'RECRUITER' || userRole === 'FREELANCE_RECRUITER';
     const currentUserId = (req.user as any)?.id || null;
+
+    // Recruiter role ownership backend enforcement:
+    // If recruiter imports, every candidate is strictly owned by the logged-in recruiter
+    let targetRecruiterId: string | null = null;
+    if (isRecruiter) {
+      targetRecruiterId = currentUserId;
+    } else if (req.body?.assignedRecruiterId) {
+      targetRecruiterId = String(req.body.assignedRecruiterId).trim() || null;
+    }
 
     // 1. Parse spreadsheet safely (disable formula execution)
     let workbook: XLSX.WorkBook;
@@ -2854,13 +3390,30 @@ export const bulkImportCandidates = async (
       return;
     }
 
-    const MAX_ROW_LIMIT = 5000;
+    // Maximum 2,000 rows limit enforcement
+    const MAX_ROW_LIMIT = 2000;
     if (rawRows.length > MAX_ROW_LIMIT) {
       sendError(res, `Spreadsheet exceeds maximum allowed limit of ${MAX_ROW_LIMIT} rows per import batch.`, 400);
       return;
     }
 
-    // 2. Normalization map for headers
+    // 2. Validate sheet headers against canonical format
+    const firstRowKeys = Object.keys(rawRows[0] || {});
+    const normalizedSheetHeaders = firstRowKeys.map(k => k.toLowerCase().replace(/[^a-z0-9]/g, ''));
+
+    const hasFullName = normalizedSheetHeaders.some(h => ['fullname', 'name', 'candidatename'].includes(h));
+    const hasPhone = normalizedSheetHeaders.some(h => ['phone', 'mobile', 'phonenumber', 'contact', 'mobilenumber', 'contactnumber'].includes(h));
+
+    if (!hasFullName || !hasPhone) {
+      sendError(
+        res,
+        "Spreadsheet headers do not match template: Required columns 'Full Name' and 'Phone' were not found. Please use the standard template.",
+        400
+      );
+      return;
+    }
+
+    // Normalization map for headers
     const normalizeKey = (key: string): string => {
       const lower = key.toLowerCase().replace(/[^a-z0-9]/g, '');
       if (['fullname', 'name', 'candidatename'].includes(lower)) return 'fullName';
@@ -2890,11 +3443,9 @@ export const bulkImportCandidates = async (
       if (['source', 'sourcingchannel'].includes(lower)) return 'source';
       if (['tags', 'tag'].includes(lower)) return 'tags';
       if (['notes', 'remarks', 'feedback', 'comments'].includes(lower)) return 'notes';
-      if (['candidateid', 'candidatecode', 'candcode', 'candid', 'referenceid'].includes(lower)) return 'candidateCode';
       return lower;
     };
 
-    // 3. First pass: Parse & Validate fields, detect duplicate phones/emails inside sheet
     type ProcessedRow = {
       rowNumber: number;
       data: any;
@@ -2909,7 +3460,6 @@ export const bulkImportCandidates = async (
 
     const candidatePhonesForDbCheck = new Set<string>();
     const candidateEmailsForDbCheck = new Set<string>();
-    const candidateCodesForDbCheck = new Set<string>();
 
     for (let index = 0; index < rawRows.length; index++) {
       const raw = rawRows[index];
@@ -2923,22 +3473,36 @@ export const bulkImportCandidates = async (
         rowNormalized[canonicalKey] = sanitizeCellValue(val);
       }
 
-      const fullName = rowNormalized.fullName || '';
+      const fullName = (rowNormalized.fullName || '').trim();
       const rawPhone = rowNormalized.phone || '';
       const rawEmail = (rowNormalized.email || '').toLowerCase().trim();
 
+      // Skip template example row if user uploaded template without removing row 2
+      if (fullName.includes('(Example Row') || fullName.includes('(EXAMPLE')) {
+        continue;
+      }
+
+      // Required: Full Name
       if (!fullName) {
         errors.push('Full Name is required.');
       }
 
-      const { phone: normalizedPhone, isValid: isPhoneValid } = normalizePhoneNumber(rawPhone);
+      // Required: Phone (normalized 10-digit Indian mobile, scientific notation protected)
+      const { phone: normalizedPhone, isValid: isPhoneValid, error: phoneError } = normalizePhoneNumber(rawPhone);
       if (!isPhoneValid) {
-        errors.push(`Invalid phone number '${rawPhone}'. Must be a valid 10-digit Indian mobile number.`);
+        errors.push(phoneError || `Invalid phone number '${rawPhone}'. Must be a valid 10-digit Indian mobile number.`);
       }
 
+      // Email validation (optional; if present, validate format)
       const emailRegex = /^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i;
-      if (!rawEmail || !emailRegex.test(rawEmail)) {
-        errors.push(`Invalid or missing email address '${rawEmail}'.`);
+      let finalEmail = rawEmail;
+      if (rawEmail) {
+        if (!emailRegex.test(rawEmail)) {
+          errors.push(`Invalid email address '${rawEmail}'.`);
+        }
+      } else if (isPhoneValid) {
+        // Fallback unique email for candidates imported without email
+        finalEmail = `bulk.${normalizedPhone}@orricaedge.internal`;
       }
 
       // Check within-sheet duplicates
@@ -2963,85 +3527,105 @@ export const bulkImportCandidates = async (
         }
       }
 
+      // Gender validation (case-insensitive Male/Female/Other)
+      const { gender: parsedGender, error: genderError } = parseGender(rowNormalized.gender);
+      if (genderError) {
+        errors.push(genderError);
+      }
+
+      // Date of Birth validation (ISO, past date, age 18+)
+      const { date: dobDate, error: dobError } = parseDateOfBirth(rowNormalized.dateOfBirth);
+      if (dobError) {
+        errors.push(dobError);
+      }
+
       // Parse experience and numbers safely
-      const parseDecimal = (val: any, fallback = 0) => {
-        if (!val) return fallback;
+      const parseDecimal = (val: any): number | null => {
+        if (val === undefined || val === null || val === '') return null;
         const num = parseFloat(String(val).replace(/[^0-9.]/g, ''));
-        return isNaN(num) ? fallback : Math.max(0, num);
+        return isNaN(num) ? null : Math.max(0, num);
       };
 
-      const totalExp = parseDecimal(rowNormalized.totalExperience, 0);
-      const relExp = parseDecimal(rowNormalized.relevantExperience, 0);
-      const currSal = rowNormalized.currentSalary ? parseDecimal(rowNormalized.currentSalary) : null;
-      const expSal = rowNormalized.expectedSalary ? parseDecimal(rowNormalized.expectedSalary) : null;
-      const currCtc = rowNormalized.currentCtc ? parseDecimal(rowNormalized.currentCtc) : (currSal ? currSal * 12 : null);
-      const expCtc = rowNormalized.expectedCtc ? parseDecimal(rowNormalized.expectedCtc) : (expSal ? expSal * 12 : null);
+      const totalExp = parseDecimal(rowNormalized.totalExperience) ?? 0;
+      const relExp = parseDecimal(rowNormalized.relevantExperience) ?? 0;
 
-      // Gender normalization
-      let genderVal: 'MALE' | 'FEMALE' | 'OTHER' | null = null;
-      const rawGender = String(rowNormalized.gender || '').toUpperCase();
-      if (['MALE', 'M'].includes(rawGender)) genderVal = 'MALE';
-      else if (['FEMALE', 'F'].includes(rawGender)) genderVal = 'FEMALE';
-      else if (['OTHER', 'O'].includes(rawGender)) genderVal = 'OTHER';
+      if (relExp > totalExp) {
+        errors.push(`Relevant Experience (${relExp} yrs) cannot exceed Total Experience (${totalExp} yrs).`);
+      }
 
-      // Parse arrays (comma-separated)
-      const parseArray = (str: string) => {
+      // Notice period days (integer 0 to 180)
+      let parsedNoticeDays: number | null = null;
+      if (rowNormalized.noticePeriodDays !== undefined && rowNormalized.noticePeriodDays !== '') {
+        const nd = parseInt(String(rowNormalized.noticePeriodDays).trim(), 10);
+        if (isNaN(nd) || nd < 0 || nd > 180) {
+          errors.push(`Notice Period Days must be an integer between 0 and 180.`);
+        } else {
+          parsedNoticeDays = nd;
+        }
+      }
+
+      const currSal = parseDecimal(rowNormalized.currentSalary);
+      const expSal = parseDecimal(rowNormalized.expectedSalary);
+      const currCtc = parseDecimal(rowNormalized.currentCtc) ?? (currSal ? currSal * 12 : null);
+      const expCtc = parseDecimal(rowNormalized.expectedCtc) ?? (expSal ? expSal * 12 : null);
+
+      // Parse arrays (comma-separated, trimmed, deduplicated)
+      const parseArray = (str: string): string[] => {
         if (!str) return [];
-        return str.split(',').map((s) => s.trim()).filter(Boolean);
+        const items = str.split(',').map(s => s.trim()).filter(Boolean);
+        return Array.from(new Set(items));
       };
 
       const skillsArr = parseArray(rowNormalized.skills);
       const languagesArr = parseArray(rowNormalized.languages);
       const tagsArr = parseArray(rowNormalized.tags);
 
-      // Date of birth
-      let dobDate: Date | null = null;
-      if (rowNormalized.dateOfBirth) {
-        const parsedDob = new Date(rowNormalized.dateOfBirth);
-        if (!isNaN(parsedDob.getTime())) {
-          dobDate = parsedDob;
+      // Validate Resume URL
+      let validResumeUrl = '';
+      if (rowNormalized.resumeUrl) {
+        const urlStr = String(rowNormalized.resumeUrl).trim();
+        if (/^https?:\/\/[^\s/$.?#].[^\s]*$/i.test(urlStr)) {
+          validResumeUrl = urlStr;
+        } else {
+          errors.push(`Invalid Resume URL '${urlStr}'. Must start with http:// or https://.`);
         }
       }
 
-      const candidateCodeRef = (rowNormalized.candidateCode || '').trim();
-      if (candidateCodeRef) {
-        candidateCodesForDbCheck.add(candidateCodeRef);
-      }
-
       const candidateData = {
-        candidateCodeRef,
         fullName,
         name: fullName,
         phone: normalizedPhone,
-        email: rawEmail,
-        fatherName: rowNormalized.fatherName || null,
+        email: finalEmail,
+        fatherName: rowNormalized.fatherName ? String(rowNormalized.fatherName).trim() : null,
         dateOfBirth: dobDate,
-        gender: genderVal,
-        currentLocation: rowNormalized.location || '',
-        location: rowNormalized.location || '',
-        preferredLocation: rowNormalized.preferredLocation || null,
+        gender: parsedGender,
+        currentLocation: rowNormalized.location ? String(rowNormalized.location).trim() : '',
+        location: rowNormalized.location ? String(rowNormalized.location).trim() : '',
+        preferredLocation: rowNormalized.preferredLocation ? String(rowNormalized.preferredLocation).trim() : null,
         totalExperience: totalExp,
         relevantExperience: relExp,
         experienceYears: totalExp,
         highestQualification: rowNormalized.highestQualification || rowNormalized.education || null,
         education: rowNormalized.education || rowNormalized.highestQualification || null,
-        currentCompany: rowNormalized.currentCompany || null,
-        currentDesignation: rowNormalized.currentDesignation || null,
-        previousCompany: rowNormalized.previousCompany || null,
-        noticePeriod: rowNormalized.noticePeriod || (rowNormalized.noticePeriodDays ? `${rowNormalized.noticePeriodDays} Days` : null),
-        noticePeriodDays: rowNormalized.noticePeriodDays ? parseInt(rowNormalized.noticePeriodDays, 10) || null : null,
+        currentCompany: rowNormalized.currentCompany ? String(rowNormalized.currentCompany).trim() : null,
+        currentDesignation: rowNormalized.currentDesignation ? String(rowNormalized.currentDesignation).trim() : null,
+        previousCompany: rowNormalized.previousCompany ? String(rowNormalized.previousCompany).trim() : null,
+        noticePeriod: rowNormalized.noticePeriod || (parsedNoticeDays !== null ? `${parsedNoticeDays} Days` : null),
+        noticePeriodDays: parsedNoticeDays,
         currentSalary: currSal,
         expectedSalary: expSal,
         currentCtc: currCtc,
         expectedCtc: expCtc,
-        skills: skillsArr.length > 0 ? skillsArr : [],
+        skills: skillsArr,
         languages: languagesArr.length > 0 ? languagesArr : ['English', 'Hindi'],
-        resumeUrl: rowNormalized.resumeUrl || '',
+        resumeUrl: validResumeUrl,
         source: rowNormalized.source || defaultSource,
         tags: tagsArr,
-        notes: rowNormalized.notes || null,
+        notes: rowNormalized.notes ? String(rowNormalized.notes).trim() : null,
         status: 'New',
-        ownerRecruiterId: assignedRecruiterId,
+        ownerRecruiterId: targetRecruiterId || undefined,
+        assignedRecruiterId: targetRecruiterId || undefined,
+        assignedRecruiterIds: targetRecruiterId ? [targetRecruiterId] : [],
         createdById: currentUserId,
       };
 
@@ -3054,14 +3638,13 @@ export const bulkImportCandidates = async (
       });
     }
 
-    // 4. Second pass: Query existing candidates and perform verified identity matching
+    // 4. Second pass: Query existing candidates to detect duplicates in DB
     const existingDbCandidates = await prisma.candidate.findMany({
       where: {
         OR: [
           { phone: { in: Array.from(candidatePhonesForDbCheck) } },
-          { email: { in: Array.from(candidateEmailsForDbCheck) } },
-          ...(candidateCodesForDbCheck.size > 0
-            ? [{ candidateCode: { in: Array.from(candidateCodesForDbCheck) } }]
+          ...(candidateEmailsForDbCheck.size > 0
+            ? [{ email: { in: Array.from(candidateEmailsForDbCheck) } }]
             : []),
         ],
       },
@@ -3070,28 +3653,24 @@ export const bulkImportCandidates = async (
         candidateCode: true,
         phone: true,
         email: true,
-        status: true,
-        walkInStatus: true,
         fullName: true,
+        name: true,
       },
     });
 
     const phoneToCandidateMap = new Map<string, any>();
     const emailToCandidateMap = new Map<string, any>();
-    const codeToCandidateMap = new Map<string, any>();
 
     for (const ec of existingDbCandidates) {
       if (ec.phone) phoneToCandidateMap.set(ec.phone, ec);
       if (ec.email) emailToCandidateMap.set(ec.email.toLowerCase(), ec);
-      if (ec.candidateCode) codeToCandidateMap.set(ec.candidateCode.toUpperCase(), ec);
     }
 
     const errorReport: { row: number; candidateName: string; phone: string; email: string; reason: string }[] = [];
     const validRowsToInsert: ProcessedRow[] = [];
-    const matchedRowsToUpdate: { row: ProcessedRow; existing: any }[] = [];
     let duplicateSheetCount = 0;
+    let duplicateDbCount = 0;
     let invalidFieldCount = 0;
-    let ambiguousConflictCount = 0;
 
     for (const row of processedRows) {
       if (!row.isValid) {
@@ -3110,77 +3689,70 @@ export const bulkImportCandidates = async (
         continue;
       }
 
-      // Check verified identity matches
+      // Check DB duplicates by phone or email:
+      // STRICT POLICY: SKIP and REPORT; NEVER OVERWRITE existing records
       const matchedByPhone = phoneToCandidateMap.get(row.data.phone);
-      const matchedByEmail = emailToCandidateMap.get(row.data.email);
-      const matchedByCode = row.data.candidateCodeRef
-        ? codeToCandidateMap.get(row.data.candidateCodeRef.toUpperCase())
-        : null;
+      const matchedByEmail = row.data.email ? emailToCandidateMap.get(row.data.email) : null;
+      const matchedExisting = matchedByPhone || matchedByEmail;
 
-      // Identity conflict detection (e.g. Phone belongs to Candidate A, but Email belongs to Candidate B)
-      const matchedCandidates = [matchedByPhone, matchedByEmail, matchedByCode].filter(Boolean);
-      const uniqueMatchedIds = new Set(matchedCandidates.map((c) => c.id));
-
-      if (uniqueMatchedIds.size > 1) {
-        ambiguousConflictCount++;
-        const conflictDesc = `Ambiguous Identity Conflict: Phone matched ${matchedByPhone?.candidateCode || 'N/A'}, Email matched ${matchedByEmail?.candidateCode || 'N/A'}. Manual review required.`;
+      if (matchedExisting) {
+        duplicateDbCount++;
         errorReport.push({
           row: row.rowNumber,
           candidateName: row.data.fullName,
           phone: row.data.phone,
           email: row.data.email,
-          reason: conflictDesc,
+          reason: `Duplicate candidate skipped: ${matchedByPhone ? 'Phone' : 'Email'} already exists in database (matched Candidate: ${matchedExisting.candidateCode} - ${matchedExisting.fullName || matchedExisting.name}).`,
         });
         continue;
       }
 
-      const confidentMatch = matchedCandidates[0] || null;
-
-      if (confidentMatch) {
-        // Match found: Safe non-destructive update while preserving permanent ID and protected statuses
-        matchedRowsToUpdate.push({
-          row,
-          existing: confidentMatch,
-        });
-      } else {
-        // No existing record found: Queue for canonical candidate code allocation & insertion
-        validRowsToInsert.push(row);
-      }
+      // Row is completely valid and not duplicate: ready for atomic insert
+      validRowsToInsert.push(row);
     }
 
-    // 5. If dryRun is requested, return preview analysis without writing to DB
+    const totalDuplicates = duplicateSheetCount + duplicateDbCount;
+
+    // 5. If dryRun is requested (or /bulk-import-validate), return preview analysis without writing to DB
     if (isDryRun) {
-      sendSuccess(res, {
-        isDryRun: true,
-        totalRows: rawRows.length,
-        createdCount: validRowsToInsert.length,
-        updatedCount: matchedRowsToUpdate.length,
-        matchedCount: matchedRowsToUpdate.length,
-        validCount: validRowsToInsert.length + matchedRowsToUpdate.length,
-        duplicateCount: duplicateSheetCount,
-        duplicateSheetCount,
-        conflictCount: ambiguousConflictCount,
-        invalidCount: invalidFieldCount,
-        previewRows: validRowsToInsert.slice(0, 10).map((r) => ({
-          row: r.rowNumber,
-          name: r.data.fullName,
-          phone: r.data.phone,
-          email: r.data.email,
-          location: r.data.location,
-          totalExperience: r.data.totalExperience,
-          currentCompany: r.data.currentCompany,
-        })),
-        errors: errorReport.slice(0, 100),
-      }, 'Spreadsheet validation completed successfully.');
+      sendSuccess(
+        res,
+        {
+          isDryRun: true,
+          totalRows: processedRows.length,
+          validCount: validRowsToInsert.length,
+          createdCount: validRowsToInsert.length,
+          importedCount: validRowsToInsert.length,
+          updatedCount: 0,
+          matchedCount: 0,
+          duplicateCount: totalDuplicates,
+          duplicateSheetCount,
+          duplicateDbCount,
+          skippedCount: totalDuplicates,
+          conflictCount: 0,
+          invalidCount: invalidFieldCount,
+          failedCount: errorReport.length,
+          previewRows: validRowsToInsert.slice(0, 10).map((r) => ({
+            row: r.rowNumber,
+            name: r.data.fullName,
+            phone: r.data.phone,
+            email: r.data.email,
+            location: r.data.location,
+            totalExperience: r.data.totalExperience,
+            currentCompany: r.data.currentCompany,
+            status: 'Valid',
+          })),
+          errors: errorReport.slice(0, 200),
+        },
+        'Spreadsheet validation completed successfully.'
+      );
       return;
     }
 
-    // 6. Execute atomic batch operations in transactions
+    // 6. Execute atomic batch operations in transactions (batches of 50)
     const insertedCodes: string[] = [];
-    const updatedIds: string[] = [];
     const CHUNK_SIZE = 50;
 
-    // A. Insert New Candidates
     if (validRowsToInsert.length > 0) {
       const candidateCodes = await generateCandidateCodesBatch(validRowsToInsert.length);
 
@@ -3192,13 +3764,18 @@ export const bulkImportCandidates = async (
           for (let j = 0; j < chunk.length; j++) {
             const rowItem = chunk[j];
             const code = codesChunk[j];
+            const dataToInsert = rowItem.data;
 
-            const { candidateCodeRef, ...dataToInsert } = rowItem.data;
+            const tagsWithRecruiter = targetRecruiterId
+              ? Array.from(new Set([...dataToInsert.tags, `assignedRecruiter:${targetRecruiterId}`]))
+              : dataToInsert.tags;
+
             const created = await tx.candidate.create({
               data: {
                 ...dataToInsert,
                 candidateCode: code,
-                source: dataToInsert.source || 'Excel Import',
+                tags: tagsWithRecruiter,
+                source: dataToInsert.source || 'Bulk Import',
               },
               select: { id: true, candidateCode: true },
             });
@@ -3213,66 +3790,7 @@ export const bulkImportCandidates = async (
                 userRole: (req.user as any)?.role,
                 action: 'Candidate Imported',
                 newStatus: 'New',
-                remarks: `Candidate profile created (${created.candidateCode}) via Excel Import by ${(req.user as any)?.email || 'Admin'}`,
-                client: tx,
-              });
-            } catch {}
-          }
-        });
-      }
-    }
-
-    // B. Safely Update Matched Candidates (Preserve permanent Candidate ID & protected recruitment statuses)
-    if (matchedRowsToUpdate.length > 0) {
-      for (let i = 0; i < matchedRowsToUpdate.length; i += CHUNK_SIZE) {
-        const chunk = matchedRowsToUpdate.slice(i, i + CHUNK_SIZE);
-
-        await prisma.$transaction(async (tx) => {
-          for (const item of chunk) {
-            const existing = item.existing;
-            const rowData = item.row.data;
-
-            // Protect critical statuses (e.g. REJECTED, CONFIRMED, INTERVIEW_SCHEDULED) from being silently overwritten
-            const isProtectedStatus = [
-              'REJECTED',
-              'CONFIRMED',
-              'INTERVIEW_SCHEDULED',
-              'INTERVIEW SCHEDULED',
-              'SELECTED',
-              'JOINED',
-              'OFFER',
-            ].includes(String(existing.status || '').toUpperCase()) || existing.walkInStatus === 'REJECTED';
-
-            const statusToApply = isProtectedStatus ? existing.status : (rowData.status || existing.status);
-
-            await tx.candidate.update({
-              where: { id: existing.id },
-              data: {
-                currentCompany: rowData.currentCompany || undefined,
-                currentDesignation: rowData.currentDesignation || undefined,
-                previousCompany: rowData.previousCompany || undefined,
-                totalExperience: rowData.totalExperience || undefined,
-                relevantExperience: rowData.relevantExperience || undefined,
-                highestQualification: rowData.highestQualification || undefined,
-                currentSalary: rowData.currentSalary || undefined,
-                expectedSalary: rowData.expectedSalary || undefined,
-                resumeUrl: rowData.resumeUrl || undefined,
-                skills: rowData.skills?.length ? rowData.skills : undefined,
-                status: statusToApply,
-              },
-            });
-
-            updatedIds.push(existing.id);
-
-            try {
-              await logCandidateTimeline({
-                candidateId: existing.id,
-                userId: currentUserId || null,
-                userName: (req.user as any)?.email,
-                userRole: (req.user as any)?.role,
-                action: 'Candidate Details Updated via Excel Import',
-                newStatus: statusToApply,
-                remarks: `Candidate details matched and updated via Excel import. Permanent ID ${existing.candidateCode} preserved.`,
+                remarks: `Candidate profile created (${created.candidateCode}) via Bulk Import by ${(req.user as any)?.email || 'User'}`,
                 client: tx,
               });
             } catch {}
@@ -3290,32 +3808,33 @@ export const bulkImportCandidates = async (
         entity: 'Candidate',
         entityId: `batch-${Date.now()}`,
         newValue: {
-          createdCount: insertedCodes.length,
-          updatedCount: updatedIds.length,
-          matchedCount: matchedRowsToUpdate.length,
-          skippedDuplicates: duplicateSheetCount,
-          ambiguousConflicts: ambiguousConflictCount,
+          importedCount: insertedCodes.length,
+          skippedDuplicates: totalDuplicates,
           invalidRows: invalidFieldCount,
           fileName: file.originalname,
+          role: userRole,
+          ownerRecruiterId: targetRecruiterId,
         },
       });
     } catch {}
 
-    sendSuccess(res, {
-      totalProcessed: rawRows.length,
-      totalRows: rawRows.length,
-      createdCount: insertedCodes.length,
-      importedCount: insertedCodes.length,
-      updatedCount: updatedIds.length,
-      matchedCount: matchedRowsToUpdate.length,
-      duplicateCount: duplicateSheetCount,
-      conflictCount: ambiguousConflictCount,
-      invalidCount: invalidFieldCount,
-      failedCount: errorReport.length,
-      generatedCodes: insertedCodes,
-      errors: errorReport,
-      message: `Bulk candidate import processed: ${insertedCodes.length} created, ${updatedIds.length} matched & updated, ${errorReport.length} skipped/conflicts.`,
-    }, 'Bulk candidate import processed successfully.');
+    sendSuccess(
+      res,
+      {
+        totalProcessed: processedRows.length,
+        totalRows: processedRows.length,
+        createdCount: insertedCodes.length,
+        importedCount: insertedCodes.length,
+        updatedCount: 0,
+        skippedCount: totalDuplicates,
+        duplicateCount: totalDuplicates,
+        failedCount: invalidFieldCount,
+        generatedCodes: insertedCodes,
+        errors: errorReport,
+        message: `Bulk candidate import completed: ${insertedCodes.length} imported, ${totalDuplicates} duplicates skipped, ${invalidFieldCount} invalid rows failed.`,
+      },
+      'Bulk candidate import processed successfully.'
+    );
   } catch (err) {
     next(err);
   }

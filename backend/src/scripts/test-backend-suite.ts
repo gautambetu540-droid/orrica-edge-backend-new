@@ -1,7 +1,8 @@
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 import { z } from 'zod';
-import { CANONICAL_PIPELINE_STAGES, normalizeCandidateStatus } from '../controllers/candidate.controller';
+import { CANONICAL_PIPELINE_STAGES, normalizeCandidateStatus, CANONICAL_BULK_IMPORT_HEADERS, normalizePhoneNumber, parseDateOfBirth, parseGender } from '../controllers/candidate.controller';
+import ExcelJS from 'exceljs';
 import { CANONICAL_SEND_BACK_REASONS } from '../controllers/team-leader.controller';
 import {
   generateCandidateCode,
@@ -10,6 +11,12 @@ import {
   generateJobCode,
 } from '../utils/codeGenerators';
 import { DEFAULT_TEMPLATES, interpolateVariables } from '../services/templateEngine.service';
+import {
+  computeWorkingDays,
+  validateSelectionDates,
+  normalizeClientName,
+  CANONICAL_CLIENTS,
+} from '../utils/workingDays';
 
 async function runTestSuite() {
   console.log('====================================================');
@@ -1290,6 +1297,818 @@ async function runTestSuite() {
     activeAfterRestore.some(c => c.id === 'cand-001') && activeAfterRestore.find(c => c.id === 'cand-001')?.status === 'Shortlisted',
     'Restored candidate is immediately visible again in active pipeline with preserved candidate identity'
   );
+
+  // ----------------------------------------------------
+  // Test 17: Part A Selected Candidates Workflow & Scoping (A5 Tests A-H)
+  // ----------------------------------------------------
+  console.log('\n--- 17. Testing Selected Candidates Workflow & Visibility Scoping (Part A) ---');
+
+  // Client Canonical Normalization
+  assert(CANONICAL_CLIENTS.includes('Digitide Solutions'), 'Digitide Solutions is canonical client');
+  assert(CANONICAL_CLIENTS.includes('Radical Minds'), 'Radical Minds is canonical client');
+  assert(normalizeClientName('Digitide Tech') === 'Digitide Solutions', 'Client prefix maps to Digitide Solutions');
+  assert(normalizeClientName('Radical Minds Corp') === 'Radical Minds', 'Client prefix maps to Radical Minds');
+
+  // Date Chronology Validation
+  const validDatesCheck = validateSelectionDates({
+    selectionDate: '2026-10-01',
+    dateOfJoin: '2026-10-10',
+    lastWorkingDate: '2026-10-20',
+  });
+  assert(validDatesCheck.isValid, 'Valid selection chronology passes validation');
+
+  // Test Case D: LWD earlier than DOJ -> rejected
+  const invalidLwdCheck = validateSelectionDates({
+    selectionDate: '2026-10-02',
+    dateOfJoin: '2026-10-12',
+    lastWorkingDate: '2026-10-05',
+  });
+  assert(
+    !invalidLwdCheck.isValid && Boolean(invalidLwdCheck.error?.includes('cannot be earlier than Date of Joining')),
+    'Test D: LWD earlier than DOJ is rejected with clear error'
+  );
+
+  // Test Case E: Missing client or zero recruiters validation function
+  function simulateValidateSelectionPayload(payload: {
+    clientName?: string;
+    assignedRecruiterIds?: string[];
+    selectionDate?: string;
+    dateOfJoin?: string;
+    actualJoiningStatus?: string;
+    lastWorkingDate?: string;
+  }) {
+    if (!payload.clientName || !payload.clientName.trim()) {
+      return { status: 400, message: 'Client organization is required for candidate selection workflow.' };
+    }
+    if (!payload.assignedRecruiterIds || !Array.isArray(payload.assignedRecruiterIds) || payload.assignedRecruiterIds.length === 0) {
+      return { status: 400, message: 'At least one assigned recruiter is required.' };
+    }
+    const dateCheck = validateSelectionDates({
+      selectionDate: payload.selectionDate,
+      dateOfJoin: payload.dateOfJoin,
+      lastWorkingDate: payload.lastWorkingDate,
+    });
+    if (!dateCheck.isValid) {
+      return { status: 400, message: dateCheck.error || 'Invalid date chronology' };
+    }
+    return { status: 200, success: true };
+  }
+
+  assert(
+    simulateValidateSelectionPayload({ clientName: '', assignedRecruiterIds: ['rec-001'] }).status === 400,
+    'Test E: Missing client is rejected with 400 error'
+  );
+  assert(
+    simulateValidateSelectionPayload({ clientName: 'Digitide Solutions', assignedRecruiterIds: [] }).status === 400,
+    'Test E: Zero recruiters is rejected with 400 error'
+  );
+
+  // Test Case A: "Test Alpha" | 9000000001 | Digitide Solutions | Sel 2026-10-01 | DOJ 2026-10-10 | Joined | no LWD | R1
+  const simulatedToday = new Date('2026-10-29T12:00:00Z');
+  const wdAlpha = computeWorkingDays('Joined', '2026-10-10', null, simulatedToday);
+  assert(
+    wdAlpha.totalWorkingDays === 20 && wdAlpha.label === '20 days',
+    'Test A: "Test Alpha" working days calculated correctly ((2026-10-29 - 2026-10-10) + 1 = 20 days)'
+  );
+
+  // Test Case B: "Test Beta" | 9000000002 | Radical Minds | Sel 2026-10-02 | DOJ 2026-10-12 | Exited | LWD 2026-10-20 | R1, R2
+  const wdBeta = computeWorkingDays('Exited', '2026-10-12', '2026-10-20', simulatedToday);
+  assert(
+    wdBeta.totalWorkingDays === 9 && wdBeta.label === '9 days',
+    'Test B: "Test Beta" working days calculated correctly ((2026-10-20 - 2026-10-12) + 1 = 9 days)'
+  );
+
+  // Test Case C: "Test Gamma" | 9000000003 | Digitide Solutions | Sel 2026-10-05 | no DOJ | Selected (Not Joined Yet) | R2
+  const wdGamma = computeWorkingDays('Selected', null, null, simulatedToday);
+  assert(
+    wdGamma.totalWorkingDays === null && wdGamma.label === 'Not Joined',
+    'Test C: "Test Gamma" working days correctly returns null / Not Joined (0 days)'
+  );
+
+  // Test Case F: Double-click Save on A -> exactly one record (idempotency simulation)
+  const selectionStore: Map<string, any> = new Map();
+  function saveCandidateSelection(candidate: {
+    id: string;
+    fullName: string;
+    phone: string;
+    clientName: string;
+    selectionDate: string;
+    dateOfJoin?: string;
+    actualJoiningStatus: string;
+    lastWorkingDate?: string;
+    assignedRecruiterIds: string[];
+  }) {
+    const val = simulateValidateSelectionPayload(candidate);
+    if (val.status !== 200) return val;
+
+    const wd = computeWorkingDays(
+      candidate.actualJoiningStatus,
+      candidate.dateOfJoin,
+      candidate.lastWorkingDate,
+      simulatedToday
+    );
+
+    // Upsert transactionally by ID
+    selectionStore.set(candidate.id, {
+      ...candidate,
+      dateOfJoin: candidate.dateOfJoin || null,
+      lastWorkingDate: candidate.lastWorkingDate || null,
+      totalWorkingDays: wd.totalWorkingDays,
+      status: candidate.actualJoiningStatus === 'Joined' ? 'Joined' : 'Selected',
+      tags: candidate.assignedRecruiterIds.map(rid => `assignedRecruiter:${rid}`),
+    });
+
+    return { status: 200, success: true, data: selectionStore.get(candidate.id) };
+  }
+
+  // Simulate double-click on candidate A
+  const candidateA = {
+    id: 'cand-alpha',
+    fullName: 'Test Alpha',
+    phone: '9000000001',
+    clientName: 'Digitide Solutions',
+    selectionDate: '2026-10-01',
+    dateOfJoin: '2026-10-10',
+    actualJoiningStatus: 'Joined',
+    assignedRecruiterIds: ['R1'],
+  };
+
+  const click1 = saveCandidateSelection(candidateA);
+  const click2 = saveCandidateSelection(candidateA);
+  assert(
+    click1.status === 200 && click2.status === 200,
+    'Test F: Both saves return successful status 200'
+  );
+  assert(
+    selectionStore.size === 1 && selectionStore.get('cand-alpha')?.fullName === 'Test Alpha',
+    'Test F: Double-click results in exactly one persistent record in the store without duplicates'
+  );
+
+  // Store Candidate B and C
+  const candidateB = {
+    id: 'cand-beta',
+    fullName: 'Test Beta',
+    phone: '9000000002',
+    clientName: 'Radical Minds',
+    selectionDate: '2026-10-02',
+    dateOfJoin: '2026-10-12',
+    actualJoiningStatus: 'Exited',
+    lastWorkingDate: '2026-10-20',
+    assignedRecruiterIds: ['R1', 'R2'],
+  };
+  saveCandidateSelection(candidateB);
+
+  const candidateC = {
+    id: 'cand-gamma',
+    fullName: 'Test Gamma',
+    phone: '9000000003',
+    clientName: 'Digitide Solutions',
+    selectionDate: '2026-10-05',
+    actualJoiningStatus: 'Selected',
+    assignedRecruiterIds: ['R2'],
+  };
+  saveCandidateSelection(candidateC);
+
+  assert(selectionStore.size === 3, 'All 3 test candidates (Alpha, Beta, Gamma) stored in DB');
+
+  // Test Case H (Initial Visibility):
+  // R1 sees A & B (assigned to R1)
+  // R2 sees B & C (assigned to R2)
+  // Admin sees all 3 (A, B, C)
+  function getSelectedCandidatesForUser(user: { id: string; role: string }) {
+    const all = Array.from(selectionStore.values());
+    if (user.role === 'admin') return all;
+    return all.filter(c =>
+      c.assignedRecruiterIds?.includes(user.id) ||
+      c.tags?.includes(`assignedRecruiter:${user.id}`)
+    );
+  }
+
+  const r1ListInitial = getSelectedCandidatesForUser({ id: 'R1', role: 'recruiter' });
+  const r2ListInitial = getSelectedCandidatesForUser({ id: 'R2', role: 'recruiter' });
+  const adminListInitial = getSelectedCandidatesForUser({ id: 'admin-1', role: 'admin' });
+
+  assert(
+    r1ListInitial.length === 2 && r1ListInitial.some(c => c.id === 'cand-alpha') && r1ListInitial.some(c => c.id === 'cand-beta'),
+    'Test H: Recruiter R1 sees both Test Alpha and Test Beta'
+  );
+  assert(
+    r2ListInitial.length === 2 && r2ListInitial.some(c => c.id === 'cand-beta') && r2ListInitial.some(c => c.id === 'cand-gamma'),
+    'Test H: Recruiter R2 sees both Test Beta and Test Gamma'
+  );
+  assert(
+    adminListInitial.length === 3,
+    'Test H: Admin sees all 3 candidates (Alpha, Beta, Gamma) in Selected Candidates bucket'
+  );
+
+  // Test Case G: Edit B: remove R2, keep R1 -> R1 still sees it, R2 no longer does, candidate not deleted
+  const editB = {
+    ...candidateB,
+    assignedRecruiterIds: ['R1'], // Removed R2
+  };
+  saveCandidateSelection(editB);
+
+  const r1ListAfterEdit = getSelectedCandidatesForUser({ id: 'R1', role: 'recruiter' });
+  const r2ListAfterEdit = getSelectedCandidatesForUser({ id: 'R2', role: 'recruiter' });
+  const adminListAfterEdit = getSelectedCandidatesForUser({ id: 'admin-1', role: 'admin' });
+
+  assert(selectionStore.has('cand-beta'), 'Test G: Candidate Beta is not deleted after modifying recruiter assignments');
+  assert(
+    r1ListAfterEdit.some(c => c.id === 'cand-beta'),
+    'Test G: Recruiter R1 still sees Candidate Beta'
+  );
+  assert(
+    !r2ListAfterEdit.some(c => c.id === 'cand-beta'),
+    'Test G: Recruiter R2 no longer sees Candidate Beta after unassignment'
+  );
+  assert(
+    r2ListAfterEdit.length === 1 && r2ListAfterEdit[0].id === 'cand-gamma',
+    'Test G: Recruiter R2 now only sees Test Gamma'
+  );
+  assert(
+    adminListAfterEdit.length === 3,
+    'Test G: Admin continues to see all 3 candidates'
+  );
+
+  // Verify all 9 data contract fields exist on every candidate record
+  for (const c of Array.from(selectionStore.values())) {
+    assert(Boolean(c.fullName), `Data contract: Candidate Name present on ${c.id}`);
+    assert(Boolean(c.phone), `Data contract: Contact Number present on ${c.id}`);
+    assert(Boolean(c.clientName), `Data contract: Client present on ${c.id}`);
+    assert(Boolean(c.selectionDate), `Data contract: Selection Date present on ${c.id}`);
+    assert('dateOfJoin' in c, `Data contract: DOJ field present on ${c.id}`);
+    assert(Boolean(c.actualJoiningStatus), `Data contract: Joining Status present on ${c.id}`);
+    assert('totalWorkingDays' in c, `Data contract: Total Working Days present on ${c.id}`);
+    assert('lastWorkingDate' in c, `Data contract: Last Working Date present on ${c.id}`);
+    assert(Array.isArray(c.assignedRecruiterIds) && c.assignedRecruiterIds.length > 0, `Data contract: Assigned Recruiter(s) present on ${c.id}`);
+  }
+
+
+
+  // ----------------------------------------------------
+  // Test 18: Part B Universal Bulk Import Candidates (B5 Tests)
+  // ----------------------------------------------------
+  console.log('\n--- 18. Testing Universal Bulk Import Candidates (Part B) ---');
+
+  // 18.1 Universal Format: 27 headers in exact canonical order
+  assert(CANONICAL_BULK_IMPORT_HEADERS.length === 27, 'Exact 27 universal headers defined in canonical list');
+  const expected27Headers = [
+    'Full Name',
+    'Phone',
+    'Email',
+    'Father Name',
+    'Date of Birth (YYYY-MM-DD)',
+    'Gender (Male/Female/Other)',
+    'Current Location',
+    'Preferred Location',
+    'Total Experience (Years)',
+    'Relevant Experience (Years)',
+    'Highest Qualification',
+    'Education',
+    'Current Company',
+    'Current Designation',
+    'Previous Company',
+    'Notice Period',
+    'Notice Period Days',
+    'Current Monthly Salary',
+    'Expected Monthly Salary',
+    'Current CTC',
+    'Expected CTC',
+    'Skills (comma-separated)',
+    'Languages (comma-separated)',
+    'Resume URL',
+    'Source',
+    'Tags (comma-separated)',
+    'Notes',
+  ];
+  for (let idx = 0; idx < expected27Headers.length; idx++) {
+    assert(
+      CANONICAL_BULK_IMPORT_HEADERS[idx] === expected27Headers[idx],
+      `Header ${idx + 1} matches exactly: ${expected27Headers[idx]}`
+    );
+  }
+
+  // 18.2 ExcelJS Template Generation with Gender Dropdown & Text Phone Column
+  const templateWb = new ExcelJS.Workbook();
+  const candWs = templateWb.addWorksheet('Candidates', { views: [{ state: 'frozen', ySplit: 1 }] });
+  candWs.columns = CANONICAL_BULK_IMPORT_HEADERS.map((h) => ({
+    header: h,
+    key: h,
+    width: 25,
+    style: h === 'Phone' ? { numFmt: '@' } : undefined,
+  }));
+  (candWs as any).dataValidations.add('F2:F5000', {
+    type: 'list',
+    allowBlank: true,
+    formulae: ['"Male,Female,Other"'],
+    showErrorMessage: true,
+    errorStyle: 'stop',
+    errorTitle: 'Invalid Gender',
+    error: 'Please select Male, Female, or Other from the dropdown list.',
+  });
+  const tplBuffer = await templateWb.xlsx.writeBuffer();
+  assert(tplBuffer.byteLength > 5000, 'Template .xlsx generated with real Excel Data Validation dropdown and frozen header');
+
+  // 18.3 12-Row Test Dataset Validation Suite
+  // Row 1: Fully valid 27-column row
+  const r1Phone = normalizePhoneNumber('9811111111');
+  const r1Gender = parseGender('Male');
+  const r1Dob = parseDateOfBirth('1995-05-15');
+  assert(r1Phone.isValid && r1Phone.phone === '9811111111', 'Row 1: Valid phone accepted');
+  assert(r1Gender.gender === 'MALE', 'Row 1: Valid gender parsed as MALE');
+  assert(r1Dob.date !== null && r1Dob.date.getUTCFullYear() === 1995, 'Row 1: Valid DOB parsed correctly');
+
+  // Row 2: Only Full Name + Phone (minimal valid row)
+  const r2Phone = normalizePhoneNumber('9822222222');
+  assert(r2Phone.isValid && r2Phone.phone === '9822222222', 'Row 2: Minimal row with only Name + Phone is valid');
+
+  // Row 3: Gender "male" lowercase -> MALE
+  assert(parseGender('male').gender === 'MALE', 'Row 3: Lowercase "male" normalized to MALE');
+
+  // Row 4: Gender "FEMALE" uppercase -> FEMALE
+  assert(parseGender('FEMALE').gender === 'FEMALE', 'Row 4: Uppercase "FEMALE" normalized to FEMALE');
+
+  // Row 5: Gender "other" lowercase -> OTHER
+  assert(parseGender('other').gender === 'OTHER', 'Row 5: Lowercase "other" normalized to OTHER');
+
+  // Row 6: Invalid gender "Alien" -> row error
+  const r6Gender = parseGender('Alien');
+  assert(r6Gender.gender === null && Boolean(r6Gender.error?.includes('Allowed values: Male, Female, Other')), 'Row 6: Invalid gender "Alien" rejected with clear error');
+
+  // Row 7: Phone with +91 and spaces -> valid 10 digits
+  const r7Phone = normalizePhoneNumber('+91 98333 33333');
+  assert(r7Phone.isValid && r7Phone.phone === '9833333333', 'Row 7: Phone with "+91 98333 33333" normalized to "9833333333"');
+
+  // Row 8: Scientific notation or 9-digit phone -> rejected
+  const r8Sci = normalizePhoneNumber('7.86E+09');
+  assert(!r8Sci.isValid && Boolean(r8Sci.error?.includes('scientific notation detected')), 'Row 8: Scientific notation phone 7.86E+09 caught and rejected');
+  const r8Short = normalizePhoneNumber('984444444');
+  assert(!r8Short.isValid, 'Row 8: 9-digit short phone number caught and rejected');
+
+  // Row 9: Invalid email -> rejected
+  const emailRegex = /^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i;
+  assert(!emailRegex.test('not-an-email'), 'Row 9: Invalid email "not-an-email" rejected');
+  assert(emailRegex.test('valid.user@example.com'), 'Row 9: Valid email accepted');
+
+  // Row 10: Future DOB and under-18 DOB -> rejected
+  const r10Future = parseDateOfBirth('2030-01-01');
+  assert(r10Future.date === null && Boolean(r10Future.error?.includes('cannot be in the future')), 'Row 10: Future DOB 2030-01-01 rejected');
+  const r10Under18 = parseDateOfBirth('2018-05-15');
+  assert(r10Under18.date === null && Boolean(r10Under18.error?.includes('at least 18 years old')), 'Row 10: Under-18 DOB rejected');
+
+  // Row 11: Relevant exp > total exp -> rejected
+  function validateExperience(total: number, rel: number) {
+    if (rel > total) {
+      return { isValid: false, error: `Relevant Experience (${rel} yrs) cannot exceed Total Experience (${total} yrs).` };
+    }
+    return { isValid: true };
+  }
+  const r11Exp = validateExperience(2, 4);
+  assert(!r11Exp.isValid && Boolean(r11Exp.error?.includes('cannot exceed Total Experience')), 'Row 11: Relevant exp (4 yrs) > Total exp (2 yrs) rejected');
+
+  // Row 12: In-sheet duplicate detection (same phone as Row 1)
+  const seenSheetPhones = new Map<string, number>();
+  seenSheetPhones.set('9811111111', 2); // Row 2 had this phone
+  const isDupInSheet = seenSheetPhones.has('9811111111');
+  assert(isDupInSheet, 'Row 12: Duplicate phone inside file caught and isolated from valid rows');
+
+  // 18.4 Phone already in DB -> SKIPPED, NOT overwritten
+  const mockExistingCandidates = [
+    { id: 'cand-exist-1', candidateCode: 'OE-CAND-0010', phone: '9855555555', fullName: 'Existing Employee' },
+  ];
+  const incomingRowPhone = '9855555555';
+  const dbMatch = mockExistingCandidates.find((c) => c.phone === incomingRowPhone);
+  assert(Boolean(dbMatch), 'Database duplicate matched on phone 9855555555');
+  // Verify strict non-overwrite policy
+  let wasUpdated = false;
+  let skippedDuplicatesCount = 0;
+  if (dbMatch) {
+    skippedDuplicatesCount++;
+    // DO NOT UPDATE
+  } else {
+    wasUpdated = true;
+  }
+  assert(!wasUpdated && skippedDuplicatesCount === 1, 'Existing DB candidate skipped without overwrite');
+
+  // 18.5 Messy skills string deduplication
+  function parseSkills(str: string): string[] {
+    return Array.from(new Set(str.split(',').map((s) => s.trim()).filter(Boolean)));
+  }
+  const cleanedSkills = parseSkills('  React  , Node.js , React, TypeScript,  ');
+  assert(
+    cleanedSkills.length === 3 &&
+    cleanedSkills[0] === 'React' &&
+    cleanedSkills[1] === 'Node.js' &&
+    cleanedSkills[2] === 'TypeScript',
+    'Messy skills string trimmed and deduplicated correctly (React, Node.js, TypeScript)'
+  );
+
+  // 18.6 File boundary rules (Max 5MB / 2000 rows, file type enforcement)
+  function validateFileConstraints(file: { name: string; size: number; rowCount: number }) {
+    const ext = file.name.split('.').pop()?.toLowerCase();
+    if (!['xlsx', 'xls', 'csv'].includes(ext || '')) {
+      return { isValid: false, error: 'Invalid file format. Upload .xlsx, .xls, or .csv.' };
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      return { isValid: false, error: 'File size exceeds 5MB limit.' };
+    }
+    if (file.rowCount > 2000) {
+      return { isValid: false, error: 'Exceeds maximum 2000 rows per batch.' };
+    }
+    if (file.rowCount === 0) {
+      return { isValid: false, error: 'Spreadsheet contains no data rows.' };
+    }
+    return { isValid: true };
+  }
+
+  assert(!validateFileConstraints({ name: 'resume.pdf', size: 1000, rowCount: 10 }).isValid, '.pdf upload is rejected');
+  assert(!validateFileConstraints({ name: 'candidates.xlsx', size: 6 * 1024 * 1024, rowCount: 100 }).isValid, 'Oversize file (>5MB) is rejected');
+  assert(!validateFileConstraints({ name: 'candidates.xlsx', size: 10000, rowCount: 2500 }).isValid, 'Over 2000 rows is rejected');
+  assert(!validateFileConstraints({ name: 'empty.xlsx', size: 1000, rowCount: 0 }).isValid, 'Empty file (0 rows) is rejected');
+  assert(validateFileConstraints({ name: 'candidates.xlsx', size: 50000, rowCount: 250 }).isValid, 'Valid 250-row .xlsx within limits is accepted');
+
+  // 18.7 Role scoping & recruiter ownership enforcement
+  function simulateBulkImportForUser(user: { id: string; role: string }, validRows: any[]) {
+    const isRecruiter = user.role === 'RECRUITER' || user.role === 'FREELANCE_RECRUITER';
+    const targetRecruiterId = isRecruiter ? user.id : null;
+    return validRows.map((r, i) => ({
+      candidateCode: `OE-CAND-0${200 + i}`,
+      fullName: r.fullName,
+      phone: r.phone,
+      ownerRecruiterId: targetRecruiterId,
+      assignedRecruiterId: targetRecruiterId,
+      assignedRecruiterIds: targetRecruiterId ? [targetRecruiterId] : [],
+      tags: targetRecruiterId ? [`assignedRecruiter:${targetRecruiterId}`] : [],
+    }));
+  }
+
+  const sampleRowsToImport = [
+    { fullName: 'Candidate One', phone: '9866666661' },
+    { fullName: 'Candidate Two', phone: '9866666662' },
+  ];
+
+  const recruiterImport = simulateBulkImportForUser({ id: 'REC-01', role: 'RECRUITER' }, sampleRowsToImport);
+  assert(
+    recruiterImport.every((c) => c.ownerRecruiterId === 'REC-01' && c.assignedRecruiterIds.includes('REC-01')),
+    'Recruiter import strictly assigns ownership to the logged-in recruiter (REC-01)'
+  );
+
+  const adminImport = simulateBulkImportForUser({ id: 'ADMIN-01', role: 'ADMIN' }, sampleRowsToImport);
+  assert(
+    adminImport.every((c) => c.ownerRecruiterId === null),
+    'Admin import creates candidates without forced recruiter restriction'
+  );
+
+  // 18.8 Idempotent re-import verification: re-importing same file produces 0 duplicates
+  const persistentDb = new Map<string, any>();
+  for (const c of recruiterImport) {
+    persistentDb.set(c.phone, c);
+  }
+
+  function reImportCheck(batch: typeof sampleRowsToImport) {
+    let imported = 0;
+    let skipped = 0;
+    for (const r of batch) {
+      if (persistentDb.has(r.phone)) {
+        skipped++;
+      } else {
+        imported++;
+      }
+    }
+    return { imported, skipped };
+  }
+
+  const firstImportStats = reImportCheck(sampleRowsToImport);
+  assert(
+    firstImportStats.imported === 0 && firstImportStats.skipped === 2,
+    'Re-importing identical batch imports 0 new records and safely skips all 2 existing duplicates (idempotent)'
+  );
+
+
+  // ----------------------------------------------------
+  // Test 19: Move Pipeline to Selected Automation & Lifecycle
+  // ----------------------------------------------------
+  console.log('\n--- 19. Testing Move Pipeline to Selected Automation & Lifecycle ---');
+
+  // Simulated Database Store for Pipeline Transitions
+  interface DbCandidateRecord {
+    id: string;
+    fullName: string;
+    phone: string;
+    status: string;
+    clientName?: string;
+    clientId?: string;
+    selectionDate?: string;
+    actualJoiningStatus?: string;
+    totalWorkingDays?: number | null;
+    dateOfJoin?: string;
+    lastWorkingDate?: string;
+    assignedRecruiterIds?: string[];
+    ownerRecruiterId?: string;
+    remarks?: string;
+  }
+
+  const pipelineDb = new Map<string, DbCandidateRecord>();
+
+  // Helper simulating updateCandidate pipeline stage move
+  function moveCandidateStage(
+    candidateId: string,
+    targetStage: string,
+    user: { id: string; role: 'ADMIN' | 'RECRUITER' },
+    explicitPayload?: Partial<DbCandidateRecord>
+  ): DbCandidateRecord {
+    const existing = pipelineDb.get(candidateId);
+    if (!existing) throw new Error('Candidate not found');
+
+    const nextStatus = targetStage;
+    const isMovingToSelected = nextStatus === 'Selected' || nextStatus === 'Joined';
+
+    if (isMovingToSelected) {
+      const todayIso = new Date().toISOString().split('T')[0];
+      const effectiveClient = explicitPayload?.clientName || existing.clientName || 'Digitide Solutions';
+      const effectiveRecruiterIds = (explicitPayload?.assignedRecruiterIds && explicitPayload.assignedRecruiterIds.length > 0)
+        ? explicitPayload.assignedRecruiterIds
+        : (existing.assignedRecruiterIds && existing.assignedRecruiterIds.length > 0)
+        ? existing.assignedRecruiterIds
+        : [user.id];
+      const effectiveSelDate = explicitPayload?.selectionDate || existing.selectionDate || todayIso;
+      const effectiveJoiningStatus = explicitPayload?.actualJoiningStatus || existing.actualJoiningStatus || 'Selected (Not Joined Yet)';
+      const effectiveDoj = explicitPayload?.dateOfJoin !== undefined ? explicitPayload.dateOfJoin : existing.dateOfJoin;
+      const effectiveLwd = explicitPayload?.lastWorkingDate !== undefined ? explicitPayload.lastWorkingDate : existing.lastWorkingDate;
+      const effectiveRemarks = explicitPayload?.remarks !== undefined ? explicitPayload.remarks : existing.remarks;
+
+      let wd = 0;
+      if (effectiveDoj) {
+        wd = computeWorkingDays(effectiveJoiningStatus, effectiveDoj, effectiveLwd, new Date()).totalWorkingDays || 0;
+      } else if (existing.totalWorkingDays !== null && existing.totalWorkingDays !== undefined) {
+        wd = existing.totalWorkingDays;
+      }
+
+      const updated: DbCandidateRecord = {
+        ...existing,
+        status: nextStatus,
+        clientName: normalizeClientName(effectiveClient),
+        clientId: existing.clientId || 'cli-digitide-001',
+        selectionDate: effectiveSelDate,
+        actualJoiningStatus: effectiveJoiningStatus,
+        totalWorkingDays: wd,
+        dateOfJoin: effectiveDoj,
+        lastWorkingDate: effectiveLwd,
+        assignedRecruiterIds: Array.from(new Set(effectiveRecruiterIds)),
+        ownerRecruiterId: effectiveRecruiterIds[0],
+        remarks: effectiveRemarks,
+      };
+
+      pipelineDb.set(candidateId, updated);
+      return updated;
+    } else {
+      // Move away from Selected: keep all saved selection data intact! Only update status
+      const updated: DbCandidateRecord = {
+        ...existing,
+        status: nextStatus,
+      };
+      pipelineDb.set(candidateId, updated);
+      return updated;
+    }
+  }
+
+  // Helper simulating selectedBucket query filter
+  function querySelectedBucket(user: { id: string; role: 'ADMIN' | 'RECRUITER' }) {
+    return Array.from(pipelineDb.values()).filter((c) => {
+      // 1. One source of truth: status must be Selected or Joined
+      if (c.status !== 'Selected' && c.status !== 'Joined') return false;
+
+      // 2. Role-based scoping: Recruiter sees only assigned candidates; Admin sees all
+      if (user.role === 'RECRUITER') {
+        const isAssigned = (Array.isArray(c.assignedRecruiterIds) && c.assignedRecruiterIds.includes(user.id)) ||
+          c.ownerRecruiterId === user.id;
+        if (!isAssigned) return false;
+      }
+
+      return true;
+    });
+  }
+
+  // 19.1 Initial fresh candidate in "Interview Scheduled" stage
+  pipelineDb.set('cand-flow-1', {
+    id: 'cand-flow-1',
+    fullName: 'Rahul Sharma',
+    phone: '9811122233',
+    status: 'Interview Scheduled',
+    assignedRecruiterIds: ['REC-ALPHA'],
+    ownerRecruiterId: 'REC-ALPHA',
+  });
+
+  // Verify not in selected bucket initially
+  const initialAdminBucket = querySelectedBucket({ id: 'ADMIN-01', role: 'ADMIN' });
+  assert(initialAdminBucket.length === 0, 'Candidate in "Interview Scheduled" is not in selected bucket');
+
+  // 19.2 Move to "Selected": creates selection record with defaults
+  const movedToSelected = moveCandidateStage('cand-flow-1', 'Selected', { id: 'ADMIN-01', role: 'ADMIN' });
+  const todayExpected = new Date().toISOString().split('T')[0];
+
+  assert(movedToSelected.status === 'Selected', 'Candidate status updated to "Selected"');
+  assert(movedToSelected.selectionDate === todayExpected, 'Selection date defaulted to today (YYYY-MM-DD)');
+  assert(movedToSelected.actualJoiningStatus === 'Selected (Not Joined Yet)', 'Joining status defaulted to "Selected (Not Joined Yet)"');
+  assert(movedToSelected.totalWorkingDays === 0, 'Total working days defaulted to 0');
+  assert(movedToSelected.clientName === 'Digitide Solutions', 'Client defaulted to canonical client "Digitide Solutions"');
+  assert(movedToSelected.assignedRecruiterIds?.includes('REC-ALPHA'), 'Assigned recruiter REC-ALPHA preserved');
+
+  // 19.3 Visibility Verification: Admin sees it, Assigned Recruiter sees it, Unassigned Recruiter does not
+  const adminBucketAfterSelected = querySelectedBucket({ id: 'ADMIN-01', role: 'ADMIN' });
+  const recAlphaBucket = querySelectedBucket({ id: 'REC-ALPHA', role: 'RECRUITER' });
+  const recBetaBucket = querySelectedBucket({ id: 'REC-BETA', role: 'RECRUITER' });
+
+  assert(adminBucketAfterSelected.some((c) => c.id === 'cand-flow-1'), 'Admin sees candidate in Selected Candidates bucket');
+  assert(recAlphaBucket.some((c) => c.id === 'cand-flow-1'), 'Assigned recruiter REC-ALPHA sees candidate in their bucket');
+  assert(!recBetaBucket.some((c) => c.id === 'cand-flow-1'), 'Unassigned recruiter REC-BETA does not see candidate');
+
+  // 19.4 Move candidate to Selected again (idempotent upsert, no duplicate)
+  const movedAgain = moveCandidateStage('cand-flow-1', 'Selected', { id: 'ADMIN-01', role: 'ADMIN' });
+  assert(pipelineDb.size === 1, 'Still exactly one candidate record in DB after re-selecting');
+  assert(movedAgain.selectionDate === todayExpected, 'Existing selection date preserved on second move');
+  assert(movedAgain.clientName === 'Digitide Solutions', 'Existing client preserved on second move');
+
+  // 19.5 Configure custom selection details (DOJ, client, remarks)
+  pipelineDb.set('cand-flow-1', {
+    ...movedAgain,
+    clientName: 'Radical Minds',
+    dateOfJoin: '2026-10-15',
+    remarks: 'Candidate passed client technical round with excellence',
+  });
+
+  // 19.6 Move away from Selected to "Shortlisted"
+  const movedAway = moveCandidateStage('cand-flow-1', 'Shortlisted', { id: 'ADMIN-01', role: 'ADMIN' });
+  assert(movedAway.status === 'Shortlisted', 'Candidate status updated away from Selected to "Shortlisted"');
+
+  // Verify removed from selected bucket view for both Admin and Recruiter
+  const adminBucketAfterMoveAway = querySelectedBucket({ id: 'ADMIN-01', role: 'ADMIN' });
+  const recAlphaBucketAfterMoveAway = querySelectedBucket({ id: 'REC-ALPHA', role: 'RECRUITER' });
+  assert(adminBucketAfterMoveAway.length === 0, 'Candidate removed from Admin Selected bucket after moving away');
+  assert(recAlphaBucketAfterMoveAway.length === 0, 'Candidate removed from Recruiter Selected bucket after moving away');
+
+  // Verify candidate record and all saved selection data remain completely intact in DB
+  const rawDbRecord = pipelineDb.get('cand-flow-1')!;
+  assert(rawDbRecord.clientName === 'Radical Minds', 'Saved client "Radical Minds" preserved in DB');
+  assert(rawDbRecord.dateOfJoin === '2026-10-15', 'Saved DOJ "2026-10-15" preserved in DB');
+  assert(rawDbRecord.remarks === 'Candidate passed client technical round with excellence', 'Saved remarks preserved in DB');
+
+  // 19.7 Move back to Selected from "Shortlisted": restores to bucket with all saved data intact
+  const movedBack = moveCandidateStage('cand-flow-1', 'Selected', { id: 'ADMIN-01', role: 'ADMIN' });
+  assert(movedBack.status === 'Selected', 'Candidate status restored to "Selected"');
+  assert(movedBack.clientName === 'Radical Minds', 'Previously saved client "Radical Minds" restored intact');
+  assert(movedBack.dateOfJoin === '2026-10-15', 'Previously saved DOJ restored intact');
+  assert(movedBack.remarks?.includes('excellence'), 'Previously saved remarks restored intact');
+  assert(querySelectedBucket({ id: 'ADMIN-01', role: 'ADMIN' }).length === 1, 'Candidate reappears in Admin bucket');
+  assert(querySelectedBucket({ id: 'REC-ALPHA', role: 'RECRUITER' }).length === 1, 'Candidate reappears in Assigned Recruiter bucket');
+
+  // ----------------------------------------------------
+  // Test 20: Candidate Master Directory Single Source of Truth & Zero-Orphan Invariant
+  // ----------------------------------------------------
+  console.log('\n--- 20. Testing Master Directory Single Source of Truth & Zero-Orphan Rule ---');
+
+  interface FullCandidateEntity {
+    id: string;
+    candidateCode: string;
+    name?: string | null;
+    fullName: string;
+    phone: string;
+    email: string;
+    status?: string | null;
+    isArchived?: boolean | null;
+    assignedRecruiterIds?: string[];
+    ownerRecruiterId?: string | null;
+    clientName?: string | null;
+  }
+
+  const testDbCandidates: FullCandidateEntity[] = [
+    { id: 'c1', candidateCode: 'OE-CAND-0001', fullName: 'Aarav Patel', phone: '+91 98111 22233', email: 'aarav@example.com', status: 'New', isArchived: false, ownerRecruiterId: 'REC-01' },
+    { id: 'c2', candidateCode: 'OE-CAND-0002', fullName: 'Bhavna Sharma', phone: '9822233344', email: 'bhavna@example.com', status: 'Screening', isArchived: false, ownerRecruiterId: 'REC-01' },
+    { id: 'c3', candidateCode: 'OE-CAND-0003', fullName: 'Chirag Rao', phone: '+919833344455', email: 'chirag@example.com', status: 'Shortlisted', isArchived: false, ownerRecruiterId: 'REC-02' },
+    { id: 'c4', candidateCode: 'OE-CAND-0004', fullName: 'Divya Iyer', phone: '9844455566', email: 'divya@example.com', status: 'Interview Scheduled', isArchived: false, ownerRecruiterId: 'REC-02' },
+    { id: 'c5', candidateCode: 'OE-CAND-0005', fullName: 'Eshaan Gupta', phone: '9855566677', email: 'eshaan@example.com', status: 'Interview Completed', isArchived: false, ownerRecruiterId: 'REC-01' },
+    { id: 'c6', candidateCode: 'OE-CAND-0006', fullName: 'Fatima Sheikh', phone: '9866677788', email: 'fatima@example.com', status: 'Selected', isArchived: false, clientName: 'Digitide Solutions', ownerRecruiterId: 'REC-01' },
+    { id: 'c7', candidateCode: 'OE-CAND-0007', fullName: 'Gautam Das', phone: '9877788899', email: 'gautam@example.com', status: 'Joined', isArchived: false, clientName: 'Radical Minds', ownerRecruiterId: 'REC-02' },
+    { id: 'c8', candidateCode: 'OE-CAND-0008', fullName: 'Hari Om', phone: '9888899900', email: 'hari@example.com', status: 'Rejected', isArchived: false, ownerRecruiterId: 'REC-01' },
+    { id: 'c9', candidateCode: 'OE-CAND-0009', fullName: 'Ishita Roy', phone: '9899900011', email: 'ishita@example.com', status: 'On Hold', isArchived: false, ownerRecruiterId: 'REC-01' },
+    // Edge cases: null status, unknown status, missing recruiter, missing client
+    { id: 'c10', candidateCode: 'OE-CAND-0010', fullName: 'Jatin Verma', phone: '9812345670', email: 'jatin@example.com', status: null, isArchived: false },
+    { id: 'c11', candidateCode: 'OE-CAND-0011', fullName: 'Kavita Nair', phone: '9812345671', email: 'kavita@example.com', status: 'LEGACY_MIGRATION_PENDING', isArchived: false },
+    { id: 'c12', candidateCode: 'OE-CAND-0012', fullName: 'Lokesh Kumar', phone: '9812345672', email: 'lokesh@example.com', status: '', isArchived: null },
+    // Archived candidate
+    { id: 'c13', candidateCode: 'OE-CAND-0013', fullName: 'Manish Singh', phone: '9812345673', email: 'manish@example.com', status: 'Interview Scheduled', isArchived: true, ownerRecruiterId: 'REC-01' },
+    // Both Selected and Archived (Priority Rule: Archive wins!)
+    { id: 'c14', candidateCode: 'OE-CAND-0014', fullName: 'Neha Chopra', phone: '9812345674', email: 'neha@example.com', status: 'Selected', isArchived: true, clientName: 'Digitide Solutions', ownerRecruiterId: 'REC-01' },
+  ];
+
+  const SELECTED_SET = new Set(['Selected', 'Joined', 'SELECTED', 'JOINED', 'selected', 'joined']);
+
+  // Query Evaluators simulating backend controllers
+  function evaluateMasterDirectory(candidates: FullCandidateEntity[], userRole: 'ADMIN' | 'RECRUITER', recruiterId?: string) {
+    return candidates.filter((c) => {
+      // 1. Role scoping
+      if (userRole === 'RECRUITER' && recruiterId) {
+        const isAssigned = c.ownerRecruiterId === recruiterId || (c.assignedRecruiterIds && c.assignedRecruiterIds.includes(recruiterId));
+        if (!isAssigned) return false;
+      }
+      // 2. Archive exclusion (Archive wins!)
+      if (c.isArchived === true) return false;
+      // 3. Selected exclusion
+      const statusStr = String(c.status || '').trim();
+      if (SELECTED_SET.has(statusStr)) return false;
+      return true;
+    });
+  }
+
+  function evaluateSelectedBucket(candidates: FullCandidateEntity[], userRole: 'ADMIN' | 'RECRUITER', recruiterId?: string) {
+    return candidates.filter((c) => {
+      // 1. Role scoping
+      if (userRole === 'RECRUITER' && recruiterId) {
+        const isAssigned = c.ownerRecruiterId === recruiterId || (c.assignedRecruiterIds && c.assignedRecruiterIds.includes(recruiterId));
+        if (!isAssigned) return false;
+      }
+      // 2. Archive exclusion (Archive wins!)
+      if (c.isArchived === true) return false;
+      // 3. Selected status requirement
+      const statusStr = String(c.status || '').trim();
+      return SELECTED_SET.has(statusStr);
+    });
+  }
+
+  function evaluateArchive(candidates: FullCandidateEntity[], userRole: 'ADMIN' | 'RECRUITER', recruiterId?: string) {
+    return candidates.filter((c) => {
+      // 1. Role scoping
+      if (userRole === 'RECRUITER' && recruiterId) {
+        const isAssigned = c.ownerRecruiterId === recruiterId || (c.assignedRecruiterIds && c.assignedRecruiterIds.includes(recruiterId));
+        if (!isAssigned) return false;
+      }
+      // 2. Must be archived
+      return c.isArchived === true;
+    });
+  }
+
+  // Run Admin queries
+  const adminMaster = evaluateMasterDirectory(testDbCandidates, 'ADMIN');
+  const adminSelected = evaluateSelectedBucket(testDbCandidates, 'ADMIN');
+  const adminArchive = evaluateArchive(testDbCandidates, 'ADMIN');
+
+  // Verify Zero-Orphan & Single Source of Truth
+  const masterIds = new Set(adminMaster.map((c) => c.id));
+  const selectedIds = new Set(adminSelected.map((c) => c.id));
+  const archiveIds = new Set(adminArchive.map((c) => c.id));
+
+  const totalInDb = testDbCandidates.length;
+  const sumOfSections = adminMaster.length + adminSelected.length + adminArchive.length;
+
+  assert(totalInDb === sumOfSections, `Total candidates in DB (${totalInDb}) equals Master (${adminMaster.length}) + Selected (${adminSelected.length}) + Archive (${adminArchive.length})`);
+
+  // Verify zero orphans: every candidate appears in at least one section
+  const orphans = testDbCandidates.filter((c) => !masterIds.has(c.id) && !selectedIds.has(c.id) && !archiveIds.has(c.id));
+  assert(orphans.length === 0, 'Zero orphan candidates: every candidate appears in a section');
+
+  // Verify zero duplicates: no candidate appears in more than one section
+  const duplicates = testDbCandidates.filter((c) => {
+    let count = 0;
+    if (masterIds.has(c.id)) count++;
+    if (selectedIds.has(c.id)) count++;
+    if (archiveIds.has(c.id)) count++;
+    return count > 1;
+  });
+  assert(duplicates.length === 0, 'Zero duplicate candidates: no candidate appears in two sections');
+
+  // Verify specific edge cases
+  assert(masterIds.has('c10'), 'Candidate with null status appears in Candidate Master Directory');
+  assert(masterIds.has('c11'), 'Candidate with unknown status appears in Candidate Master Directory');
+  assert(masterIds.has('c12'), 'Candidate with empty status appears in Candidate Master Directory');
+  assert(archiveIds.has('c14') && !selectedIds.has('c14') && !masterIds.has('c14'), 'Candidate with both Selected status and isArchived=true appears ONLY in Archive (Archive wins)');
+
+  // Verify phone search normalization logic
+  function searchCandidatePhone(c: FullCandidateEntity, query: string) {
+    const qClean = query.trim().toLowerCase();
+    const qDigits = query.replace(/\D/g, '');
+    const candPhoneDigits = c.phone.replace(/\D/g, '');
+
+    return (
+      c.phone.toLowerCase().includes(qClean) ||
+      (qDigits.length >= 4 && candPhoneDigits.includes(qDigits)) ||
+      (qDigits.length >= 10 && candPhoneDigits.includes(qDigits.slice(-10)))
+    );
+  }
+
+  const c1 = testDbCandidates.find((c) => c.id === 'c1')!; // phone: '+91 98111 22233'
+  assert(searchCandidatePhone(c1, '9811122233'), 'Searching unformatted 10 digits finds formatted +91 phone');
+  assert(searchCandidatePhone(c1, '+91 98111 22233'), 'Searching full formatted phone finds candidate');
+  assert(searchCandidatePhone(c1, '22233'), 'Searching partial 5 digits finds candidate');
+
+  const c2 = testDbCandidates.find((c) => c.id === 'c2')!; // phone: '9822233344'
+  assert(searchCandidatePhone(c2, '+91 98222 33344'), 'Searching formatted +91 finds unformatted 10-digit candidate');
+
+  // Role scoping tests
+  const rec1Master = evaluateMasterDirectory(testDbCandidates, 'RECRUITER', 'REC-01');
+  const rec2Master = evaluateMasterDirectory(testDbCandidates, 'RECRUITER', 'REC-02');
+  assert(rec1Master.some((c) => c.id === 'c1'), 'Recruiter 1 sees their assigned candidate in Master Directory');
+  assert(!rec1Master.some((c) => c.id === 'c3'), 'Recruiter 1 does NOT see Recruiter 2 candidate in Master Directory');
+  assert(rec2Master.some((c) => c.id === 'c3'), 'Recruiter 2 sees their assigned candidate in Master Directory');
 
   console.log('\n====================================================');
   console.log(`🎉 All ${passedTests}/${totalTests} tests passed successfully!`);

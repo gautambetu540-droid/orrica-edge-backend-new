@@ -237,6 +237,7 @@ model Client {
   invoices         Invoice[]
   payouts           Payout[]
   replacementCases ReplacementCase[]
+  candidates       Candidate[]      @relation("ClientCandidates")
 
   @@map("clients")
 }
@@ -325,6 +326,14 @@ model Candidate {
   notes               String?             @db.Text
   feedback            String?             @db.Text
   dateOfJoin          DateTime?
+  clientId            String?
+  client              Client?             @relation("ClientCandidates", fields: [clientId], references: [id], onDelete: SetNull)
+  clientName          String?
+  selectionDate       DateTime?
+  actualJoiningStatus String?
+  totalWorkingDays    Int?
+  lastWorkingDate     DateTime?
+  assignedRecruiterIds String[]           @default([])
   walkInStatus        String?
   walkInResponse      String?
   walkInDate          DateTime?
@@ -365,6 +374,9 @@ model Candidate {
 
   @@index([isArchived])
   @@index([isArchived, archivedAt])
+  @@index([clientId])
+  @@index([actualJoiningStatus])
+  @@index([selectionDate])
   @@index([status])
   @@index([status, email, phone])
   @@index([phone])

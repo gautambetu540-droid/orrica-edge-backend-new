@@ -246,11 +246,26 @@ router.get(
   downloadCandidateImportTemplate
 );
 
-// Bulk Candidate Import API
+// Bulk Candidate Import Dry-Run Validation API
+router.post(
+  '/bulk-import-validate',
+  authenticateJwt,
+  requireRoles('SUPER_ADMIN', 'ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
+  requireRecruiterPermission('candidates'),
+  uploadSpreadsheet.single('file'),
+  (req, res, next) => {
+    req.body = req.body || {};
+    req.body.dryRun = true;
+    return bulkImportCandidates(req, res, next);
+  }
+);
+
+// Bulk Candidate Import Execution API
 router.post(
   '/bulk-import',
   authenticateJwt,
-  requireRoles('SUPER_ADMIN', 'ADMIN'),
+  requireRoles('SUPER_ADMIN', 'ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
+  requireRecruiterPermission('candidates'),
   uploadSpreadsheet.single('file'),
   bulkImportCandidates
 );
