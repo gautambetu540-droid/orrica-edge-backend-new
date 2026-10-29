@@ -235,19 +235,34 @@ const canAccessCandidate = async (req: Request, candidateIdentifier: string): Pr
   }
 
   if (user.role === 'RECRUITER' || user.role === 'FREELANCE_RECRUITER') {
+    let rIds = [user.userId];
+    try {
+      const u = await prisma.user.findUnique({
+        where: { id: user.userId },
+        select: { id: true, recruiterId: true },
+      });
+      if (u?.recruiterId) rIds.push(u.recruiterId);
+    } catch {
+      // non-blocking fallback
+    }
+    rIds = Array.from(new Set(rIds.filter(Boolean)));
+
+    const conditions: any[] = [];
+    for (const rId of rIds) {
+      conditions.push(
+        { sourcingRecruiterId: rId },
+        { ownerRecruiterId: rId },
+        { createdById: rId },
+        { applications: { some: { recruiterId: rId } } },
+        { assignedRecruiterIds: { has: rId } },
+        { tags: { has: `assignedRecruiter:${rId}` } }
+      );
+    }
+
     const accessibleCandidate = await prisma.candidate.findFirst({
       where: {
         OR: candidateIdFilter,
-        AND: {
-          OR: [
-            { sourcingRecruiterId: user.userId },
-            { ownerRecruiterId: user.userId },
-            { createdById: user.userId },
-            { applications: { some: { recruiterId: user.userId } } },
-            { assignedRecruiterIds: { has: user.userId } },
-            { tags: { has: `assignedRecruiter:${user.userId}` } },
-          ],
-        },
+        AND: { OR: conditions },
       },
       select: { id: true },
     });
@@ -255,6 +270,178 @@ const canAccessCandidate = async (req: Request, candidateIdentifier: string): Pr
   }
 
   return false;
+};
+
+/**
+ * Enriches candidate records with fully resolved recruiter objects and display names.
+ * Ensures multi-recruiter assignments, owner recruiters, and sourcing recruiters are
+ * clearly structured for frontend display and selection tracking.
+ */
+const enrichCandidatesWithRecruiters = async (candidatesList: any[]): Promise<any[]> => {
+  if (!Array.isArray(candidatesList) || candidatesList.length === 0) return [];
+
+  const recruiterIdSet = new Set<string>();
+  for (const cand of candidatesList) {
+    if (!cand) continue;
+    if (Array.isArray(cand.assignedRecruiterIds)) {
+      for (const rId of cand.assignedRecruiterIds) {
+        if (rId && typeof rId === 'string' && rId.trim()) recruiterIdSet.add(rId.trim());
+      }
+    }
+    if (cand.ownerRecruiterId && typeof cand.ownerRecruiterId === 'string' && cand.ownerRecruiterId.trim()) {
+      recruiterIdSet.add(cand.ownerRecruiterId.trim());
+    }
+    if (cand.sourcingRecruiterId && typeof cand.sourcingRecruiterId === 'string' && cand.sourcingRecruiterId.trim()) {
+      recruiterIdSet.add(cand.sourcingRecruiterId.trim());
+    }
+    if (Array.isArray(cand.tags)) {
+      for (const tag of cand.tags) {
+        if (typeof tag === 'string' && tag.startsWith('assignedRecruiter:')) {
+          const id = tag.replace('assignedRecruiter:', '').trim();
+          if (id) recruiterIdSet.add(id);
+        }
+      }
+    }
+  }
+
+  const recruiterUsers = recruiterIdSet.size > 0
+    ? await prisma.user.findMany({
+        where: {
+          OR: [
+            { id: { in: Array.from(recruiterIdSet) } },
+            { recruiterId: { in: Array.from(recruiterIdSet) } },
+          ],
+        },
+        select: {
+          id: true,
+          recruiterId: true,
+          fullName: true,
+          email: true,
+          role: true,
+          recruiterType: true,
+        },
+      })
+    : [];
+
+  const recruiterMap = new Map<string, { id: string; recruiterId?: string | null; name: string; fullName: string; email?: string }>();
+  for (const u of recruiterUsers) {
+    const recObj = {
+      id: u.id,
+      recruiterId: u.recruiterId,
+      name: u.fullName || u.email || 'Recruiter',
+      fullName: u.fullName || u.email || 'Recruiter',
+      email: u.email,
+    };
+    if (u.id) recruiterMap.set(u.id.toLowerCase(), recObj);
+    if (u.recruiterId) recruiterMap.set(u.recruiterId.toLowerCase(), recObj);
+  }
+
+  return candidatesList.map((cand) => {
+    if (!cand) return cand;
+    const assignedList: Array<{ id: string; recruiterId?: string | null; name: string; fullName: string; email?: string }> = [];
+    const seenIds = new Set<string>();
+
+    const addRec = (r: { id: string; recruiterId?: string | null; name?: string; fullName?: string; email?: string } | null | undefined) => {
+      if (!r || !r.id) return;
+      const key = r.id.toLowerCase();
+      if (!seenIds.has(key)) {
+        seenIds.add(key);
+        assignedList.push({
+          id: r.id,
+          recruiterId: r.recruiterId || null,
+          name: r.fullName || r.name || 'Recruiter',
+          fullName: r.fullName || r.name || 'Recruiter',
+          email: r.email,
+        });
+      }
+    };
+
+    // 1. Check assignedRecruiterIds
+    if (Array.isArray(cand.assignedRecruiterIds)) {
+      for (const rId of cand.assignedRecruiterIds) {
+        if (!rId) continue;
+        const found = recruiterMap.get(String(rId).toLowerCase());
+        if (found) addRec(found);
+        else addRec({ id: String(rId), name: String(rId) });
+      }
+    }
+
+    // 2. Check tags: assignedRecruiter:...
+    if (Array.isArray(cand.tags)) {
+      for (const tag of cand.tags) {
+        if (typeof tag === 'string' && tag.startsWith('assignedRecruiter:')) {
+          const id = tag.replace('assignedRecruiter:', '').trim();
+          const found = recruiterMap.get(id.toLowerCase());
+          if (found) addRec(found);
+        }
+      }
+    }
+
+    // 3. Check ownerRecruiter
+    if (cand.ownerRecruiter) {
+      addRec({
+        id: cand.ownerRecruiter.id,
+        recruiterId: cand.ownerRecruiter.recruiterId,
+        name: cand.ownerRecruiter.fullName,
+        fullName: cand.ownerRecruiter.fullName,
+        email: cand.ownerRecruiter.email,
+      });
+    } else if (cand.ownerRecruiterId) {
+      const found = recruiterMap.get(String(cand.ownerRecruiterId).toLowerCase());
+      if (found) addRec(found);
+    }
+
+    // 4. Check sourcingRecruiter
+    if (cand.sourcingRecruiter) {
+      addRec({
+        id: cand.sourcingRecruiter.id,
+        recruiterId: cand.sourcingRecruiter.recruiterId,
+        name: cand.sourcingRecruiter.fullName,
+        fullName: cand.sourcingRecruiter.fullName,
+        email: cand.sourcingRecruiter.email,
+      });
+    } else if (cand.sourcingRecruiterId) {
+      const found = recruiterMap.get(String(cand.sourcingRecruiterId).toLowerCase());
+      if (found) addRec(found);
+    }
+
+    // 5. Check applications
+    if (Array.isArray(cand.applications)) {
+      for (const app of cand.applications) {
+        if (app?.recruiter) {
+          addRec({
+            id: app.recruiter.id,
+            recruiterId: app.recruiter.recruiterId,
+            name: app.recruiter.fullName,
+            fullName: app.recruiter.fullName,
+            email: app.recruiter.email,
+          });
+        }
+      }
+    }
+
+    // 6. Check createdBy
+    if (cand.createdBy && (cand.createdBy.role === 'RECRUITER' || cand.createdBy.role === 'FREELANCE_RECRUITER')) {
+      addRec({
+        id: cand.createdBy.id,
+        recruiterId: cand.createdBy.recruiterId,
+        name: cand.createdBy.fullName,
+        fullName: cand.createdBy.fullName,
+        email: cand.createdBy.email,
+      });
+    }
+
+    const primaryRecruiter = assignedList[0];
+    const combinedNames = assignedList.map((r) => r.name).join(', ');
+
+    return {
+      ...cand,
+      assignedRecruiters: assignedList,
+      assignedRecruiterIds: assignedList.map((r) => r.id),
+      assignedRecruiterName: combinedNames || null,
+      assignedRecruiterId: primaryRecruiter?.id || cand.ownerRecruiterId || cand.sourcingRecruiterId || null,
+    };
+  });
 };
 
 /**
@@ -425,8 +612,8 @@ export const getCandidates = async (req: Request, res: Response, next: NextFunct
         ],
       });
     } else {
-      // 3. CANDIDATE MASTER DIRECTORY: Single source of truth
-      // MUST show every candidate that is NOT Archived AND NOT Selected!
+      // 3. CANDIDATE MASTER DIRECTORY: Retains all active candidates in the system (Single Source of Truth)
+      // Master directory shows ALL active candidates (isArchived = false), including Selected/Joined candidates
       andFilters.push({ isArchived: false });
 
       if (status && status !== 'ALL') {
@@ -437,13 +624,6 @@ export const getCandidates = async (req: Request, res: Response, next: NextFunct
         } else {
           andFilters.push({ status: statusStr });
         }
-      } else {
-        // Exclude Selected bucket candidates: not in SELECTED_STATUSES and no selection metadata
-        andFilters.push({
-          status: { notIn: SELECTED_STATUSES },
-          actualJoiningStatus: null,
-          selectionDate: null,
-        });
       }
     }
     if (location) andFilters.push({ location: { contains: String(location), mode: 'insensitive' } });
@@ -481,10 +661,13 @@ export const getCandidates = async (req: Request, res: Response, next: NextFunct
       try {
         const recUser = await prisma.user.findUnique({
           where: { id: currentUserId },
-          select: { id: true, recruiterId: true },
+          select: { id: true, recruiterId: true, email: true },
         });
         if (recUser?.recruiterId) {
           recruiterUserIds.push(recUser.recruiterId);
+        }
+        if (recUser?.email) {
+          recruiterUserIds.push(recUser.email.toLowerCase());
         }
       } catch (uErr) {
         console.warn('[getCandidates] Failed resolving current user recruiterId:', uErr);
@@ -763,8 +946,10 @@ export const getCandidates = async (req: Request, res: Response, next: NextFunct
       console.warn('[getCandidates] status summary groupBy non-blocking notice:', groupErr);
     }
 
+    const enrichedCandidates = await enrichCandidatesWithRecruiters(candidates);
+
     sendSuccess(res, {
-      candidates,
+      candidates: enrichedCandidates,
       statusCounts,
       pagination: {
         total,
@@ -1120,7 +1305,7 @@ export const assignCandidate = async (req: Request, res: Response, next: NextFun
     const previousRecruiter = existing.ownerRecruiterId
       ? await prisma.user.findUnique({
           where: { id: existing.ownerRecruiterId },
-          select: { id: true, fullName: true, email: true },
+          select: { id: true, recruiterId: true, fullName: true, email: true },
         })
       : null;
 
@@ -1138,6 +1323,11 @@ export const assignCandidate = async (req: Request, res: Response, next: NextFun
 
     let newAssignedRecruiterIds = Array.isArray(existing.assignedRecruiterIds) ? [...existing.assignedRecruiterIds] : [];
     if (recruiterIdToStore) {
+      if (isReassign && existing.ownerRecruiterId) {
+        newAssignedRecruiterIds = newAssignedRecruiterIds.filter(
+          (id) => id !== existing.ownerRecruiterId && id !== previousRecruiter?.recruiterId
+        );
+      }
       if (!newAssignedRecruiterIds.includes(recruiterIdToStore)) {
         newAssignedRecruiterIds.push(recruiterIdToStore);
       }
@@ -1393,7 +1583,8 @@ export const getCandidateById = async (req: Request, res: Response, next: NextFu
       return;
     }
 
-    sendSuccess(res, { candidate });
+    const [enrichedCandidate] = await enrichCandidatesWithRecruiters([candidate]);
+    sendSuccess(res, { candidate: enrichedCandidate });
   } catch (err) {
     next(err);
   }
@@ -1754,7 +1945,19 @@ export const updateCandidate = async (req: Request, res: Response, next: NextFun
         candidateData.totalWorkingDays = computedTotalWorkingDays !== undefined ? computedTotalWorkingDays : (existing.totalWorkingDays ?? 0);
         if (finalAssignedRecruiterIds.length > 0) {
           candidateData.assignedRecruiterIds = finalAssignedRecruiterIds;
-          candidateData.ownerRecruiterId = finalAssignedRecruiterIds[0];
+          const firstRecId = finalAssignedRecruiterIds[0];
+          const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(firstRecId);
+          if (isUuid) {
+            candidateData.ownerRecruiterId = firstRecId;
+          } else {
+            const recUser = await tx.user.findFirst({
+              where: { OR: [{ recruiterId: firstRecId }, { email: firstRecId.toLowerCase() }] },
+              select: { id: true },
+            });
+            if (recUser?.id) {
+              candidateData.ownerRecruiterId = recUser.id;
+            }
+          }
         }
 
         // Build clean tags
@@ -1958,7 +2161,8 @@ export const updateCandidate = async (req: Request, res: Response, next: NextFun
       },
     });
 
-    sendSuccess(res, { candidate: updated }, 'Candidate profile updated successfully');
+    const [enrichedUpdated] = await enrichCandidatesWithRecruiters([updated]);
+    sendSuccess(res, { candidate: enrichedUpdated }, 'Candidate profile updated successfully');
   } catch (err) {
     next(err);
   }
