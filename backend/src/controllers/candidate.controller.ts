@@ -393,7 +393,17 @@ export const getCandidates = async (req: Request, res: Response, next: NextFunct
     if (to) to.setHours(23, 59, 59, 999);
 
     const andFilters: any[] = [];
-    const SELECTED_STATUSES = ['Selected', 'Joined', 'SELECTED', 'JOINED', 'selected', 'joined'];
+    const SELECTED_STATUSES = [
+      'Selected',
+      'Joined',
+      'SELECTED',
+      'JOINED',
+      'selected',
+      'joined',
+      'Selected (Not Joined Yet)',
+      'Joining Pending',
+      'Joining Scheduled',
+    ];
 
     const isArchivedRequested = String(archived).toLowerCase() === 'true' || String(archived) === '1';
     const isSelectedBucketRequested = String(req.query.selectedBucket).toLowerCase() === 'true';
@@ -405,25 +415,19 @@ export const getCandidates = async (req: Request, res: Response, next: NextFunct
       if (archivedAt) andFilters.push({ archivedAt });
       if (previousStatus) andFilters.push({ previousStatus: String(previousStatus) });
     } else if (isSelectedBucketRequested) {
-      // 2. SELECTED BUCKET: isArchived is false (or null) AND status in Selected/Joined
+      // 2. SELECTED BUCKET: isArchived is false AND (status in Selected/Joined OR actualJoiningStatus is set OR selectionDate is set)
+      andFilters.push({ isArchived: false });
       andFilters.push({
         OR: [
-          { isArchived: false },
-          { isArchived: null },
+          { status: { in: SELECTED_STATUSES } },
+          { actualJoiningStatus: { not: null } },
+          { selectionDate: { not: null } },
         ],
-      });
-      andFilters.push({
-        status: { in: SELECTED_STATUSES },
       });
     } else {
       // 3. CANDIDATE MASTER DIRECTORY: Single source of truth
       // MUST show every candidate that is NOT Archived AND NOT Selected!
-      andFilters.push({
-        OR: [
-          { isArchived: false },
-          { isArchived: null },
-        ],
-      });
+      andFilters.push({ isArchived: false });
 
       if (status && status !== 'ALL') {
         const statusStr = String(status).trim();
@@ -434,12 +438,11 @@ export const getCandidates = async (req: Request, res: Response, next: NextFunct
           andFilters.push({ status: statusStr });
         }
       } else {
-        // Explicit exclusion of Selected/Joined so unknown, legacy, null, and empty statuses NEVER disappear!
+        // Exclude Selected bucket candidates: not in SELECTED_STATUSES and no selection metadata
         andFilters.push({
-          OR: [
-            { status: null },
-            { status: { notIn: SELECTED_STATUSES } },
-          ],
+          status: { notIn: SELECTED_STATUSES },
+          actualJoiningStatus: null,
+          selectionDate: null,
         });
       }
     }
@@ -473,17 +476,35 @@ export const getCandidates = async (req: Request, res: Response, next: NextFunct
     const userRole = req.user?.role;
     const currentUserId = req.user?.userId;
 
+    let recruiterUserIds: string[] = [currentUserId].filter(Boolean) as string[];
+    if (currentUserId) {
+      try {
+        const recUser = await prisma.user.findUnique({
+          where: { id: currentUserId },
+          select: { id: true, recruiterId: true },
+        });
+        if (recUser?.recruiterId) {
+          recruiterUserIds.push(recUser.recruiterId);
+        }
+      } catch (uErr) {
+        console.warn('[getCandidates] Failed resolving current user recruiterId:', uErr);
+      }
+    }
+    recruiterUserIds = Array.from(new Set(recruiterUserIds));
+
     if (userRole === 'RECRUITER' || userRole === 'FREELANCE_RECRUITER') {
-      andFilters.push({
-        OR: [
-          { sourcingRecruiterId: currentUserId },
-          { ownerRecruiterId: currentUserId },
-          { createdById: currentUserId },
-          { applications: { some: { recruiterId: currentUserId } } },
-          { assignedRecruiterIds: { has: currentUserId } },
-          { tags: { has: `assignedRecruiter:${currentUserId}` } },
-        ],
-      });
+      const recruiterConditions: any[] = [];
+      for (const rId of recruiterUserIds) {
+        recruiterConditions.push(
+          { sourcingRecruiterId: rId },
+          { ownerRecruiterId: rId },
+          { createdById: rId },
+          { applications: { some: { recruiterId: rId } } },
+          { assignedRecruiterIds: { has: rId } },
+          { tags: { has: `assignedRecruiter:${rId}` } }
+        );
+      }
+      andFilters.push({ OR: recruiterConditions });
     } else if (userRole === 'TEAM_LEADER') {
       andFilters.push({
         OR: [
@@ -498,17 +519,39 @@ export const getCandidates = async (req: Request, res: Response, next: NextFunct
 
     const applicationSome: any = {};
     if (recruiterId) {
-      const recIdStr = String(recruiterId);
-      andFilters.push({
-        OR: [
-          { ownerRecruiterId: recIdStr },
-          { sourcingRecruiterId: recIdStr },
-          { createdById: recIdStr },
-          { applications: { some: { recruiterId: recIdStr } } },
-          { assignedRecruiterIds: { has: recIdStr } },
-          { tags: { has: `assignedRecruiter:${recIdStr}` } },
-        ],
-      });
+      const recIdStr = String(recruiterId).trim();
+      let targetIds = [recIdStr];
+      try {
+        const targetUser = await prisma.user.findFirst({
+          where: {
+            OR: [
+              { id: recIdStr },
+              { recruiterId: recIdStr },
+            ],
+          },
+          select: { id: true, recruiterId: true },
+        });
+        if (targetUser) {
+          if (targetUser.id) targetIds.push(targetUser.id);
+          if (targetUser.recruiterId) targetIds.push(targetUser.recruiterId);
+        }
+      } catch (tErr) {
+        console.warn('[getCandidates] Failed resolving target recruiterId:', tErr);
+      }
+      targetIds = Array.from(new Set(targetIds.filter(Boolean)));
+
+      const filterConditions: any[] = [];
+      for (const rId of targetIds) {
+        filterConditions.push(
+          { ownerRecruiterId: rId },
+          { sourcingRecruiterId: rId },
+          { createdById: rId },
+          { applications: { some: { recruiterId: rId } } },
+          { assignedRecruiterIds: { has: rId } },
+          { tags: { has: `assignedRecruiter:${rId}` } }
+        );
+      }
+      andFilters.push({ OR: filterConditions });
     }
     if (jobId) applicationSome.jobId = String(jobId);
 
@@ -582,7 +625,7 @@ export const getCandidates = async (req: Request, res: Response, next: NextFunct
     const statusFilters = andFilters.filter((filter: any) => !Object.prototype.hasOwnProperty.call(filter, 'status'));
     const statusSummaryWhere = statusFilters.length ? { AND: statusFilters } : {};
 
-    const [total, candidates, statusGroups] = await Promise.all([
+    const [total, candidates] = await Promise.all([
       prisma.candidate.count({ where }),
       prisma.candidate.findMany({
         where,
@@ -704,16 +747,21 @@ export const getCandidates = async (req: Request, res: Response, next: NextFunct
           },
         },
       }),
-      prisma.candidate.groupBy({
+    ]);
+
+    let statusCounts: Record<string, number> = {};
+    try {
+      const statusGroups = await prisma.candidate.groupBy({
         by: ['status'],
         where: statusSummaryWhere,
         _count: { _all: true },
-      }),
-    ]);
-
-    const statusCounts = Object.fromEntries(
-      statusGroups.map((group) => [group.status, group._count._all])
-    );
+      });
+      statusCounts = Object.fromEntries(
+        statusGroups.map((group) => [group.status || 'Unknown', group._count._all])
+      );
+    } catch (groupErr) {
+      console.warn('[getCandidates] status summary groupBy non-blocking notice:', groupErr);
+    }
 
     sendSuccess(res, {
       candidates,
@@ -1020,8 +1068,13 @@ export const createCandidate = async (req: Request, res: Response, next: NextFun
 export const assignCandidate = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const identifier = req.params.id;
-    const schema = z.object({ recruiterId: z.string().uuid().nullable() });
-    const { recruiterId } = schema.parse(req.body);
+    const schema = z.object({
+      recruiterId: z.string().nullable().optional(),
+      assignedRecruiterId: z.string().nullable().optional(),
+      assignedRecruiterIds: z.array(z.string()).optional(),
+    }).passthrough();
+    const parsedBody = schema.parse(req.body);
+    const rawRecruiterId = parsedBody.recruiterId !== undefined ? parsedBody.recruiterId : parsedBody.assignedRecruiterId;
 
     const existing = await prisma.candidate.findFirst({
       where: {
@@ -1044,15 +1097,24 @@ export const assignCandidate = async (req: Request, res: Response, next: NextFun
     }
 
     let recruiter: any = null;
-    if (recruiterId) {
+    let resolvedRecruiterUserId: string | null = null;
+    if (rawRecruiterId) {
+      const rId = String(rawRecruiterId).trim();
       recruiter = await prisma.user.findFirst({
-        where: { id: recruiterId, role: { in: ['RECRUITER', 'FREELANCE_RECRUITER'] }, isActive: true },
-        select: { id: true, fullName: true, email: true },
+        where: {
+          OR: [
+            { id: rId },
+            { recruiterId: rId },
+            { email: rId },
+          ],
+        },
+        select: { id: true, recruiterId: true, fullName: true, email: true, role: true },
       });
       if (!recruiter) {
         sendError(res, 'Recruiter not found or inactive', 400);
         return;
       }
+      resolvedRecruiterUserId = recruiter.id;
     }
 
     const previousRecruiter = existing.ownerRecruiterId
@@ -1062,7 +1124,9 @@ export const assignCandidate = async (req: Request, res: Response, next: NextFun
         })
       : null;
 
-    const isReassign = Boolean(existing.ownerRecruiterId && existing.ownerRecruiterId !== recruiterId);
+    const recruiterIdToStore = resolvedRecruiterUserId || (rawRecruiterId ? String(rawRecruiterId).trim() : null);
+    const recruiterId = recruiterIdToStore;
+    const isReassign = Boolean(existing.ownerRecruiterId && existing.ownerRecruiterId !== recruiterIdToStore);
     const candidateName = existing.fullName || existing.name || 'Candidate';
     const candidateCode = existing.candidateCode || existing.id;
     const assignedRecruiterName = recruiter ? (recruiter.fullName || recruiter.email) : 'Unassigned';
@@ -1072,10 +1136,36 @@ export const assignCandidate = async (req: Request, res: Response, next: NextFun
       ? `Candidate "${candidateName}" (${candidateCode}) reassigned from ${previousRecruiterName} to ${assignedRecruiterName}`
       : `Candidate "${candidateName}" (${candidateCode}) assigned to recruiter ${assignedRecruiterName}`;
 
+    let newAssignedRecruiterIds = Array.isArray(existing.assignedRecruiterIds) ? [...existing.assignedRecruiterIds] : [];
+    if (recruiterIdToStore) {
+      if (!newAssignedRecruiterIds.includes(recruiterIdToStore)) {
+        newAssignedRecruiterIds.push(recruiterIdToStore);
+      }
+      if (recruiter?.recruiterId && !newAssignedRecruiterIds.includes(recruiter.recruiterId)) {
+        newAssignedRecruiterIds.push(recruiter.recruiterId);
+      }
+    } else {
+      newAssignedRecruiterIds = [];
+    }
+
+    let newTags = Array.isArray(existing.tags) ? [...existing.tags] : [];
+    newTags = newTags.filter((t: string) => !t.startsWith('assignedRecruiter:') && !t.startsWith('assignedRecruiters:'));
+    if (recruiterIdToStore) {
+      newTags.push(`assignedRecruiter:${recruiterIdToStore}`);
+      if (recruiter?.recruiterId) {
+        newTags.push(`assignedRecruiter:${recruiter.recruiterId}`);
+      }
+      newTags.push(`assignedRecruiters:${newAssignedRecruiterIds.join(',')}`);
+    }
+
     const updated = await prisma.$transaction(async (tx) => {
       const candidate = await tx.candidate.update({
         where: { id: existing.id },
-        data: { ownerRecruiterId: recruiterId },
+        data: {
+          ownerRecruiterId: recruiterIdToStore,
+          assignedRecruiterIds: newAssignedRecruiterIds,
+          tags: newTags,
+        },
         include: {
           ownerRecruiter: { select: { id: true, recruiterId: true, fullName: true, email: true, recruiterType: true } },
         },
@@ -1654,11 +1744,12 @@ export const updateCandidate = async (req: Request, res: Response, next: NextFun
 
       if (isSelectionWorkflow) {
         if (effectiveSelDate) {
-          candidateData.selectionDate = effectiveSelDate;
+          candidateData.selectionDate = new Date(effectiveSelDate);
         }
         candidateData.actualJoiningStatus = effectiveJoiningStatus;
         if (lastWorkingDate !== undefined || existing.lastWorkingDate) {
-          candidateData.lastWorkingDate = lastWorkingDate !== undefined ? lastWorkingDate : existing.lastWorkingDate;
+          const lDate = lastWorkingDate !== undefined ? lastWorkingDate : existing.lastWorkingDate;
+          candidateData.lastWorkingDate = lDate ? new Date(lDate) : null;
         }
         candidateData.totalWorkingDays = computedTotalWorkingDays !== undefined ? computedTotalWorkingDays : (existing.totalWorkingDays ?? 0);
         if (finalAssignedRecruiterIds.length > 0) {
