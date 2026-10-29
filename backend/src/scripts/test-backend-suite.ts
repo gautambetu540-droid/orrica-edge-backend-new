@@ -26,7 +26,7 @@ async function runTestSuite() {
   let passedTests = 0;
   let totalTests = 0;
 
-  function assert(condition: boolean, testName: string, detail?: string) {
+  function assert(condition: any, testName: string, detail?: string) {
     totalTests++;
     if (!condition) {
       console.error(`❌ FAIL: ${testName}`, detail || '');
@@ -1912,7 +1912,7 @@ async function runTestSuite() {
   assert(movedToSelected.actualJoiningStatus === 'Selected (Not Joined Yet)', 'Joining status defaulted to "Selected (Not Joined Yet)"');
   assert(movedToSelected.totalWorkingDays === 0, 'Total working days defaulted to 0');
   assert(movedToSelected.clientName === 'Digitide Solutions', 'Client defaulted to canonical client "Digitide Solutions"');
-  assert(movedToSelected.assignedRecruiterIds?.includes('REC-ALPHA'), 'Assigned recruiter REC-ALPHA preserved');
+  assert(Boolean(movedToSelected.assignedRecruiterIds?.includes('REC-ALPHA')), 'Assigned recruiter REC-ALPHA preserved');
 
   // 19.3 Visibility Verification: Admin sees it, Assigned Recruiter sees it, Unassigned Recruiter does not
   const adminBucketAfterSelected = querySelectedBucket({ id: 'ADMIN-01', role: 'ADMIN' });
@@ -1958,7 +1958,7 @@ async function runTestSuite() {
   assert(movedBack.status === 'Selected', 'Candidate status restored to "Selected"');
   assert(movedBack.clientName === 'Radical Minds', 'Previously saved client "Radical Minds" restored intact');
   assert(movedBack.dateOfJoin === '2026-10-15', 'Previously saved DOJ restored intact');
-  assert(movedBack.remarks?.includes('excellence'), 'Previously saved remarks restored intact');
+  assert(Boolean(movedBack.remarks?.includes('excellence')), 'Previously saved remarks restored intact');
   assert(querySelectedBucket({ id: 'ADMIN-01', role: 'ADMIN' }).length === 1, 'Candidate reappears in Admin bucket');
   assert(querySelectedBucket({ id: 'REC-ALPHA', role: 'RECRUITER' }).length === 1, 'Candidate reappears in Assigned Recruiter bucket');
 
