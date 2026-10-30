@@ -567,6 +567,7 @@ export const getCandidates = async (req: Request, res: Response, next: NextFunct
       archivedFrom,
       archivedTo,
       previousStatus,
+      sortBy,
       page = '1',
       limit = '20',
     } = req.query;
@@ -600,7 +601,7 @@ export const getCandidates = async (req: Request, res: Response, next: NextFunct
       andFilters.push({ isArchived: true });
       const archivedAt = buildDateFilter(parseDate(archivedFrom), parseDate(archivedTo));
       if (archivedAt) andFilters.push({ archivedAt });
-      if (previousStatus) andFilters.push({ previousStatus: String(previousStatus) });
+      if (previousStatus && previousStatus !== 'ALL') andFilters.push({ previousStatus: String(previousStatus) });
     } else if (isSelectedBucketRequested) {
       // 2. SELECTED BUCKET: isArchived is false AND (status in Selected/Joined OR actualJoiningStatus is set OR selectionDate is set)
       andFilters.push({ isArchived: false });
@@ -808,13 +809,36 @@ export const getCandidates = async (req: Request, res: Response, next: NextFunct
     const statusFilters = andFilters.filter((filter: any) => !Object.prototype.hasOwnProperty.call(filter, 'status'));
     const statusSummaryWhere = statusFilters.length ? { AND: statusFilters } : {};
 
+    let orderBy: any[] = [{ createdAt: 'desc' }, { id: 'desc' }];
+    if (isArchivedRequested) {
+      if (sortBy === 'archived_asc') {
+        orderBy = [{ archivedAt: 'asc' }, { id: 'asc' }];
+      } else if (sortBy === 'name_asc') {
+        orderBy = [{ fullName: 'asc' }, { id: 'asc' }];
+      } else if (sortBy === 'name_desc') {
+        orderBy = [{ fullName: 'desc' }, { id: 'desc' }];
+      } else {
+        orderBy = [{ archivedAt: 'desc' }, { id: 'desc' }];
+      }
+    } else {
+      if (sortBy === 'name_asc') {
+        orderBy = [{ fullName: 'asc' }, { id: 'asc' }];
+      } else if (sortBy === 'name_desc') {
+        orderBy = [{ fullName: 'desc' }, { id: 'desc' }];
+      } else if (sortBy === 'created_asc') {
+        orderBy = [{ createdAt: 'asc' }, { id: 'asc' }];
+      } else {
+        orderBy = [{ createdAt: 'desc' }, { id: 'desc' }];
+      }
+    }
+
     const [total, candidates] = await Promise.all([
       prisma.candidate.count({ where }),
       prisma.candidate.findMany({
         where,
         skip,
         take: limitNum,
-        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        orderBy,
         include: {
           sourcingRecruiter: {
             select: {
@@ -3950,6 +3974,7 @@ export const bulkImportCandidates = async (
         email: true,
         fullName: true,
         name: true,
+        isArchived: true,
       },
     });
 
@@ -4764,7 +4789,9 @@ export const restoreCandidate = async (req: Request, res: Response, next: NextFu
 
     const userId = req.user?.userId || null;
     const userEmail = req.user?.email || 'User';
-    const restoredStatus = candidate.previousStatus || 'New';
+    const restoredStatus = (candidate.previousStatus && candidate.previousStatus !== 'Archived')
+      ? candidate.previousStatus
+      : (candidate.status && candidate.status !== 'Archived' ? candidate.status : 'New');
 
     const updated = await prisma.$transaction(async (tx) => {
       const restoredCandidate = await tx.candidate.update({

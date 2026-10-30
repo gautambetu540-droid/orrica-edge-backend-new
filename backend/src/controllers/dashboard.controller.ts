@@ -36,6 +36,7 @@ export const getDashboardStats = async (req: Request, res: Response, next: NextF
       activeCandidates,
       newCandidates,
       rejectedCandidates,
+      archivedCandidates,
       activeJobs,
       closedJobs,
       totalApplications,
@@ -52,10 +53,11 @@ export const getDashboardStats = async (req: Request, res: Response, next: NextF
       locationRows,
       noticeRows,
     ] = await Promise.all([
-      prisma.candidate.count(),
-      prisma.candidate.count({ where: { status: { notIn: ['REJECTED', 'DROPPED', 'Rejected', 'Not Interested', 'Not Eligible', 'Withdrawn'] } } }),
-      prisma.candidate.count({ where: { status: { in: ['NEW', 'New'] } } }),
-      prisma.candidate.count({ where: { status: { in: ['REJECTED', 'Rejected'] } } }),
+      prisma.candidate.count({ where: { isArchived: false } }),
+      prisma.candidate.count({ where: { isArchived: false, status: { notIn: ['REJECTED', 'DROPPED', 'Rejected', 'Not Interested', 'Not Eligible', 'Withdrawn'] } } }),
+      prisma.candidate.count({ where: { isArchived: false, status: { in: ['NEW', 'New'] } } }),
+      prisma.candidate.count({ where: { isArchived: false, status: { in: ['REJECTED', 'Rejected'] } } }),
+      prisma.candidate.count({ where: { isArchived: true } }),
 
       prisma.job.count({ where: { status: 'PUBLISHED' } }),
       prisma.job.count({ where: { status: { in: ['CLOSED', 'ARCHIVED'] } } }),
@@ -91,6 +93,8 @@ export const getDashboardStats = async (req: Request, res: Response, next: NextF
     sendSuccess(res, {
       metrics: {
         totalCandidates,
+        archivedCandidates,
+        candidateArchiveCount: archivedCandidates,
         activeCandidates,
         newCandidates,
         rejectedCandidates,
@@ -134,6 +138,7 @@ export const getAdminDashboard = async (req: Request, res: Response, next: NextF
       totalCandidates,
       activeCandidates,
       newCandidates,
+      archivedCandidates,
       activeJobs,
       closedJobs,
       totalApplications,
@@ -151,9 +156,10 @@ export const getAdminDashboard = async (req: Request, res: Response, next: NextF
       locationRows,
       noticeRows,
     ] = await Promise.all([
-      prisma.candidate.count(),
-      prisma.candidate.count({ where: { status: { notIn: ['REJECTED', 'DROPPED', 'Rejected', 'Not Interested', 'Not Eligible', 'Withdrawn'] } } }),
-      prisma.candidate.count({ where: { status: { in: ['NEW', 'New'] } } }),
+      prisma.candidate.count({ where: { isArchived: false } }),
+      prisma.candidate.count({ where: { isArchived: false, status: { notIn: ['REJECTED', 'DROPPED', 'Rejected', 'Not Interested', 'Not Eligible', 'Withdrawn'] } } }),
+      prisma.candidate.count({ where: { isArchived: false, status: { in: ['NEW', 'New'] } } }),
+      prisma.candidate.count({ where: { isArchived: true } }),
       prisma.job.count({ where: { status: 'PUBLISHED' } }),
       prisma.job.count({ where: { status: { in: ['CLOSED', 'ARCHIVED'] } } }),
       prisma.application.count(),
@@ -204,6 +210,8 @@ export const getAdminDashboard = async (req: Request, res: Response, next: NextF
       metrics: {
         totalCandidates,
         candidateTalentPool: totalCandidates,
+        archivedCandidates,
+        candidateArchiveCount: archivedCandidates,
         activeCandidates,
         newCandidates,
         activeJobs,
@@ -307,6 +315,7 @@ export const getTLDashboard = async (req: Request, res: Response, next: NextFunc
     };
 
     const candidatePodFilter = {
+      isArchived: false,
       OR: [
         { teamLeaderId: tlId },
         { sourcingRecruiterId: { in: recruiterIds } },
@@ -478,6 +487,7 @@ export const getRecruiterDashboard = async (req: Request, res: Response, next: N
     const todayEnd = new Date(new Date().setHours(23, 59, 59, 999));
 
     const candidateFilter = {
+      isArchived: false,
       OR: [
         { sourcingRecruiterId: recruiterId },
         { ownerRecruiterId: recruiterId },

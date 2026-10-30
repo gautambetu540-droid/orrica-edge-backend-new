@@ -17,6 +17,7 @@ export const getAdminPortalData = async (req: Request, res: Response, next: Next
     ] = await Promise.all([
       prisma.client.findMany({ orderBy: { createdAt: 'desc' } }),
       prisma.candidate.findMany({
+        where: { isArchived: false },
         orderBy: { createdAt: 'desc' },
         take: 1000,
         include: {
