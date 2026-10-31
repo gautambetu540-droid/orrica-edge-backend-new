@@ -6,7 +6,9 @@ import {
   getEmployeeUsers,
   updateEmployeeUser,
   deleteEmployeeUser,
+  resetEmployeeCredentials,
 } from '../controllers/admin-portal.controller';
+import rateLimit from 'express-rate-limit';
 import {
   getMyProfile,
   updateMyProfile,
@@ -44,6 +46,20 @@ router.post('/employees', createEmployeeUser);
 router.put('/employees/:id', updateEmployeeUser);
 router.patch('/employees/:id', updateEmployeeUser);
 router.delete('/employees/:id', deleteEmployeeUser);
+
+const resetCredentialsLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    success: false,
+    message: 'Too many password reset requests. Please try again after an hour.',
+  },
+});
+
+router.post('/employees/:id/reset-credentials', resetCredentialsLimiter, resetEmployeeCredentials);
+router.post('/employees/:id/resend-credentials', resetCredentialsLimiter, resetEmployeeCredentials);
 
 // Explicit welcome email endpoints for recruiters under admin portal
 router.post('/recruiters/:id/send-welcome', sendRecruiterWelcomeEmail);

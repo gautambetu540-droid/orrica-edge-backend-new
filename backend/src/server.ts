@@ -210,12 +210,27 @@ const repairLegacyClientNames = async () => {
   }
 };
 
+const validateEmailConfig = () => {
+  const missing: string[] = [];
+  if (!process.env.RESEND_API_KEY) missing.push('RESEND_API_KEY');
+  if (!process.env.EMAIL_FROM) missing.push('EMAIL_FROM');
+  if (!process.env.FRONTEND_URL) missing.push('FRONTEND_URL');
+
+  if (missing.length > 0) {
+    console.warn(`[EMAIL CONFIG WARNING] Missing email environment variables: ${missing.join(', ')}`);
+    console.warn(`[EMAIL CONFIG WARNING] Outbound emails will run in local simulation mode.`);
+  } else {
+    console.log(`[EMAIL CONFIG] Email provider verified (Resend active).`);
+  }
+};
+
 // Server Startup & Graceful Shutdown
 const startServer = async () => {
   try {
     await ensureDatabaseSchema();
     await repairLegacyClientNames();
     await ensureDefaultUniversalForm();
+    validateEmailConfig();
   } catch (err) {
     console.error('[STARTUP] Initialization warning:', err);
   }

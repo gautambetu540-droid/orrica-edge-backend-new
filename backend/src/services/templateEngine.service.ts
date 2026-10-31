@@ -180,6 +180,47 @@ export const DEFAULT_TEMPLATES: Record<string, DefaultTemplateDefinition> = {
     variables: ['client_name', 'company_name', 'support_email'],
   },
 
+  EMPLOYEE_WELCOME: {
+    templateKey: 'EMPLOYEE_WELCOME',
+    name: 'Employee Account Welcome & Credentials',
+    category: 'System',
+    subject: 'Welcome to Orrica Edge — Your Employee Account Credentials',
+    htmlBody:
+      '<div style="max-width:600px;margin:0 auto;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Roboto,sans-serif;color:#1e293b;line-height:1.6;">' +
+      '<h2 style="margin-top:0;color:#0f172a;font-size:20px;border-bottom:2px solid #f97316;padding-bottom:10px;">Welcome to the Orrica Edge Team</h2>' +
+      '<p>Dear <strong>{{employee_name}}</strong>,</p>' +
+      '<p>Your employee account (<strong>{{role}}</strong>) has been created on the Orrica Edge Platform.</p>' +
+      '<div style="background:#f8fafc;border:1px solid #cbd5e1;border-radius:10px;padding:20px;margin:24px 0;">' +
+      '<h3 style="margin-top:0;margin-bottom:14px;color:#0f172a;font-size:16px;">Your Login Credentials</h3>' +
+      '<table style="width:100%;border-collapse:collapse;">' +
+      '<tr><td style="padding:6px 0;color:#64748b;width:160px;font-size:14px;"><strong>Role:</strong></td><td style="padding:6px 0;font-size:14px;color:#0f172a;font-weight:600;">{{role}}</td></tr>' +
+      '<tr><td style="padding:6px 0;color:#64748b;font-size:14px;"><strong>Login Email:</strong></td><td style="padding:6px 0;font-size:14px;color:#0f172a;font-weight:600;">{{employee_email}}</td></tr>' +
+      '<tr><td style="padding:6px 0;color:#64748b;font-size:14px;"><strong>Temporary Password:</strong></td><td style="padding:6px 0;"><code style="background:#fee2e2;color:#991b1b;border:1px solid #fecaca;padding:4px 10px;border-radius:6px;font-size:15px;font-weight:bold;letter-spacing:0.5px;display:inline-block;">{{temporary_password}}</code></td></tr>' +
+      '</table>' +
+      '</div>' +
+      '<p>You can sign in immediately using the link below. For security purposes, you will be required to set a new permanent password on your first login.</p>' +
+      '<p style="margin:28px 0;text-align:center;">' +
+      '<a href="{{login_url}}" style="background:#f97316;color:#ffffff;padding:12px 28px;text-decoration:none;border-radius:8px;font-weight:700;display:inline-block;font-size:15px;">Sign In to Orrica Edge</a>' +
+      '</p>' +
+      '<p style="font-size:13px;color:#64748b;line-height:1.5;">' +
+      'Direct Login URL: <a href="{{login_url}}" style="color:#f97316;text-decoration:none;font-weight:600;">{{login_url}}</a>' +
+      '</p>' +
+      '<hr style="border:none;border-top:1px solid #e2e8f0;margin:24px 0;">' +
+      '<p style="margin-bottom:0;color:#475569;font-size:14px;">Regards,<br><strong>Orrica Edge Administration Team</strong></p>' +
+      '</div>',
+    plainText:
+      'Welcome {{employee_name}}!\n\n' +
+      'Your employee account ({{role}}) has been created on the Orrica Edge Platform.\n\n' +
+      'LOGIN CREDENTIALS:\n' +
+      '- Role: {{role}}\n' +
+      '- Login Email: {{employee_email}}\n' +
+      '- Temporary Password: {{temporary_password}}\n\n' +
+      'Sign in here: {{login_url}}\n\n' +
+      'Note: You will be required to change your password upon your first login.\n\n' +
+      'Regards,\nOrrica Edge Administration Team',
+    variables: ['employee_name', 'employee_email', 'role', 'temporary_password', 'login_url', 'support_email'],
+  },
+
   PASSWORD_RESET: {
     templateKey: 'PASSWORD_RESET',
     name: 'Password Reset Request',

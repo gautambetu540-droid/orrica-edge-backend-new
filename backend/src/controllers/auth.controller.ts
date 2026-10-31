@@ -205,7 +205,7 @@ export const login = async (req: Request, res: Response, next: NextFunction): Pr
           accessToken,
           requiresMfaSetup: false,
           requiresMfa: false,
-          requiresPasswordChange: (user.role === 'RECRUITER' || user.role === 'FREELANCE_RECRUITER' || user.role === 'SUB_ADMIN') && Boolean(user.mustSetPassword),
+          requiresPasswordChange: Boolean(user.mustSetPassword),
           user: userData,
         },
       });
@@ -222,7 +222,7 @@ export const login = async (req: Request, res: Response, next: NextFunction): Pr
         mfaChallengeToken,
         requiresMfaSetup: false,
         requiresMfa: true,
-        requiresPasswordChange: (user.role === 'RECRUITER' || user.role === 'FREELANCE_RECRUITER' || user.role === 'SUB_ADMIN') && Boolean(user.mustSetPassword),
+        requiresPasswordChange: Boolean(user.mustSetPassword),
         user: userData,
       },
     });

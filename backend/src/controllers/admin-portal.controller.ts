@@ -6,7 +6,8 @@ import { prisma } from '../prisma/client';
 import { config } from '../config';
 import { sendSuccess, sendError } from '../utils/response';
 import { logAudit } from '../services/audit.service';
-import { dispatchEmail } from '../services/email.service';
+import { dispatchEmail, sendDynamicEmail } from '../services/email.service';
+import { generateSecureTemporaryPassword } from '../utils/password';
 
 export const getAdminPortalData = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
@@ -509,7 +510,7 @@ export const createEmployeeUser = async (req: Request, res: Response, next: Next
       return;
     }
 
-    const temporaryPassword = `Orrica@${crypto.randomBytes(4).toString('hex')}`;
+    const temporaryPassword = generateSecureTemporaryPassword();
     const passwordHash = await bcrypt.hash(temporaryPassword, 12);
 
     let recruiterId: string | null = null;
@@ -568,6 +569,11 @@ export const createEmployeeUser = async (req: Request, res: Response, next: Next
       },
     });
 
+    const frontendBaseUrl = (process.env.FRONTEND_URL || 'https://orricaedge.com').replace(/\/+$/, '');
+    const loginUrl = `${frontendBaseUrl}/login`;
+    let emailSent = false;
+    let emailErrorReason: string | undefined;
+
     if (data.role === 'RECRUITER' || data.role === 'FREELANCE_RECRUITER') {
       await prisma.recruiterPermission.create({
         data: {
@@ -584,14 +590,47 @@ export const createEmployeeUser = async (req: Request, res: Response, next: Next
       });
 
       const setupUrl = `${config.recruiter.passwordSetupUrl}?token=${rawSetupToken}&email=${encodeURIComponent(user.email)}`;
-      dispatchEmail('RECRUITER_WELCOME', user.email, {
-        recruiter_id: user.recruiterId || '',
-        recruiter_name: user.fullName,
-        recruiter_email: user.email,
-        temporary_password: temporaryPassword,
-        setup_url: setupUrl,
-        login_url: config.recruiter.loginUrl,
-      });
+      try {
+        await sendDynamicEmail({
+          templateKey: 'RECRUITER_WELCOME',
+          recipient: user.email,
+          variables: {
+            recruiter_id: user.recruiterId || '',
+            recruiter_name: user.fullName,
+            recruiter_email: user.email,
+            temporary_password: temporaryPassword,
+            setup_url: setupUrl,
+            login_url: config.recruiter.loginUrl || loginUrl,
+          },
+        });
+        emailSent = true;
+      } catch (err: any) {
+        emailSent = false;
+        emailErrorReason = err?.message || 'Failed to dispatch email';
+        console.warn(`[CREATE RECRUITER] Email dispatch failed for email="${user.email}":`, emailErrorReason);
+      }
+    } else {
+      // Non-recruiter employee (SUB_ADMIN, ADMIN, TEAM_LEADER, HR_OPERATIONS)
+      try {
+        const formattedRole = data.role.replace(/_/g, ' ');
+        await sendDynamicEmail({
+          templateKey: 'EMPLOYEE_WELCOME',
+          recipient: user.email,
+          variables: {
+            employee_name: user.fullName,
+            employee_email: user.email,
+            role: formattedRole,
+            temporary_password: temporaryPassword,
+            login_url: loginUrl,
+            support_email: 'support@orricaedge.com',
+          },
+        });
+        emailSent = true;
+      } catch (err: any) {
+        emailSent = false;
+        emailErrorReason = err?.message || 'Failed to dispatch email';
+        console.warn(`[CREATE EMPLOYEE] Email dispatch failed for email="${user.email}":`, emailErrorReason);
+      }
     }
 
     await logAudit({
@@ -600,10 +639,22 @@ export const createEmployeeUser = async (req: Request, res: Response, next: Next
       module: 'USERS',
       entity: 'User',
       entityId: user.id,
-      newValue: { fullName: user.fullName, email: user.email, role: user.role },
+      newValue: { fullName: user.fullName, email: user.email, role: user.role, emailSent },
     });
 
-    sendSuccess(res, { employee: user, temporaryPassword }, 'Employee account created successfully and credentials dispatched', 201);
+    sendSuccess(
+      res,
+      {
+        employee: user,
+        temporaryPassword,
+        emailSent,
+        emailErrorReason,
+      },
+      emailSent
+        ? 'Employee account created successfully and credentials dispatched via email.'
+        : 'Employee account created successfully. Please share the temporary credentials manually.',
+      201
+    );
   } catch (err) {
     next(err);
   }
@@ -789,6 +840,143 @@ export const deleteEmployeeUser = async (req: Request, res: Response, next: Next
     });
 
     sendSuccess(res, { deleted: true, id }, 'Employee deleted successfully');
+  } catch (err) {
+    next(err);
+  }
+};
+
+
+export const resetEmployeeCredentials = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const { id } = req.params;
+
+    const targetUser = await prisma.user.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        email: true,
+        fullName: true,
+        role: true,
+        recruiterId: true,
+        isActive: true,
+      },
+    });
+
+    if (!targetUser) {
+      sendError(res, 'Employee account not found.', 404);
+      return;
+    }
+
+    if (!targetUser.isActive) {
+      sendError(res, 'Cannot reset credentials for an inactive account.', 400);
+      return;
+    }
+
+    // Role privilege escalation checks:
+    // Sub-Admin cannot reset credentials for Admin or Super Admin accounts
+    if (req.user?.role === 'SUB_ADMIN' && (targetUser.role === 'ADMIN' || targetUser.role === 'SUPER_ADMIN')) {
+      sendError(res, 'Forbidden: Sub-Admin cannot reset credentials for Admin or Super Admin accounts.', 403, 'PRIVILEGE_ESCALATION_BLOCKED');
+      return;
+    }
+
+    // Non-SuperAdmin cannot reset SuperAdmin credentials
+    if (req.user?.role !== 'SUPER_ADMIN' && targetUser.role === 'SUPER_ADMIN') {
+      sendError(res, 'Forbidden: Only Super Admin can reset credentials for Super Admin accounts.', 403, 'PRIVILEGE_ESCALATION_BLOCKED');
+      return;
+    }
+
+    // 1. Generate strong temporary password
+    const temporaryPassword = generateSecureTemporaryPassword();
+    const passwordHash = await bcrypt.hash(temporaryPassword, 12);
+
+    // 2. Revoke all existing refresh tokens
+    await prisma.refreshToken.deleteMany({
+      where: { userId: targetUser.id },
+    });
+
+    // 3. Update user passwordHash and mustSetPassword
+    await prisma.user.update({
+      where: { id: targetUser.id },
+      data: {
+        passwordHash,
+        mustSetPassword: true,
+        failedLoginAttempts: 0,
+        lockUntil: null,
+      },
+    });
+
+    // 4. Send welcome email with new temporary password
+    const frontendBaseUrl = (process.env.FRONTEND_URL || 'https://orricaedge.com').replace(/\/+$/, '');
+    const loginUrl = `${frontendBaseUrl}/login`;
+    const isRecruiter = targetUser.role === 'RECRUITER' || targetUser.role === 'FREELANCE_RECRUITER';
+    let emailSent = false;
+    let emailErrorReason: string | undefined;
+
+    try {
+      if (isRecruiter) {
+        await sendDynamicEmail({
+          templateKey: 'RECRUITER_WELCOME',
+          recipient: targetUser.email,
+          variables: {
+            recruiter_id: targetUser.recruiterId || '',
+            recruiter_name: targetUser.fullName,
+            recruiter_email: targetUser.email,
+            temporary_password: temporaryPassword,
+            setup_url: `${config.recruiter.passwordSetupUrl}?email=${encodeURIComponent(targetUser.email)}`,
+            login_url: config.recruiter.loginUrl || loginUrl,
+          },
+        });
+      } else {
+        const formattedRole = targetUser.role.replace(/_/g, ' ');
+        await sendDynamicEmail({
+          templateKey: 'EMPLOYEE_WELCOME',
+          recipient: targetUser.email,
+          variables: {
+            employee_name: targetUser.fullName,
+            employee_email: targetUser.email,
+            role: formattedRole,
+            temporary_password: temporaryPassword,
+            login_url: loginUrl,
+            support_email: 'support@orricaedge.com',
+          },
+        });
+      }
+      emailSent = true;
+    } catch (err: any) {
+      emailSent = false;
+      emailErrorReason = err?.message || 'Failed to dispatch email';
+      console.warn(`[RESET CREDENTIALS] Email dispatch failed for email="${targetUser.email}":`, emailErrorReason);
+    }
+
+    // 5. Audit log
+    await logAudit({
+      req,
+      action: 'RESET_EMPLOYEE_CREDENTIALS',
+      module: 'USERS',
+      entity: 'User',
+      entityId: targetUser.id,
+      newValue: {
+        email: targetUser.email,
+        role: targetUser.role,
+        emailSent,
+      },
+    });
+
+    sendSuccess(
+      res,
+      {
+        id: targetUser.id,
+        email: targetUser.email,
+        fullName: targetUser.fullName,
+        role: targetUser.role,
+        temporaryPassword,
+        emailSent,
+        emailErrorReason,
+      },
+      emailSent
+        ? 'Credentials reset and welcome email sent successfully.'
+        : 'Credentials reset successfully. Please share the temporary password manually.'
+    );
   } catch (err) {
     next(err);
   }

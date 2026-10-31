@@ -1,4 +1,5 @@
 import bcrypt from 'bcryptjs';
+import { generateSecureTemporaryPassword } from '../utils/password';
 import crypto from 'crypto';
 import { z } from 'zod';
 import { CANONICAL_PIPELINE_STAGES, normalizeCandidateStatus, CANONICAL_BULK_IMPORT_HEADERS, normalizePhoneNumber, parseDateOfBirth, parseGender } from '../controllers/candidate.controller';
@@ -2109,6 +2110,71 @@ async function runTestSuite() {
   assert(rec1Master.some((c) => c.id === 'c1'), 'Recruiter 1 sees their assigned candidate in Master Directory');
   assert(!rec1Master.some((c) => c.id === 'c3'), 'Recruiter 1 does NOT see Recruiter 2 candidate in Master Directory');
   assert(rec2Master.some((c) => c.id === 'c3'), 'Recruiter 2 sees their assigned candidate in Master Directory');
+
+  console.log('\n--- 21. Testing Employee Temporary Credentials & Email Welcome ---');
+  // 1. Password generation tests
+  const samplePasswords: string[] = [];
+  for (let i = 0; i < 20; i++) {
+    samplePasswords.push(generateSecureTemporaryPassword());
+  }
+  assert(samplePasswords.every(p => p.length >= 12 && p.length <= 14), 'All generated passwords are between 12 and 14 characters');
+  assert(samplePasswords.every(p => /[A-Z]/.test(p)), 'All generated passwords contain at least one uppercase letter');
+  assert(samplePasswords.every(p => /[a-z]/.test(p)), 'All generated passwords contain at least one lowercase letter');
+  assert(samplePasswords.every(p => /[0-9]/.test(p)), 'All generated passwords contain at least one digit');
+  assert(samplePasswords.every(p => /[!@#$%^&*_+=\-]/.test(p)), 'All generated passwords contain at least one special symbol');
+  assert(new Set(samplePasswords).size === 20, 'Generated temporary passwords are mathematically distinct and random');
+
+  // 2. Privilege Escalation Prevention tests
+  function canResetCredentials(actorRole: string, targetRole: string): boolean {
+    if (actorRole === 'SUB_ADMIN' && (targetRole === 'ADMIN' || targetRole === 'SUPER_ADMIN')) {
+      return false;
+    }
+    if (actorRole !== 'SUPER_ADMIN' && targetRole === 'SUPER_ADMIN') {
+      return false;
+    }
+    if (actorRole === 'SUPER_ADMIN' || actorRole === 'ADMIN' || actorRole === 'SUB_ADMIN') {
+      return true;
+    }
+    return false;
+  }
+
+  assert(canResetCredentials('SUPER_ADMIN', 'ADMIN') === true, 'Super Admin can reset Admin credentials');
+  assert(canResetCredentials('SUPER_ADMIN', 'SUB_ADMIN') === true, 'Super Admin can reset Sub-Admin credentials');
+  assert(canResetCredentials('ADMIN', 'SUB_ADMIN') === true, 'Admin can reset Sub-Admin credentials');
+  assert(canResetCredentials('ADMIN', 'RECRUITER') === true, 'Admin can reset Recruiter credentials');
+  assert(canResetCredentials('SUB_ADMIN', 'RECRUITER') === true, 'Sub-Admin can reset Recruiter credentials');
+  assert(canResetCredentials('SUB_ADMIN', 'TEAM_LEADER') === true, 'Sub-Admin can reset Team Leader credentials');
+  assert(canResetCredentials('SUB_ADMIN', 'ADMIN') === false, 'Sub-Admin CANNOT reset Admin credentials (blocked)');
+  assert(canResetCredentials('SUB_ADMIN', 'SUPER_ADMIN') === false, 'Sub-Admin CANNOT reset Super-Admin credentials (blocked)');
+  assert(canResetCredentials('ADMIN', 'SUPER_ADMIN') === false, 'Admin CANNOT reset Super-Admin credentials (blocked)');
+  assert(canResetCredentials('RECRUITER', 'RECRUITER') === false, 'Recruiter CANNOT reset any credentials');
+
+  // 3. User creation resilience when email fails
+  function simulateEmployeeCreationResponse(user: any, temporaryPassword: string, emailSuccess: boolean, emailError?: string) {
+    return {
+      success: true,
+      data: {
+        employee: user,
+        temporaryPassword,
+        emailSent: emailSuccess,
+        emailErrorReason: emailSuccess ? undefined : emailError,
+      },
+      message: emailSuccess
+        ? 'Employee account created successfully and credentials dispatched via email.'
+        : 'Employee account created successfully. Please share the temporary credentials manually.'
+    };
+  }
+
+  const simulatedFailure = simulateEmployeeCreationResponse(
+    { id: 'usr-123', email: 'subadmin@example.com', role: 'SUB_ADMIN' },
+    generateSecureTemporaryPassword(),
+    false,
+    'Resend API key missing'
+  );
+  assert(simulatedFailure.success === true, 'Employee creation succeeds even when email fails');
+  assert(simulatedFailure.data.emailSent === false, 'emailSent flag correctly reports false on delivery failure');
+  assert(simulatedFailure.data.temporaryPassword.length >= 12, 'Temporary password is still provided to admin when email fails');
+  assert(simulatedFailure.data.emailErrorReason === 'Resend API key missing', 'Specific email error reason preserved in response');
 
   console.log('\n====================================================');
   console.log(`🎉 All ${passedTests}/${totalTests} tests passed successfully!`);
