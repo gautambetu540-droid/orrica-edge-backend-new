@@ -20,7 +20,7 @@ const updateProfileSchema = z
 
 const changePasswordSchema = z
   .object({
-    currentPassword: z.string().min(1, 'Current password is required'),
+    currentPassword: z.string().optional(),
     newPassword: z
       .string()
       .min(8, 'New password must be at least 8 characters long')
@@ -259,6 +259,7 @@ export const changePassword = async (
         email: true,
         passwordHash: true,
         isActive: true,
+        mustSetPassword: true,
       },
     });
 
@@ -268,10 +269,22 @@ export const changePassword = async (
     }
 
     // 1. Verify current password
-    const matchesCurrent = await bcrypt.compare(data.currentPassword, user.passwordHash);
-    if (!matchesCurrent) {
-      sendError(res, 'Current password is incorrect.', 400);
-      return;
+    if (!user.mustSetPassword) {
+      if (!data.currentPassword || !data.currentPassword.trim()) {
+        sendError(res, 'Current password is required.', 400);
+        return;
+      }
+      const matchesCurrent = await bcrypt.compare(data.currentPassword, user.passwordHash);
+      if (!matchesCurrent) {
+        sendError(res, 'Current password is incorrect.', 400);
+        return;
+      }
+    } else if (data.currentPassword && data.currentPassword.trim()) {
+      const matchesCurrent = await bcrypt.compare(data.currentPassword, user.passwordHash);
+      if (!matchesCurrent) {
+        sendError(res, 'Current password is incorrect.', 400);
+        return;
+      }
     }
 
     // 2. Verify new password is not identical to current password

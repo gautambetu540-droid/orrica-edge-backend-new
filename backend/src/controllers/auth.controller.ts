@@ -36,7 +36,7 @@ const hashSetupToken = (token: string): string =>
 
 const changePasswordSchema = z
   .object({
-    currentPassword: z.string().min(1, 'Current password is required'),
+    currentPassword: z.string().optional(),
     newPassword: z
       .string()
       .min(8, 'New password must be at least 8 characters')
@@ -352,6 +352,7 @@ export const changeMyPassword = async (
         role: true,
         passwordHash: true,
         isActive: true,
+        mustSetPassword: true,
       },
     });
 
@@ -360,18 +361,40 @@ export const changeMyPassword = async (
       return;
     }
 
-    const currentPasswordMatches = await bcrypt.compare(
-      data.currentPassword,
-      user.passwordHash
-    );
-
-    if (!currentPasswordMatches) {
-      res.status(400).json({
-        success: false,
-        code: 'INVALID_CURRENT_PASSWORD',
-        message: 'Current password is incorrect.',
-      });
-      return;
+    if (!user.mustSetPassword) {
+      if (!data.currentPassword || !data.currentPassword.trim()) {
+        res.status(400).json({
+          success: false,
+          code: 'CURRENT_PASSWORD_REQUIRED',
+          message: 'Current password is required.',
+        });
+        return;
+      }
+      const currentPasswordMatches = await bcrypt.compare(
+        data.currentPassword,
+        user.passwordHash
+      );
+      if (!currentPasswordMatches) {
+        res.status(400).json({
+          success: false,
+          code: 'INVALID_CURRENT_PASSWORD',
+          message: 'Current password is incorrect.',
+        });
+        return;
+      }
+    } else if (data.currentPassword && data.currentPassword.trim()) {
+      const currentPasswordMatches = await bcrypt.compare(
+        data.currentPassword,
+        user.passwordHash
+      );
+      if (!currentPasswordMatches) {
+        res.status(400).json({
+          success: false,
+          code: 'INVALID_CURRENT_PASSWORD',
+          message: 'Current password is incorrect.',
+        });
+        return;
+      }
     }
 
     const samePassword = await bcrypt.compare(data.newPassword, user.passwordHash);
