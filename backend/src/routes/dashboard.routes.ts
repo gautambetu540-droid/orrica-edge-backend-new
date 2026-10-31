@@ -13,7 +13,7 @@ const router = Router();
 router.get(
   '/stats',
   authenticateJwt,
-  requireRoles('SUPER_ADMIN', 'ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
+  requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
   getDashboardStats
 );
 
@@ -21,7 +21,7 @@ router.get(
 router.get(
   '/admin',
   authenticateJwt,
-  requireRoles('SUPER_ADMIN', 'ADMIN'),
+  requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN'),
   getAdminDashboard
 );
 
@@ -29,7 +29,7 @@ router.get(
 router.get(
   '/tl',
   authenticateJwt,
-  requireRoles('SUPER_ADMIN', 'ADMIN', 'TEAM_LEADER'),
+  requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN', 'TEAM_LEADER'),
   getTLDashboard
 );
 
@@ -37,7 +37,7 @@ router.get(
 router.get(
   '/recruiter',
   authenticateJwt,
-  requireRoles('SUPER_ADMIN', 'ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
+  requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
   getRecruiterDashboard
 );
 

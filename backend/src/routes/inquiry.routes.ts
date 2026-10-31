@@ -15,6 +15,6 @@ router.post('/recruiter-partner', submitRecruiterPartnerInquiry);
 router.post('/contact', submitContactInquiry);
 
 // Admin review endpoint
-router.get('/', authenticateJwt, requireRoles('SUPER_ADMIN', 'ADMIN'), getInquiries);
+router.get('/', authenticateJwt, requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN'), getInquiries);
 
 export default router;

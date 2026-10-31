@@ -7,7 +7,7 @@ import { authenticateJwt, requireRoles, requireRecruiterPermission } from '../mi
 
 const router = Router();
 
-router.post('/', authenticateJwt, requireRoles('SUPER_ADMIN', 'ADMIN', 'RECRUITER'), requireRecruiterPermission('interviews'), scheduleInterview);
-router.patch('/:id/status', authenticateJwt, requireRoles('SUPER_ADMIN', 'ADMIN', 'RECRUITER'), requireRecruiterPermission('interviews'), updateInterviewStatus);
+router.post('/', authenticateJwt, requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN', 'RECRUITER'), requireRecruiterPermission('interviews'), scheduleInterview);
+router.patch('/:id/status', authenticateJwt, requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN', 'RECRUITER'), requireRecruiterPermission('interviews'), updateInterviewStatus);
 
 export default router;

@@ -4,6 +4,8 @@ import {
   getAuditLogs,
   createEmployeeUser,
   getEmployeeUsers,
+  updateEmployeeUser,
+  deleteEmployeeUser,
 } from '../controllers/admin-portal.controller';
 import {
   getMyProfile,
@@ -39,6 +41,9 @@ router.get('/portal-data', getAdminPortalData);
 router.get('/audit-logs', getAuditLogs);
 router.get('/employees', getEmployeeUsers);
 router.post('/employees', createEmployeeUser);
+router.put('/employees/:id', updateEmployeeUser);
+router.patch('/employees/:id', updateEmployeeUser);
+router.delete('/employees/:id', deleteEmployeeUser);
 
 // Explicit welcome email endpoints for recruiters under admin portal
 router.post('/recruiters/:id/send-welcome', sendRecruiterWelcomeEmail);

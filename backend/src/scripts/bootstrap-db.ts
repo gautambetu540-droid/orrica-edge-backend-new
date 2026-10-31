@@ -21,6 +21,7 @@ export const ensureDatabaseSchema = async () => {
   await executeSafe(`ALTER TYPE "Role" ADD VALUE IF NOT EXISTS 'TEAM_LEADER';`, 'Add Role.TEAM_LEADER');
   await executeSafe(`ALTER TYPE "Role" ADD VALUE IF NOT EXISTS 'FREELANCE_RECRUITER';`, 'Add Role.FREELANCE_RECRUITER');
   await executeSafe(`ALTER TYPE "Role" ADD VALUE IF NOT EXISTS 'EMPLOYER';`, 'Add Role.EMPLOYER');
+  await executeSafe(`ALTER TYPE "Role" ADD VALUE IF NOT EXISTS 'SUB_ADMIN';`, 'Add Role.SUB_ADMIN');
 
   await executeSafe(`
     DO $$ BEGIN

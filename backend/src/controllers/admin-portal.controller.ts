@@ -496,6 +496,10 @@ export const createEmployeeUser = async (req: Request, res: Response, next: Next
       sendError(res, 'Forbidden: Sub-Admin accounts cannot create new recruiters.', 403, 'SUB_ADMIN_CANNOT_CREATE_RECRUITER');
       return;
     }
+    if (req.user?.role === 'SUB_ADMIN' && (data.role === 'SUPER_ADMIN' || data.role === 'ADMIN')) {
+      sendError(res, 'Forbidden: Sub-Admin accounts cannot assign Admin or Super Admin roles.', 403, 'PRIVILEGE_ESCALATION_BLOCKED');
+      return;
+    }
     const existing = await prisma.user.findUnique({
       where: { email: data.email },
       select: { id: true },
@@ -650,6 +654,141 @@ export const getEmployeeUsers = async (req: Request, res: Response, next: NextFu
     }
 
     sendSuccess(res, { employees });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const updateEmployeeUser = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const { id } = req.params;
+    if (!id) {
+      sendError(res, 'Employee ID is required', 400);
+      return;
+    }
+
+    const targetUser = await prisma.user.findUnique({
+      where: { id },
+      select: { id: true, role: true, email: true, fullName: true },
+    });
+
+    if (!targetUser) {
+      sendError(res, 'Employee not found', 404);
+      return;
+    }
+
+    // Privilege escalation protection
+    if (req.user?.role === 'SUB_ADMIN') {
+      if (targetUser.role === 'SUPER_ADMIN' || targetUser.role === 'ADMIN') {
+        sendError(res, 'Forbidden: Sub-Admin cannot modify Administrator accounts.', 403, 'PRIVILEGE_ESCALATION_BLOCKED');
+        return;
+      }
+      if (req.body.role === 'SUPER_ADMIN' || req.body.role === 'ADMIN') {
+        sendError(res, 'Forbidden: Sub-Admin cannot grant Administrator roles.', 403, 'PRIVILEGE_ESCALATION_BLOCKED');
+        return;
+      }
+      if (req.body.role === 'RECRUITER' || req.body.role === 'FREELANCE_RECRUITER') {
+        sendError(res, 'Forbidden: Sub-Admin accounts cannot assign recruiter roles.', 403, 'SUB_ADMIN_CANNOT_CREATE_RECRUITER');
+        return;
+      }
+    }
+
+    const schema = z.object({
+      fullName: z.string().trim().min(2).max(120).optional(),
+      email: z.string().trim().email().toLowerCase().optional(),
+      phone: z.string().trim().max(30).nullable().optional(),
+      role: z.enum(['ADMIN', 'SUPER_ADMIN', 'SUB_ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER']).optional(),
+      department: z.string().trim().optional(),
+      designation: z.string().trim().optional(),
+      isActive: z.boolean().optional(),
+    });
+
+    const parsed = schema.parse(req.body);
+
+    const updated = await prisma.user.update({
+      where: { id },
+      data: {
+        ...(parsed.fullName ? { fullName: parsed.fullName } : {}),
+        ...(parsed.email ? { email: parsed.email } : {}),
+        ...(parsed.phone !== undefined ? { phone: parsed.phone } : {}),
+        ...(parsed.role ? { role: parsed.role as any } : {}),
+        ...(parsed.isActive !== undefined ? { isActive: parsed.isActive } : {}),
+      },
+      select: {
+        id: true,
+        email: true,
+        fullName: true,
+        role: true,
+        phone: true,
+        isActive: true,
+      },
+    });
+
+    await logAudit({
+      req,
+      action: 'UPDATE_EMPLOYEE',
+      module: 'USERS',
+      entity: 'User',
+      entityId: id,
+      oldValue: targetUser,
+      newValue: updated,
+    });
+
+    sendSuccess(res, { employee: updated }, 'Employee updated successfully');
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const deleteEmployeeUser = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const { id } = req.params;
+    if (!id) {
+      sendError(res, 'Employee ID is required', 400);
+      return;
+    }
+
+    const targetUser = await prisma.user.findUnique({
+      where: { id },
+      select: { id: true, role: true, email: true, fullName: true },
+    });
+
+    if (!targetUser) {
+      sendError(res, 'Employee not found', 404);
+      return;
+    }
+
+    if (req.user?.role === 'SUB_ADMIN' && (targetUser.role === 'SUPER_ADMIN' || targetUser.role === 'ADMIN')) {
+      sendError(res, 'Forbidden: Sub-Admin cannot delete Administrator accounts.', 403, 'PRIVILEGE_ESCALATION_BLOCKED');
+      return;
+    }
+
+    // Unassign candidates and delete user
+    await prisma.$transaction(async (tx) => {
+      await tx.candidate.updateMany({ where: { createdById: id }, data: { createdById: null } });
+      await tx.candidate.updateMany({ where: { ownerRecruiterId: id }, data: { ownerRecruiterId: null } });
+      await tx.candidate.updateMany({ where: { sourcingRecruiterId: id }, data: { sourcingRecruiterId: null } });
+      await tx.candidate.updateMany({ where: { archivedById: id }, data: { archivedById: null } });
+      await tx.candidate.updateMany({ where: { teamLeaderId: id }, data: { teamLeaderId: null } });
+      await tx.candidate.updateMany({ where: { userId: id }, data: { userId: null } });
+      await tx.candidateActivity.updateMany({ where: { userId: id }, data: { userId: null } });
+      await tx.candidateTimeline.updateMany({ where: { userId: id }, data: { userId: null } });
+      await tx.refreshToken.deleteMany({ where: { userId: id } });
+      await tx.notification.deleteMany({ where: { userId: id } });
+      await tx.recruiterPermission.deleteMany({ where: { recruiterId: id } });
+      await tx.user.delete({ where: { id } });
+    });
+
+    await logAudit({
+      req,
+      action: 'DELETE_EMPLOYEE',
+      module: 'USERS',
+      entity: 'User',
+      entityId: id,
+      oldValue: targetUser,
+    });
+
+    sendSuccess(res, { deleted: true, id }, 'Employee deleted successfully');
   } catch (err) {
     next(err);
   }

@@ -15,13 +15,13 @@ const router = Router();
 router.get('/', getBlogPosts);
 
 // Admin Career Resources — returns both DRAFT and PUBLISHED posts.
-router.get('/admin', authenticateJwt, requireRoles('SUPER_ADMIN', 'ADMIN'), getAdminBlogPosts);
+router.get('/admin', authenticateJwt, requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN'), getAdminBlogPosts);
 
 router.get('/:slug', getBlogPostBySlug);
 
 // Admin-only management
-router.post('/', authenticateJwt, requireRoles('SUPER_ADMIN', 'ADMIN'), createBlogPost);
-router.put('/:id', authenticateJwt, requireRoles('SUPER_ADMIN', 'ADMIN'), updateBlogPost);
-router.delete('/:id', authenticateJwt, requireRoles('SUPER_ADMIN', 'ADMIN'), deleteBlogPost);
+router.post('/', authenticateJwt, requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN'), createBlogPost);
+router.put('/:id', authenticateJwt, requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN'), updateBlogPost);
+router.delete('/:id', authenticateJwt, requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN'), deleteBlogPost);
 
 export default router;

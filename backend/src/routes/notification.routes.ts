@@ -11,21 +11,21 @@ const router = Router();
 router.get(
   '/',
   authenticateJwt,
-  requireRoles('SUPER_ADMIN', 'ADMIN', 'RECRUITER'),
+  requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN', 'RECRUITER'),
   getMyNotifications
 );
 
 router.patch(
   '/:id/read',
   authenticateJwt,
-  requireRoles('SUPER_ADMIN', 'ADMIN', 'RECRUITER'),
+  requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN', 'RECRUITER'),
   markNotificationRead
 );
 
 router.post(
   '/read-all',
   authenticateJwt,
-  requireRoles('SUPER_ADMIN', 'ADMIN', 'RECRUITER'),
+  requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN', 'RECRUITER'),
   markAllNotificationsRead
 );
 

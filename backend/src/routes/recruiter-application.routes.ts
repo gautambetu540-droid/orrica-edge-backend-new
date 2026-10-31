@@ -17,7 +17,7 @@ router.post('/', submitRecruiterApplication);
 router.get(
   '/',
   authenticateJwt,
-  requireRoles('SUPER_ADMIN', 'ADMIN'),
+  requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN'),
   getRecruiterApplications
 );
 
@@ -25,7 +25,7 @@ router.get(
 router.get(
   '/:id',
   authenticateJwt,
-  requireRoles('SUPER_ADMIN', 'ADMIN'),
+  requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN'),
   getRecruiterApplicationById
 );
 
@@ -33,7 +33,7 @@ router.get(
 router.patch(
   '/:id/status',
   authenticateJwt,
-  requireRoles('SUPER_ADMIN', 'ADMIN'),
+  requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN'),
   updateRecruiterApplicationStatus
 );
 
@@ -41,7 +41,7 @@ router.patch(
 router.post(
   '/:id/approve',
   authenticateJwt,
-  requireRoles('SUPER_ADMIN', 'ADMIN'),
+  requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN'),
   approveRecruiterApplication
 );
 

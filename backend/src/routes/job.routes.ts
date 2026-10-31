@@ -23,9 +23,9 @@ router.get('/', optionalAuthenticateJwt, requireRecruiterJobPermission, getJobs)
 router.get('/:slug', optionalAuthenticateJwt, requireRecruiterJobPermission, getJobBySlug);
 
 // Administrative job management
-router.post('/', authenticateJwt, requireRoles('SUPER_ADMIN', 'ADMIN'), createJob);
-router.put('/:id', authenticateJwt, requireRoles('SUPER_ADMIN', 'ADMIN'), updateJob);
-router.patch('/:id', authenticateJwt, requireRoles('SUPER_ADMIN', 'ADMIN'), updateJob);
-router.delete('/:id', authenticateJwt, requireRoles('SUPER_ADMIN', 'ADMIN'), deleteJob);
+router.post('/', authenticateJwt, requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN'), createJob);
+router.put('/:id', authenticateJwt, requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN'), updateJob);
+router.patch('/:id', authenticateJwt, requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN'), updateJob);
+router.delete('/:id', authenticateJwt, requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN'), deleteJob);
 
 export default router;

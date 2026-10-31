@@ -43,7 +43,7 @@ router.post(
 router.post(
   '/recruiter-submit',
   authenticateJwt,
-  requireRoles('SUPER_ADMIN', 'ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
+  requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
   requireRecruiterPermission('candidates'),
   uploadResume.single('resume'),
   recruiterSubmitCandidate
@@ -52,7 +52,7 @@ router.post(
 router.get(
   '/',
   authenticateJwt,
-  requireRoles('SUPER_ADMIN', 'ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
+  requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
   requireRecruiterPermission('candidates'),
   getCandidates
 );
@@ -60,7 +60,7 @@ router.get(
 router.get(
   '/walk-ins',
   authenticateJwt,
-  requireRoles('SUPER_ADMIN', 'ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
+  requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
   requireRecruiterPermission('candidates'),
   getCandidates
 );
@@ -68,7 +68,7 @@ router.get(
 router.post(
   '/',
   authenticateJwt,
-  requireRoles('SUPER_ADMIN', 'ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
+  requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
   requireRecruiterPermission('candidates'),
   createCandidate
 );
@@ -76,7 +76,7 @@ router.post(
 router.get(
   '/:id/activities',
   authenticateJwt,
-  requireRoles('SUPER_ADMIN', 'ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
+  requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
   requireRecruiterPermission('candidates'),
   getCandidateActivities
 );
@@ -84,7 +84,7 @@ router.get(
 router.post(
   '/:id/activities',
   authenticateJwt,
-  requireRoles('SUPER_ADMIN', 'ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
+  requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
   requireRecruiterPermission('candidates'),
   addCandidateActivity
 );
@@ -95,7 +95,7 @@ router.post(
 router.get(
   '/archived/count',
   authenticateJwt,
-  requireRoles('SUPER_ADMIN', 'ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
+  requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
   requireRecruiterPermission('candidates'),
   getArchivedCandidatesCount
 );
@@ -104,7 +104,7 @@ router.get(
 router.post(
   '/bulk-archive',
   authenticateJwt,
-  requireRoles('SUPER_ADMIN', 'ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
+  requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
   requireRecruiterPermission('candidates'),
   bulkArchiveCandidates
 );
@@ -113,7 +113,7 @@ router.post(
 router.post(
   '/:id/archive',
   authenticateJwt,
-  requireRoles('SUPER_ADMIN', 'ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
+  requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
   requireRecruiterPermission('candidates'),
   archiveCandidate
 );
@@ -122,7 +122,7 @@ router.post(
 router.post(
   '/:id/restore',
   authenticateJwt,
-  requireRoles('SUPER_ADMIN', 'ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
+  requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
   requireRecruiterPermission('candidates'),
   restoreCandidate
 );
@@ -131,7 +131,7 @@ router.post(
 router.post(
   '/bulk-assign-job',
   authenticateJwt,
-  requireRoles('SUPER_ADMIN', 'ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
+  requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
   bulkAssignJobToCandidates
 );
 
@@ -139,21 +139,21 @@ router.post(
 router.post(
   '/:id/assign-job',
   authenticateJwt,
-  requireRoles('SUPER_ADMIN', 'ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
+  requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
   assignJobToCandidate
 );
 
 router.patch(
   '/:id/assign-recruiter',
   authenticateJwt,
-  requireRoles('SUPER_ADMIN', 'ADMIN', 'TEAM_LEADER'),
+  requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN', 'TEAM_LEADER'),
   assignCandidate
 );
 
 router.get(
   '/:id',
   authenticateJwt,
-  requireRoles('SUPER_ADMIN', 'ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
+  requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
   requireRecruiterPermission('candidates'),
   getCandidateById
 );
@@ -161,7 +161,7 @@ router.get(
 router.put(
   '/:id',
   authenticateJwt,
-  requireRoles('SUPER_ADMIN', 'ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
+  requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
   requireRecruiterPermission('candidates'),
   updateCandidate
 );
@@ -169,7 +169,7 @@ router.put(
 router.patch(
   '/:id',
   authenticateJwt,
-  requireRoles('SUPER_ADMIN', 'ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
+  requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
   requireRecruiterPermission('candidates'),
   updateCandidate
 );
@@ -177,7 +177,7 @@ router.patch(
 router.patch(
   '/:id/status',
   authenticateJwt,
-  requireRoles('SUPER_ADMIN', 'ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
+  requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
   requireRecruiterPermission('candidates'),
   updateCandidateStatus
 );
@@ -185,7 +185,7 @@ router.patch(
 router.put(
   '/:id/status',
   authenticateJwt,
-  requireRoles('SUPER_ADMIN', 'ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
+  requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
   requireRecruiterPermission('candidates'),
   updateCandidateStatus
 );
@@ -193,7 +193,7 @@ router.put(
 router.get(
   '/:id/timeline',
   authenticateJwt,
-  requireRoles('SUPER_ADMIN', 'ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
+  requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
   requireRecruiterPermission('candidates'),
   getCandidateTimeline
 );
@@ -201,7 +201,7 @@ router.get(
 router.get(
   '/:id/history',
   authenticateJwt,
-  requireRoles('SUPER_ADMIN', 'ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
+  requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
   requireRecruiterPermission('candidates'),
   getCandidateTimeline
 );
@@ -209,7 +209,7 @@ router.get(
 router.delete(
   '/:id',
   authenticateJwt,
-  requireRoles('SUPER_ADMIN', 'ADMIN'),
+  requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN'),
   deleteCandidate
 );
 
@@ -218,21 +218,21 @@ router.delete(
 router.post(
   '/:id/resend-walk-in-email',
   authenticateJwt,
-  requireRoles('SUPER_ADMIN', 'ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
+  requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
   resendWalkInEmail
 );
 
 router.post(
   '/:id/send-walk-in-invitation',
   authenticateJwt,
-  requireRoles('SUPER_ADMIN', 'ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
+  requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
   sendWalkInInvitation
 );
 
 router.post(
   '/:id/approve-walk-in-reschedule',
   authenticateJwt,
-  requireRoles('SUPER_ADMIN', 'ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
+  requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
   approveWalkInReschedule
 );
 
@@ -241,7 +241,7 @@ router.post(
 router.get(
   '/template/download',
   authenticateJwt,
-  requireRoles('SUPER_ADMIN', 'ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
+  requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
   requireRecruiterPermission('candidates'),
   downloadCandidateImportTemplate
 );
@@ -250,7 +250,7 @@ router.get(
 router.post(
   '/bulk-import-validate',
   authenticateJwt,
-  requireRoles('SUPER_ADMIN', 'ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
+  requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
   requireRecruiterPermission('candidates'),
   uploadSpreadsheet.single('file'),
   (req, res, next) => {
@@ -264,7 +264,7 @@ router.post(
 router.post(
   '/bulk-import',
   authenticateJwt,
-  requireRoles('SUPER_ADMIN', 'ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
+  requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
   requireRecruiterPermission('candidates'),
   uploadSpreadsheet.single('file'),
   bulkImportCandidates

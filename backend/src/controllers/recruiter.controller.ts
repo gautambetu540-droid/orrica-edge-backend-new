@@ -1162,12 +1162,57 @@ export const deleteRecruiter = async (
         where: { userId: recruiter.id },
       });
 
-      // 6. Delete candidateProfile if attached to this user
-      await tx.candidate.deleteMany({
+      // 6. Unlink candidateProfile if attached to this user (preserving candidate records!)
+      await tx.candidate.updateMany({
         where: { userId: recruiter.id },
+        data: { userId: null },
       });
 
-      // 7. Disconnect jobs: Many-to-Many implicit table _RecruiterJobs
+      // 7. Nullify teamLeader references
+      await tx.candidate.updateMany({
+        where: { teamLeaderId: recruiter.id },
+        data: { teamLeaderId: null },
+      });
+      await tx.user.updateMany({
+        where: { teamLeaderId: recruiter.id },
+        data: { teamLeaderId: null },
+      });
+
+      // 8. Reassign jobs created by this user to a fallback admin
+      const fallbackAdmin = await tx.user.findFirst({
+        where: { role: { in: ['SUPER_ADMIN', 'ADMIN'] }, id: { not: recruiter.id } },
+        select: { id: true },
+      });
+      if (fallbackAdmin) {
+        await tx.job.updateMany({
+          where: { createdById: recruiter.id },
+          data: { createdById: fallbackAdmin.id },
+        });
+      }
+
+      // 9. Remove recruiter from assignedRecruiterIds string array on candidates
+      try {
+        const matchingCandidates = await tx.candidate.findMany({
+          where: {
+            OR: [
+              { assignedRecruiterIds: { has: recruiter.id } },
+              ...(recruiter.recruiterId ? [{ assignedRecruiterIds: { has: recruiter.recruiterId } }] : []),
+            ],
+          },
+          select: { id: true, assignedRecruiterIds: true },
+        });
+        for (const cand of matchingCandidates) {
+          const filtered = cand.assignedRecruiterIds.filter(
+            (id) => id !== recruiter.id && id !== recruiter.recruiterId
+          );
+          await tx.candidate.update({
+            where: { id: cand.id },
+            data: { assignedRecruiterIds: filtered },
+          });
+        }
+      } catch (_) {}
+
+      // 10. Disconnect jobs: Many-to-Many implicit table _RecruiterJobs
       try {
         await tx.user.update({
           where: { id: recruiter.id },
@@ -1177,7 +1222,7 @@ export const deleteRecruiter = async (
         });
       } catch (_) {}
 
-      // 8. Permanently hard delete user record
+      // 11. Permanently hard delete user record
       await tx.user.delete({
         where: { id: recruiter.id },
       });
