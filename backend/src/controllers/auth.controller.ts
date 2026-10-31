@@ -148,7 +148,14 @@ export const login = async (req: Request, res: Response, next: NextFunction): Pr
       },
     });
 
-    if (!user || !user.isActive) {
+    if (!user) {
+      console.warn(`[AUTH] Login failed: User not found for email="${email}"`);
+      res.status(401).json({ success: false, message: 'Invalid credentials or inactive account' });
+      return;
+    }
+
+    if (!user.isActive) {
+      console.warn(`[AUTH] Login failed: Account inactive (isActive=false) for userId="${user.id}", email="${email}"`);
       res.status(401).json({ success: false, message: 'Invalid credentials or inactive account' });
       return;
     }
@@ -156,6 +163,7 @@ export const login = async (req: Request, res: Response, next: NextFunction): Pr
     const isMatch = await bcrypt.compare(data.password, user.passwordHash);
 
     if (!isMatch) {
+      console.warn(`[AUTH] Login failed: Password mismatch for userId="${user.id}", email="${email}"`);
       res.status(401).json({ success: false, message: 'Invalid credentials' });
       return;
     }
@@ -214,7 +222,7 @@ export const login = async (req: Request, res: Response, next: NextFunction): Pr
         mfaChallengeToken,
         requiresMfaSetup: false,
         requiresMfa: true,
-        requiresPasswordChange: (user.role === 'RECRUITER' || user.role === 'FREELANCE_RECRUITER') && user.mustSetPassword,
+        requiresPasswordChange: (user.role === 'RECRUITER' || user.role === 'FREELANCE_RECRUITER' || user.role === 'SUB_ADMIN') && Boolean(user.mustSetPassword),
         user: userData,
       },
     });

@@ -3,6 +3,12 @@ import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 
 export const seedSubAdmin = async () => {
+  // Ensure SUB_ADMIN exists in PostgreSQL Role enum (idempotent safety guard)
+  try {
+    await prisma.$executeRawUnsafe(`ALTER TYPE "Role" ADD VALUE IF NOT EXISTS 'SUB_ADMIN';`);
+  } catch (err: any) {
+    console.warn('[SEED] ALTER TYPE "Role" notice/warning:', err?.message || err);
+  }
   const email = (process.env.SUBADMIN_SEED_EMAIL || 'subadmin@orricaedge.com').trim().toLowerCase();
   const password = process.env.SUBADMIN_SEED_PASSWORD || `SubAdmin@${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
   const passwordHash = await bcrypt.hash(password, 12);
