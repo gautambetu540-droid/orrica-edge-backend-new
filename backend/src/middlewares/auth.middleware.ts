@@ -6,7 +6,7 @@ import { prisma } from '../prisma/client';
 export interface AuthUserPayload {
   userId: string;
   email: string;
-  role: 'SUPER_ADMIN' | 'ADMIN' | 'TEAM_LEADER' | 'RECRUITER' | 'FREELANCE_RECRUITER' | 'EMPLOYER' | 'CLIENT' | 'CANDIDATE';
+  role: 'SUPER_ADMIN' | 'ADMIN' | 'SUB_ADMIN' | 'TEAM_LEADER' | 'RECRUITER' | 'FREELANCE_RECRUITER' | 'EMPLOYER' | 'CLIENT' | 'CANDIDATE';
   mfaState?: 'SETUP_REQUIRED' | 'CHALLENGE_REQUIRED';
 }
 
@@ -120,7 +120,7 @@ export const requireRecruiterPermission = (permission: RecruiterPermissionKey) =
     }
 
     // Admins, super admins, and team leaders are not restricted by recruiter module permissions.
-    if (req.user.role === 'SUPER_ADMIN' || req.user.role === 'ADMIN' || req.user.role === 'TEAM_LEADER') {
+    if (req.user.role === 'SUPER_ADMIN' || req.user.role === 'ADMIN' || req.user.role === 'SUB_ADMIN' || req.user.role === 'TEAM_LEADER') {
       next();
       return;
     }

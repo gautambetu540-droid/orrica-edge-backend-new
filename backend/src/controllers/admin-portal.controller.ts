@@ -56,7 +56,7 @@ export const getAdminPortalData = async (req: Request, res: Response, next: Next
       }),
       prisma.job.findMany({ include: { client: true, createdBy: { select: { id: true, fullName: true, email: true, role: true } } }, orderBy: { createdAt: 'desc' }, take: 1000 }),
       prisma.user.findMany({
-        where: { role: { in: ['RECRUITER', 'FREELANCE_RECRUITER', 'TEAM_LEADER', 'ADMIN', 'SUPER_ADMIN'] } },
+        where: { role: { in: ['RECRUITER', 'FREELANCE_RECRUITER', 'TEAM_LEADER', 'ADMIN', 'SUPER_ADMIN', 'SUB_ADMIN'] } },
         select: {
           id: true,
           email: true,
@@ -484,7 +484,7 @@ export const createEmployeeUser = async (req: Request, res: Response, next: Next
       fullName: z.string().trim().min(2).max(120),
       email: z.string().trim().email().toLowerCase(),
       phone: z.string().trim().max(30).optional(),
-      role: z.enum(['ADMIN', 'SUPER_ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER']).default('RECRUITER'),
+      role: z.enum(['ADMIN', 'SUPER_ADMIN', 'SUB_ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER']).default('RECRUITER'),
       department: z.string().trim().optional(),
       designation: z.string().trim().optional(),
       teamLeaderId: z.string().uuid().nullable().optional(),
@@ -492,6 +492,10 @@ export const createEmployeeUser = async (req: Request, res: Response, next: Next
     });
 
     const data = schema.parse(req.body);
+    if (req.user?.role === 'SUB_ADMIN' && (data.role === 'RECRUITER' || data.role === 'FREELANCE_RECRUITER')) {
+      sendError(res, 'Forbidden: Sub-Admin accounts cannot create new recruiters.', 403, 'SUB_ADMIN_CANNOT_CREATE_RECRUITER');
+      return;
+    }
     const existing = await prisma.user.findUnique({
       where: { email: data.email },
       select: { id: true },
@@ -621,7 +625,7 @@ export const getEmployeeUsers = async (req: Request, res: Response, next: NextFu
     try {
       employees = await prisma.user.findMany({
         where: {
-          role: { in: ['ADMIN', 'SUPER_ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'] },
+          role: { in: ['ADMIN', 'SUPER_ADMIN', 'SUB_ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'] },
         },
         select,
         orderBy: { createdAt: 'desc' },
@@ -631,6 +635,7 @@ export const getEmployeeUsers = async (req: Request, res: Response, next: NextFu
         try {
           await prisma.$executeRawUnsafe(`ALTER TYPE "Role" ADD VALUE IF NOT EXISTS 'FREELANCE_RECRUITER';`);
           await prisma.$executeRawUnsafe(`ALTER TYPE "Role" ADD VALUE IF NOT EXISTS 'TEAM_LEADER';`);
+          await prisma.$executeRawUnsafe(`ALTER TYPE "Role" ADD VALUE IF NOT EXISTS 'SUB_ADMIN';`);
         } catch (_) {}
         employees = await prisma.user.findMany({
           where: {

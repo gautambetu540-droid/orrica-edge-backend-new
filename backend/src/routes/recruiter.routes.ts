@@ -41,7 +41,7 @@ const requireRecruiterSelfOrAdmin = async (
     return;
   }
 
-  if (user.role === 'SUPER_ADMIN' || user.role === 'ADMIN') {
+  if (user.role === 'SUPER_ADMIN' || user.role === 'ADMIN' || user.role === 'SUB_ADMIN') {
     next();
     return;
   }
@@ -78,7 +78,7 @@ const requireRecruiterSelfOrAdmin = async (
 router.get(
   '/dashboard',
   authenticateJwt,
-  requireRoles('SUPER_ADMIN', 'ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
+  requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
   getRecruiterDashboard
 );
 
@@ -92,7 +92,7 @@ router.post(
 router.get(
   '/',
   authenticateJwt,
-  requireRoles('SUPER_ADMIN', 'ADMIN', 'TEAM_LEADER'),
+  requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN', 'TEAM_LEADER'),
   getRecruiters
 );
 
@@ -134,28 +134,28 @@ router.get(
 router.put(
   '/:id',
   authenticateJwt,
-  requireRoles('SUPER_ADMIN', 'ADMIN'),
+  requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN'),
   updateRecruiter
 );
 
 router.patch(
   '/:id',
   authenticateJwt,
-  requireRoles('SUPER_ADMIN', 'ADMIN'),
+  requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN'),
   updateRecruiter
 );
 
 router.delete(
   '/:id',
   authenticateJwt,
-  requireRoles('SUPER_ADMIN', 'ADMIN'),
+  requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN'),
   deleteRecruiter
 );
 
 router.patch(
   '/:id/status',
   authenticateJwt,
-  requireRoles('SUPER_ADMIN', 'ADMIN'),
+  requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN'),
   updateRecruiterStatus
 );
 
@@ -186,35 +186,35 @@ router.get(
 router.put(
   '/:id/jobs',
   authenticateJwt,
-  requireRoles('SUPER_ADMIN', 'ADMIN'),
+  requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN'),
   updateRecruiterJobs
 );
 
 router.get(
   '/:id/permissions',
   authenticateJwt,
-  requireRoles('SUPER_ADMIN', 'ADMIN'),
+  requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN'),
   getRecruiterPermissions
 );
 
 router.put(
   '/:id/permissions',
   authenticateJwt,
-  requireRoles('SUPER_ADMIN', 'ADMIN'),
+  requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN'),
   updateRecruiterPermissions
 );
 
 router.post(
   '/:id/send-welcome',
   authenticateJwt,
-  requireRoles('SUPER_ADMIN', 'ADMIN'),
+  requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN'),
   sendRecruiterWelcomeEmail
 );
 
 router.post(
   '/:id/resend-welcome',
   authenticateJwt,
-  requireRoles('SUPER_ADMIN', 'ADMIN'),
+  requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN'),
   sendRecruiterWelcomeEmail
 );
 

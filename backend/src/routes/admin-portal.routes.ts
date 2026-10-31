@@ -19,7 +19,7 @@ import recruiterRoutes from './recruiter.routes';
 
 const router = Router();
 
-router.use(authenticateJwt, requireRoles('SUPER_ADMIN', 'ADMIN'));
+router.use(authenticateJwt, requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN'));
 
 // Admin profile endpoints
 router.get('/profile', getMyProfile);

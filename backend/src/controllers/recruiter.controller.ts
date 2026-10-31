@@ -60,6 +60,10 @@ export const createRecruiter = async (
   next: NextFunction
 ): Promise<void> => {
   try {
+    if (req.user?.role === 'SUB_ADMIN') {
+      sendError(res, 'Forbidden: Sub-Admin accounts cannot create new recruiters.', 403, 'SUB_ADMIN_CANNOT_CREATE_RECRUITER');
+      return;
+    }
     const data = createRecruiterSchema.parse(req.body);
     const email = data.email.trim().toLowerCase();
 
@@ -1076,6 +1080,13 @@ export const deleteRecruiter = async (
       return;
     }
 
+    // Role check: Only administrative roles can delete recruiters
+    const userRole = req.user?.role;
+    if (userRole !== 'ADMIN' && userRole !== 'SUPER_ADMIN' && userRole !== 'SUB_ADMIN') {
+      sendError(res, 'Forbidden: Only administrators can delete recruiters', 403);
+      return;
+    }
+
     const recruiter = await prisma.user.findFirst({
       where: {
         id: recruiterId,
@@ -1095,89 +1106,86 @@ export const deleteRecruiter = async (
       return;
     }
 
-    // 1. Check active job assignments
-    const activeJobsCount = await prisma.job.count({
-      where: {
-        assignedRecruiters: { some: { id: recruiter.id } },
-        status: 'PUBLISHED',
-      },
-    });
-
-    // 2. Check active candidate applications (non-terminal)
-    const activeAppsCount = await prisma.application.count({
-      where: {
-        recruiterId: recruiter.id,
-        stage: { notIn: ['REJECTED', 'JOINED'] },
-      },
-    });
-
-    if (activeJobsCount > 0 || activeAppsCount > 0) {
-      sendError(
-        res,
-        `Cannot delete recruiter with active mandates (${activeJobsCount}) or in-progress candidate applications (${activeAppsCount}). Reassign them before deleting.`,
-        409,
-        'RECRUITER_HAS_ACTIVE_ASSIGNMENTS'
-      );
-      return;
-    }
-
-    // 3. Check historical records
-    const [historicalCandidates, historicalApps, historicalTimelines] = await Promise.all([
-      prisma.candidate.count({
-        where: {
-          OR: [
-            { sourcingRecruiterId: recruiter.id },
-            { ownerRecruiterId: recruiter.id },
-            { createdById: recruiter.id },
-          ],
-        },
-      }),
-      prisma.application.count({ where: { recruiterId: recruiter.id } }),
-      prisma.candidateTimeline.count({ where: { userId: recruiter.id } }),
-    ]);
-
-    const totalHistorical = historicalCandidates + historicalApps + historicalTimelines;
-
-    if (totalHistorical > 0) {
-      // Historical references exist: soft-delete to preserve data integrity and audit trail
-      await prisma.user.update({
-        where: { id: recruiter.id },
-        data: { isActive: false },
-      });
-
-      await logAudit({
-        req,
-        action: 'DEACTIVATE_RECRUITER',
-        module: 'RECRUITERS',
-        entity: 'User',
-        entityId: recruiter.id,
-        oldValue: { isActive: recruiter.isActive },
-        newValue: { isActive: false, reason: 'Archived due to historical records' },
-      });
-
-      sendSuccess(
-        res,
-        {
-          deleted: false,
-          deactivated: true,
-          message:
-            'Recruiter account was deactivated rather than permanently removed because historical hiring activities are attached to this account.',
-        },
-        'Recruiter deactivated successfully.'
-      );
-      return;
-    }
-
-    // 4. No historical records: safe permanent hard delete in transaction
+    // Permanent hard delete in transaction
     await prisma.$transaction(async (tx) => {
-      await tx.recruiterPermission.deleteMany({ where: { recruiterId: recruiter.id } });
-      await tx.refreshToken.deleteMany({ where: { userId: recruiter.id } });
-      await tx.user.delete({ where: { id: recruiter.id } });
+      // 1. Unassign recruiter from candidates
+      await tx.candidate.updateMany({
+        where: { ownerRecruiterId: recruiter.id },
+        data: { ownerRecruiterId: null },
+      });
+      await tx.candidate.updateMany({
+        where: { sourcingRecruiterId: recruiter.id },
+        data: { sourcingRecruiterId: null },
+      });
+      await tx.candidate.updateMany({
+        where: { createdById: recruiter.id },
+        data: { createdById: null },
+      });
+      await tx.candidate.updateMany({
+        where: { archivedById: recruiter.id },
+        data: { archivedById: null },
+      });
+
+      // 2. Unassign recruiter from candidate applications
+      await tx.application.updateMany({
+        where: { recruiterId: recruiter.id },
+        data: { recruiterId: null },
+      });
+
+      // 3. Nullify activity and timeline references
+      await tx.candidateActivity.updateMany({
+        where: { userId: recruiter.id },
+        data: { userId: null },
+      });
+      await tx.candidateActivity.updateMany({
+        where: { recruiterId: recruiter.id },
+        data: { recruiterId: null },
+      });
+      await tx.candidateTimeline.updateMany({
+        where: { userId: recruiter.id },
+        data: { userId: null },
+      });
+
+      // 4. Delete payouts associated with recruiter if any
+      await tx.payout.deleteMany({
+        where: { recruiterId: recruiter.id },
+      });
+
+      // 5. Delete recruiter permissions, tokens, notifications
+      await tx.recruiterPermission.deleteMany({
+        where: { recruiterId: recruiter.id },
+      });
+      await tx.refreshToken.deleteMany({
+        where: { userId: recruiter.id },
+      });
+      await tx.notification.deleteMany({
+        where: { userId: recruiter.id },
+      });
+
+      // 6. Delete candidateProfile if attached to this user
+      await tx.candidate.deleteMany({
+        where: { userId: recruiter.id },
+      });
+
+      // 7. Disconnect jobs: Many-to-Many implicit table _RecruiterJobs
+      try {
+        await tx.user.update({
+          where: { id: recruiter.id },
+          data: {
+            assignedJobs: { set: [] },
+          },
+        });
+      } catch (_) {}
+
+      // 8. Permanently hard delete user record
+      await tx.user.delete({
+        where: { id: recruiter.id },
+      });
     });
 
     await logAudit({
       req,
-      action: 'DELETE_RECRUITER',
+      action: 'PERMANENT_DELETE_RECRUITER',
       module: 'RECRUITERS',
       entity: 'User',
       entityId: recruiter.id,
@@ -1188,7 +1196,11 @@ export const deleteRecruiter = async (
       },
     });
 
-    sendSuccess(res, { deleted: true }, 'Recruiter permanently deleted.');
+    sendSuccess(
+      res,
+      { deleted: true, permanent: true, id: recruiter.id },
+      'Recruiter permanently deleted from database.'
+    );
   } catch (err) {
     next(err);
   }

@@ -13,6 +13,7 @@ datasource db {
 enum Role {
   SUPER_ADMIN
   ADMIN
+  SUB_ADMIN
   TEAM_LEADER
   RECRUITER
   FREELANCE_RECRUITER
