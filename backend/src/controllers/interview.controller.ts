@@ -36,7 +36,7 @@ const canAccessApplicationForInterview = async (
   const user = req.user;
   if (!user) return false;
 
-  if (user.role === 'ADMIN' || user.role === 'SUPER_ADMIN') {
+  if (user.role === 'ADMIN' || user.role === 'SUPER_ADMIN' || user.role === 'SUB_ADMIN') {
     return true;
   }
 

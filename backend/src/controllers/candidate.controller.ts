@@ -207,7 +207,7 @@ const buildDateFilter = (from?: Date, to?: Date) => {
 const canAccessCandidate = async (req: Request, candidateIdentifier: string): Promise<boolean> => {
   const user = req.user;
   if (!user) return false;
-  if (user.role === 'ADMIN' || user.role === 'SUPER_ADMIN') return true;
+  if (user.role === 'ADMIN' || user.role === 'SUPER_ADMIN' || user.role === 'SUB_ADMIN') return true;
 
   const candidateIdFilter = [
     { id: candidateIdentifier },

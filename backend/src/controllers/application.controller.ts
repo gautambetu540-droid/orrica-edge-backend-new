@@ -498,7 +498,7 @@ export const updateApplicationStage = async (req: Request, res: Response, next: 
       return;
     }
 
-    const isAdmin = req.user?.role === 'ADMIN' || req.user?.role === 'SUPER_ADMIN';
+    const isAdmin = req.user?.role === 'ADMIN' || req.user?.role === 'SUPER_ADMIN' || req.user?.role === 'SUB_ADMIN';
     const isTeamLeader = req.user?.role === 'TEAM_LEADER';
     const isRecruiter = req.user?.role === 'RECRUITER' || req.user?.role === 'FREELANCE_RECRUITER';
 
