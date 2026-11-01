@@ -30,6 +30,11 @@ import {
   requireRoles,
   requireRecruiterPermission,
 } from '../middlewares/auth.middleware';
+import {
+  getSubAdminsList,
+  getSubAdminSelectedCandidates,
+  exportSubAdminSelectedCandidates,
+} from '../controllers/sub-admin-selection.controller';
 
 const router = Router();
 
@@ -63,6 +68,28 @@ router.get(
   requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
   requireRecruiterPermission('candidates'),
   getCandidates
+);
+
+// Sub Admin-wise Selected Candidates Management Routes
+router.get(
+  '/sub-admin/list',
+  authenticateJwt,
+  requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN'),
+  getSubAdminsList
+);
+
+router.get(
+  '/sub-admin/selected-candidates',
+  authenticateJwt,
+  requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN'),
+  getSubAdminSelectedCandidates
+);
+
+router.get(
+  '/sub-admin/export',
+  authenticateJwt,
+  requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN'),
+  exportSubAdminSelectedCandidates
 );
 
 router.post(
