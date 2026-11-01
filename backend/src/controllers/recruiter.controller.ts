@@ -13,7 +13,8 @@ const createRecruiterSchema = z.object({
   email: z.string().trim().email().max(180),
   phone: z.string().trim().max(30).optional(),
   avatarUrl: z.string().url().max(1000).optional(),
-  recruiterType: z.enum(['INTERNAL', 'FREELANCER']).default('INTERNAL'),
+  recruiterType: z.enum(['INTERNAL', 'FREELANCER', 'FREELANCE_RECRUITER', 'AGENCY']).default('INTERNAL').optional(),
+  gender: z.enum(['male', 'female', 'other']).optional(),
   role: z.enum(['RECRUITER', 'FREELANCE_RECRUITER']).default('RECRUITER'),
   password: z.string().min(6).max(100).optional(),
   temporaryPassword: z.string().min(6).max(100).optional(),
@@ -24,7 +25,8 @@ const updateRecruiterSchema = z.object({
   name: z.string().trim().min(2).max(120).optional(),
   phone: z.string().trim().max(30).nullable().optional(),
   avatarUrl: z.union([z.string().url().max(1000), z.literal('')]).nullable().optional(),
-  recruiterType: z.enum(['INTERNAL', 'FREELANCER']).optional(),
+  recruiterType: z.string().optional(),
+  gender: z.enum(['male', 'female', 'other']).nullable().optional(),
   teamLeaderId: z.string().nullable().optional().or(z.literal('')),
   isActive: z.boolean().optional(),
 });
@@ -106,6 +108,7 @@ export const createRecruiter = async (
           mustSetPassword: true,
           resetPasswordToken: tokenHash,
           resetPasswordExpires: tokenExpiry,
+          preferences: data.gender ? { gender: data.gender } : undefined,
         },
         select: {
           id: true,
@@ -811,6 +814,7 @@ export const getRecruiters = async (
       lastLoginAt: true,
       createdAt: true,
       teamLeaderId: true,
+      preferences: true,
       teamLeader: {
         select: {
           id: true,
@@ -856,6 +860,7 @@ export const getRecruiters = async (
         phone: recruiter.phone || '',
         avatarUrl: recruiter.avatarUrl,
         avatar: recruiter.avatarUrl || undefined,
+        gender: (recruiter.preferences as any)?.gender || null,
         teamLeaderId: recruiter.teamLeaderId,
         teamLeaderName: recruiter.teamLeader?.fullName || null,
         isActive: recruiter.isActive,
@@ -926,6 +931,7 @@ export const getRecruiterById = async (
         lastLoginAt: true,
         createdAt: true,
         teamLeaderId: true,
+        preferences: true,
         teamLeader: {
           select: {
             id: true,
@@ -959,6 +965,7 @@ export const getRecruiterById = async (
         ...recruiter,
         name: recruiter.fullName,
         avatar: recruiter.avatarUrl,
+        gender: (recruiter.preferences as any)?.gender || null,
         metrics,
       },
     });
@@ -1010,6 +1017,11 @@ export const updateRecruiter = async (
           : null
         : recruiter.teamLeaderId;
 
+    let nextPreferences = (recruiter.preferences as Record<string, any>) || {};
+    if (data.gender !== undefined) {
+      nextPreferences = { ...nextPreferences, gender: data.gender };
+    }
+
     const updated = await prisma.user.update({
       where: { id: recruiter.id },
       data: {
@@ -1019,6 +1031,7 @@ export const updateRecruiter = async (
         recruiterType: nextRecruiterType,
         isActive: nextIsActive,
         teamLeaderId: nextTeamLeaderId,
+        ...(data.gender !== undefined ? { preferences: nextPreferences } : {}),
       },
       select: {
         id: true,
@@ -1031,6 +1044,7 @@ export const updateRecruiter = async (
         recruiterType: true,
         isActive: true,
         teamLeaderId: true,
+        preferences: true,
         updatedAt: true,
       },
     });
@@ -1055,7 +1069,7 @@ export const updateRecruiter = async (
       },
     });
 
-    sendSuccess(res, { recruiter: updated }, 'Recruiter updated successfully.');
+    sendSuccess(res, { recruiter: { ...updated, gender: (updated.preferences as any)?.gender || null } }, 'Recruiter updated successfully.');
   } catch (err) {
     next(err);
   }
