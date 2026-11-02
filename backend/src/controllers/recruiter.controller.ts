@@ -807,6 +807,30 @@ export const getRecruiters = async (
       where.isActive = true;
     }
 
+    // Support safe query filtering for status, search, and pagination
+    if (req.query.status) {
+      const s = String(req.query.status).toLowerCase();
+      if (s === 'active' || s === 'true') where.isActive = true;
+      if (s === 'inactive' || s === 'false') where.isActive = false;
+    } else if (req.query.isActive !== undefined) {
+      where.isActive = String(req.query.isActive) === 'true';
+    }
+
+    if (typeof req.query.search === 'string' && req.query.search.trim()) {
+      const q = req.query.search.trim();
+      where.AND = [
+        ...(where.AND || []),
+        {
+          OR: [
+            { fullName: { contains: q, mode: 'insensitive' } },
+            { email: { contains: q, mode: 'insensitive' } },
+            { recruiterId: { contains: q, mode: 'insensitive' } },
+            { phone: { contains: q, mode: 'insensitive' } },
+          ],
+        },
+      ];
+    }
+
     const selectFields = {
       id: true,
       recruiterId: true,
@@ -842,19 +866,37 @@ export const getRecruiters = async (
     });
 
     const recruiterRecords = await Promise.all(recruiters.map(async (recruiter) => {
-      const [
-        metrics,
-        replacementCount,
-      ] = await Promise.all([
-        getRecruiterMetricSnapshot(recruiter.id),
-        prisma.replacementCase.count({
-          where: {
-            primaryCandidate: {
-              is: { ownerRecruiterId: recruiter.id },
+      let metrics = {
+        candidates: 0,
+        submittedCount: 0,
+        shortlistedCount: 0,
+        interviewedCount: 0,
+        selectedCount: 0,
+        joinedCount: 0,
+        rejectedCount: 0,
+        walkInAttended: 0,
+        walkInScheduled: 0,
+        walkInNoShow: 0,
+        pendingCount: 0,
+      };
+      let replacementCount = 0;
+
+      try {
+        const [m, rc] = await Promise.all([
+          getRecruiterMetricSnapshot(recruiter.id).catch(() => metrics),
+          prisma.replacementCase.count({
+            where: {
+              primaryCandidate: {
+                is: { ownerRecruiterId: recruiter.id },
+              },
             },
-          },
-        }),
-      ]);
+          }).catch(() => 0),
+        ]);
+        if (m) metrics = m;
+        if (typeof rc === 'number') replacementCount = rc;
+      } catch (e) {
+        console.warn(`[getRecruiters] Metric snapshot non-fatal error for ${recruiter.id}:`, e);
+      }
 
       return {
         id: recruiter.id,
@@ -892,6 +934,7 @@ export const getRecruiters = async (
 
     sendSuccess(res, {
       recruiters: recruiterRecords,
+      data: recruiterRecords,
       pagination: {
         total: recruiters.length,
         page: 1,
