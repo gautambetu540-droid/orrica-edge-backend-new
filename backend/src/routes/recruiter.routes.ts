@@ -92,7 +92,7 @@ router.post(
 router.get(
   '/',
   authenticateJwt,
-  requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN', 'TEAM_LEADER'),
+  requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
   getRecruiters
 );
 

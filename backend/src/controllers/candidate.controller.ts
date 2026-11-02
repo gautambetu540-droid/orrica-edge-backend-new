@@ -146,7 +146,7 @@ const createCandidateSchema = z.object({
   expectedCtc: z.coerce.number().min(0).optional(),
   skills: z.array(z.string()).default([]),
   languages: z.array(z.string()).default(['English', 'Hindi']),
-  resumeUrl: z.union([z.string().url().max(2000), z.literal('')]).optional(),
+  resumeUrl: z.string().max(2000).optional().or(z.literal('')),
   source: z.string().trim().max(100).optional(),
   tags: z.array(z.string()).default([]),
   notes: z.string().max(10000).optional(),
@@ -161,6 +161,8 @@ const createCandidateSchema = z.object({
   followUpCompletedAt: safeDate,
   rescheduleReason: z.string().trim().max(1000).optional(),
   status: candidateStatus.optional(),
+  pipelineStage: z.string().optional(),
+  stage: z.string().optional(),
   sourcingRecruiterId: z.string().nullable().optional(),
   teamLeaderId: z.string().nullable().optional(),
   ownerRecruiterId: z.string().nullable().optional(),
@@ -174,6 +176,8 @@ const createCandidateSchema = z.object({
 
 const updateCandidateSchema = createCandidateSchema.partial().extend({
   candidateCode: z.string().optional(),
+  pipelineStage: z.string().optional(),
+  stage: z.string().optional(),
   clientName: z.string().trim().max(160).optional(),
   clientId: z.string().optional().nullable(),
   selectionDate: safeDate,
@@ -215,19 +219,28 @@ const canAccessCandidate = async (req: Request, candidateIdentifier: string): Pr
   ];
 
   if (user.role === 'TEAM_LEADER') {
+    const podRecruiters = await prisma.user.findMany({
+      where: { teamLeaderId: user.userId },
+      select: { id: true, recruiterId: true },
+    });
+    const podRecruiterIds = podRecruiters.flatMap((r) => [r.id, r.recruiterId].filter(Boolean) as string[]);
+    podRecruiterIds.push(user.userId);
+
+    const conditions: any[] = [
+      { teamLeaderId: user.userId },
+      { sourcingRecruiter: { teamLeaderId: user.userId } },
+      { ownerRecruiter: { teamLeaderId: user.userId } },
+      { sourcingRecruiterId: { in: podRecruiterIds } },
+      { ownerRecruiterId: { in: podRecruiterIds } },
+      { createdById: { in: podRecruiterIds } },
+      { applications: { some: { OR: [{ teamLeaderId: user.userId }, { recruiterId: { in: podRecruiterIds } }] } } },
+      { assignedRecruiterIds: { hasSome: podRecruiterIds } },
+    ];
+
     const accessible = await prisma.candidate.findFirst({
       where: {
         OR: candidateIdFilter,
-        AND: {
-          OR: [
-            { teamLeaderId: user.userId },
-            { sourcingRecruiter: { teamLeaderId: user.userId } },
-            { ownerRecruiter: { teamLeaderId: user.userId } },
-            { sourcingRecruiterId: user.userId },
-            { ownerRecruiterId: user.userId },
-            { applications: { some: { OR: [{ teamLeaderId: user.userId }, { recruiter: { teamLeaderId: user.userId } }] } } },
-          ],
-        },
+        AND: { OR: conditions },
       },
       select: { id: true },
     });
@@ -1678,15 +1691,17 @@ export const updateCandidate = async (req: Request, res: Response, next: NextFun
     }
 
     if (
-      req.user?.role === 'RECRUITER' &&
+      (req.user?.role === 'RECRUITER' || req.user?.role === 'FREELANCE_RECRUITER') &&
       data.ownerRecruiterId !== undefined &&
-      data.ownerRecruiterId !== existing.ownerRecruiterId
+      data.ownerRecruiterId !== existing.ownerRecruiterId &&
+      data.ownerRecruiterId !== req.user.userId
     ) {
       sendError(res, 'Recruiters cannot change candidate ownership.', 403);
       return;
     }
 
-    const nextStatus = data.status !== undefined ? normalizeCandidateStatus(data.status) : undefined;
+    const rawStatus = data.status ?? (data as any).pipelineStage ?? (data as any).stage;
+    const nextStatus = rawStatus !== undefined ? normalizeCandidateStatus(rawStatus) : undefined;
     const {
       rescheduleReason,
       recruiterRemarks,
@@ -1797,18 +1812,15 @@ export const updateCandidate = async (req: Request, res: Response, next: NextFun
       }
     }
 
-    // Selection Workflow Validation & Preparation
-    const isExplicitSelectionWorkflow =
-      selectionDate !== undefined ||
-      selectedAt !== undefined ||
-      actualJoiningStatus !== undefined ||
-      clientName !== undefined ||
-      clientId !== undefined ||
-      (Array.isArray(assignedRecruiterIds) && assignedRecruiterIds.length > 0) ||
-      lastWorkingDate !== undefined;
-
+    // Selection Workflow Validation & Preparation:
+    // Only engage selection-specific operations if the candidate is transitioning into Selected/Joined
+    // or if the candidate is already in Selected/Joined and selection fields are explicitly provided.
     const isMovingToSelected = nextStatus === 'Selected' || nextStatus === 'Joined';
-    const isSelectionWorkflow = isExplicitSelectionWorkflow || isMovingToSelected;
+    const isExplicitSelectionUpdate =
+      (existing.status === 'Selected' || existing.status === 'Joined') &&
+      (selectionDate !== undefined || selectedAt !== undefined || actualJoiningStatus !== undefined || lastWorkingDate !== undefined || (clientName !== undefined && clientName.trim().length > 0));
+
+    const isSelectionWorkflow = isMovingToSelected || isExplicitSelectionUpdate;
 
     let computedTotalWorkingDays: number | null | undefined = undefined;
     let resolvedCanonicalClientName: string | null | undefined = undefined;
@@ -1817,17 +1829,13 @@ export const updateCandidate = async (req: Request, res: Response, next: NextFun
     let effectiveJoiningStatus: string = 'Selected (Not Joined Yet)';
 
     if (isSelectionWorkflow) {
-      // 1. Client check & resolution (Keep existing client; default to application client or canonical client if missing)
+      // 1. Client check & resolution:
+      // Check provided client, existing client, or applied job's client; default to 'Digitide Solutions' if none present.
       let effectiveClientName = String(clientName || existing.clientName || '').trim();
       let effectiveClientId = clientId || existing.clientId;
       if (!effectiveClientName && !effectiveClientId) {
-        if (isMovingToSelected) {
-          const appClient = (existing as any).applications?.[0]?.job?.client?.companyName;
-          effectiveClientName = appClient ? String(appClient).trim() : 'Digitide Solutions';
-        } else {
-          sendError(res, 'Client organization is required.', 400);
-          return;
-        }
+        const appClient = (existing as any).applications?.[0]?.job?.client?.companyName;
+        effectiveClientName = appClient ? String(appClient).trim() : 'Digitide Solutions';
       }
 
       // 2. Recruiter assignment check & resolution (Keep existing recruiters; default to owner/creator if missing)
@@ -1837,13 +1845,8 @@ export const updateCandidate = async (req: Request, res: Response, next: NextFun
         ? existing.assignedRecruiterIds
         : (existing.ownerRecruiterId ? [existing.ownerRecruiterId] : []);
       if (!effectiveRecruiterIds || effectiveRecruiterIds.length === 0) {
-        if (isMovingToSelected) {
-          const defaultRecruiterId = existing.sourcingRecruiterId || (req.user?.role === 'RECRUITER' || req.user?.role === 'FREELANCE_RECRUITER' ? req.user.userId : null) || existing.id;
-          effectiveRecruiterIds = [defaultRecruiterId];
-        } else {
-          sendError(res, 'At least one assigned recruiter is required.', 400);
-          return;
-        }
+        const defaultRecruiterId = existing.sourcingRecruiterId || (req.user?.role === 'RECRUITER' || req.user?.role === 'FREELANCE_RECRUITER' ? req.user.userId : null) || existing.id;
+        effectiveRecruiterIds = defaultRecruiterId ? [defaultRecruiterId] : [];
       }
 
       // 3. Status and Last Working Date check
@@ -1888,7 +1891,9 @@ export const updateCandidate = async (req: Request, res: Response, next: NextFun
       }
 
       // 6. Normalize Client Name
-      resolvedCanonicalClientName = normalizeClientName(effectiveClientName);
+      if (effectiveClientName) {
+        resolvedCanonicalClientName = normalizeClientName(effectiveClientName);
+      }
 
       // 7. De-duplicate recruiter IDs
       finalAssignedRecruiterIds = Array.from(new Set(effectiveRecruiterIds.filter(Boolean)));
@@ -2109,6 +2114,15 @@ export const updateCandidate = async (req: Request, res: Response, next: NextFun
       }
 
       if (nextStatus && nextStatus !== existing.status) {
+        try {
+          await tx.application.updateMany({
+            where: { candidateId: existing.id },
+            data: { status: nextStatus },
+          });
+        } catch (appSyncErr) {
+          console.warn('[UPDATE_CANDIDATE] Application sync warning:', appSyncErr);
+        }
+
         await logCandidateTimeline({
           candidateId: existing.id,
           userId: req.user?.userId || null,
@@ -2568,14 +2582,21 @@ export const getCandidateTimeline = async (req: Request, res: Response, next: Ne
 export const updateCandidateStatus = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const identifier = req.params.id;
-    const { status, remarks } = req.body;
+    const { status, remarks, notes, pipelineStage, stage } = req.body;
 
-    if (!status || typeof status !== 'string') {
+    const rawStatus = status || pipelineStage || stage;
+    if (!rawStatus || typeof rawStatus !== 'string') {
       sendError(res, 'A valid candidate status string is required.', 400);
       return;
     }
 
-    req.body = { status, notes: remarks };
+    req.body = {
+      status: rawStatus,
+      pipelineStage: rawStatus,
+      stage: rawStatus,
+      notes: remarks || notes || '',
+      recruiterRemarks: remarks || notes || '',
+    };
     return updateCandidate(req, res, next);
   } catch (err) {
     next(err);

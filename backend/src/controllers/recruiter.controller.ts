@@ -797,6 +797,8 @@ export const getRecruiters = async (
 
     if (user?.role === 'TEAM_LEADER') {
       where.teamLeaderId = user.userId;
+    } else if (user?.role === 'RECRUITER' || user?.role === 'FREELANCE_RECRUITER') {
+      where.isActive = true;
     }
 
     const selectFields = {

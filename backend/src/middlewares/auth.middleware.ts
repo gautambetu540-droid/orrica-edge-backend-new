@@ -158,6 +158,19 @@ export const requireRecruiterPermission = (permission: RecruiterPermissionKey) =
       });
 
       if (!permissions) {
+        // Base ATS operational modules default to granted for any active recruiter
+        const baseRecruiterModules: RecruiterPermissionKey[] = [
+          'dashboard',
+          'candidates',
+          'jobs',
+          'applications',
+          'interviews',
+        ];
+        if (baseRecruiterModules.includes(permission)) {
+          next();
+          return;
+        }
+
         res.status(403).json({
           success: false,
           code: 'RECRUITER_PERMISSIONS_NOT_FOUND',
