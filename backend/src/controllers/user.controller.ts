@@ -10,8 +10,8 @@ const updateProfileSchema = z
     fullName: z.string().trim().min(2).max(120).optional(),
     name: z.string().trim().min(2).max(120).optional(),
     phone: z.string().trim().max(30).nullable().optional(),
-    avatarUrl: z.union([z.string().url().max(1000), z.literal('')]).nullable().optional(),
-    avatar: z.union([z.string().url().max(1000), z.literal('')]).nullable().optional(),
+    avatarUrl: z.string().trim().max(1000).nullable().optional(),
+    avatar: z.string().trim().max(1000).nullable().optional(),
     preferences: z.record(z.any()).optional(),
     email: z.string().email().optional(),
   })

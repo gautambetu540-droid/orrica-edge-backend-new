@@ -12,7 +12,7 @@ const createRecruiterSchema = z.object({
   fullName: z.string().trim().min(2).max(120),
   email: z.string().trim().email().max(180),
   phone: z.string().trim().max(30).optional(),
-  avatarUrl: z.string().url().max(1000).optional(),
+  avatarUrl: z.string().trim().max(1000).nullable().optional(),
   recruiterType: z.enum(['INTERNAL', 'FREELANCER', 'FREELANCE_RECRUITER', 'AGENCY']).default('INTERNAL').optional(),
   gender: z.enum(['male', 'female', 'other']).optional(),
   role: z.enum(['RECRUITER', 'FREELANCE_RECRUITER']).default('RECRUITER'),
@@ -24,7 +24,7 @@ const updateRecruiterSchema = z.object({
   fullName: z.string().trim().min(2).max(120).optional(),
   name: z.string().trim().min(2).max(120).optional(),
   phone: z.string().trim().max(30).nullable().optional(),
-  avatarUrl: z.union([z.string().url().max(1000), z.literal('')]).nullable().optional(),
+  avatarUrl: z.string().trim().max(1000).nullable().optional(),
   recruiterType: z.string().optional(),
   gender: z.enum(['male', 'female', 'other']).nullable().optional(),
   teamLeaderId: z.string().nullable().optional().or(z.literal('')),
@@ -441,7 +441,7 @@ export const updateRecruiterJobs = async (
 const updateRecruiterProfileSchema = z.object({
   fullName: z.string().trim().min(2).max(120),
   phone: z.string().trim().max(30).nullable().optional(),
-  avatarUrl: z.string().url().max(1000).nullable().optional(),
+  avatarUrl: z.string().trim().max(1000).nullable().optional(),
 });
 
 export const getMyRecruiterProfile = async (
