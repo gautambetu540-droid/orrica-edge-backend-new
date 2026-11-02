@@ -34,7 +34,19 @@ export const generateCandidateCode = async (client?: DbClient): Promise<string> 
         if (Array.isArray(result) && result.length > 0 && result[0]?.next_val) {
           const seqNum = parseInt(result[0].next_val, 10);
           if (!isNaN(seqNum) && seqNum > 0) {
-            return formatCandidateCode(seqNum);
+            const candidateModel = db?.candidate || defaultPrisma?.candidate;
+            const candidateCode = formatCandidateCode(seqNum);
+            if (candidateModel?.findUnique) {
+              const existing = await candidateModel.findUnique({
+                where: { candidateCode },
+                select: { id: true },
+              });
+              if (!existing) {
+                return candidateCode;
+              }
+            } else {
+              return candidateCode;
+            }
           }
         }
       } catch {
@@ -98,6 +110,8 @@ export const generateCandidateCodesBatch = async (
   if (count <= 0) return [];
   const db: any = client || defaultPrisma;
 
+  let generatedCodes: string[] = [];
+
   // 1. Attempt atomic block reservation via PostgreSQL sequence on root client
   const isMockClient = client && typeof (client as any).$queryRaw !== 'function';
 
@@ -122,7 +136,7 @@ export const generateCandidateCodesBatch = async (
             for (let i = 0; i < count; i++) {
               codes.push(formatCandidateCode(startVal + i));
             }
-            return codes;
+            generatedCodes = codes;
           }
         }
       } catch {
@@ -132,14 +146,64 @@ export const generateCandidateCodesBatch = async (
   }
 
   // 2. Resilient fallback: obtain initial code and increment
-  const firstCode = await generateCandidateCode(db);
-  const match = firstCode.match(/^OE-CAND-(\d+)$/i) || firstCode.match(/^CND-(\d+)$/i);
-  const startNum = match ? parseInt(match[1], 10) : 1;
-  const codes: string[] = [];
-  for (let i = 0; i < count; i++) {
-    codes.push(formatCandidateCode(startNum + i));
+  if (generatedCodes.length === 0) {
+    const firstCode = await generateCandidateCode(db);
+    const match = firstCode.match(/^OE-CAND-(\d+)$/i) || firstCode.match(/^CND-(\d+)$/i);
+    const startNum = match ? parseInt(match[1], 10) : 1;
+    const codes: string[] = [];
+    for (let i = 0; i < count; i++) {
+      codes.push(formatCandidateCode(startNum + i));
+    }
+    generatedCodes = codes;
   }
-  return codes;
+
+  // 3. Collision guard: verify none of generatedCodes exist in DB
+  try {
+    const candidateModel = db?.candidate || defaultPrisma?.candidate;
+    if (candidateModel?.findMany) {
+      const collisions = await candidateModel.findMany({
+        where: { candidateCode: { in: generatedCodes } },
+        select: { candidateCode: true },
+      });
+
+      if (collisions.length > 0) {
+        const latestCandidates = await candidateModel.findMany({
+          select: { candidateCode: true },
+          orderBy: { createdAt: 'desc' },
+          take: 500,
+        });
+
+        let maxSeq = 0;
+        for (const c of latestCandidates) {
+          if (!c.candidateCode) continue;
+          const match = c.candidateCode.match(/(\d+)$/);
+          if (match) {
+            const num = parseInt(match[1], 10);
+            if (!isNaN(num) && num > maxSeq) {
+              maxSeq = num;
+            }
+          }
+        }
+
+        const safeStart = maxSeq + 1;
+        generatedCodes = [];
+        for (let i = 0; i < count; i++) {
+          generatedCodes.push(formatCandidateCode(safeStart + i));
+        }
+
+        if (!isMockClient) {
+          try {
+            const rootClient: any = defaultPrisma || db;
+            if (rootClient?.$executeRaw) {
+              await rootClient.$executeRaw`SELECT setval('candidate_code_seq', ${safeStart + count}, true)`;
+            }
+          } catch {}
+        }
+      }
+    }
+  } catch {}
+
+  return generatedCodes;
 };
 
 /**

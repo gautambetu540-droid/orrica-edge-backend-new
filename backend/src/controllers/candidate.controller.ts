@@ -3667,7 +3667,7 @@ export const bulkImportCandidates = async (
     const defaultSource = sanitizeCellValue(req.body?.source || 'Bulk Import');
     const userRole = (req.user as any)?.role;
     const isRecruiter = userRole === 'RECRUITER' || userRole === 'FREELANCE_RECRUITER';
-    const currentUserId = (req.user as any)?.id || null;
+    const currentUserId = (req.user as any)?.userId || (req.user as any)?.id || null;
 
     // Recruiter role ownership backend enforcement:
     // If recruiter imports, every candidate is strictly owned by the logged-in recruiter
@@ -3676,6 +3676,30 @@ export const bulkImportCandidates = async (
       targetRecruiterId = currentUserId;
     } else if (req.body?.assignedRecruiterId) {
       targetRecruiterId = String(req.body.assignedRecruiterId).trim() || null;
+    }
+
+    // Verify foreign keys against database to prevent Postgres constraint violations
+    let validOwnerRecruiterId: string | null = null;
+    if (targetRecruiterId) {
+      const rec = await prisma.user.findFirst({
+        where: {
+          OR: [
+            { id: targetRecruiterId },
+            { recruiterId: targetRecruiterId },
+          ],
+        },
+        select: { id: true },
+      });
+      validOwnerRecruiterId = rec?.id || null;
+    }
+
+    let validCreatedById: string | null = null;
+    if (currentUserId) {
+      const usr = await prisma.user.findUnique({
+        where: { id: currentUserId },
+        select: { id: true },
+      });
+      validCreatedById = usr?.id || null;
     }
 
     // 1. Parse spreadsheet safely (disable formula execution)
@@ -3814,9 +3838,11 @@ export const bulkImportCandidates = async (
 
       // Email validation (optional; if present, validate format)
       const emailRegex = /^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i;
-      let finalEmail = rawEmail;
+      let finalEmail: string | null = null;
       if (rawEmail) {
-        if (!emailRegex.test(rawEmail)) {
+        if (emailRegex.test(rawEmail)) {
+          finalEmail = rawEmail.toLowerCase().trim();
+        } else {
           errors.push(`Invalid email address '${rawEmail}'.`);
         }
       } else if (isPhoneValid) {
@@ -3836,13 +3862,13 @@ export const bulkImportCandidates = async (
         }
       }
 
-      if (rawEmail && emailRegex.test(rawEmail)) {
-        if (seenEmailsInSheet.has(rawEmail)) {
+      if (finalEmail) {
+        if (seenEmailsInSheet.has(finalEmail)) {
           isDuplicateInSheet = true;
-          errors.push(`Duplicate email address in spreadsheet. Already appeared in Row ${seenEmailsInSheet.get(rawEmail)}.`);
+          errors.push(`Duplicate email address in spreadsheet. Already appeared in Row ${seenEmailsInSheet.get(finalEmail)}.`);
         } else {
-          seenEmailsInSheet.set(rawEmail, rowNumber);
-          candidateEmailsForDbCheck.add(rawEmail);
+          seenEmailsInSheet.set(finalEmail, rowNumber);
+          candidateEmailsForDbCheck.add(finalEmail);
         }
       }
 
@@ -3942,10 +3968,9 @@ export const bulkImportCandidates = async (
         tags: tagsArr,
         notes: rowNormalized.notes ? String(rowNormalized.notes).trim() : null,
         status: 'New',
-        ownerRecruiterId: targetRecruiterId || undefined,
-        assignedRecruiterId: targetRecruiterId || undefined,
-        assignedRecruiterIds: targetRecruiterId ? [targetRecruiterId] : [],
-        createdById: currentUserId,
+        ownerRecruiterId: validOwnerRecruiterId || undefined,
+        assignedRecruiterIds: validOwnerRecruiterId ? [validOwnerRecruiterId] : [],
+        createdById: validCreatedById || undefined,
       };
 
       processedRows.push({
@@ -4012,7 +4037,7 @@ export const bulkImportCandidates = async (
       // Check DB duplicates by phone or email:
       // STRICT POLICY: SKIP and REPORT; NEVER OVERWRITE existing records
       const matchedByPhone = phoneToCandidateMap.get(row.data.phone);
-      const matchedByEmail = row.data.email ? emailToCandidateMap.get(row.data.email) : null;
+      const matchedByEmail = row.data.email ? emailToCandidateMap.get(row.data.email.toLowerCase()) : null;
       const matchedExisting = matchedByPhone || matchedByEmail;
 
       if (matchedExisting) {
@@ -4086,8 +4111,8 @@ export const bulkImportCandidates = async (
             const code = codesChunk[j];
             const dataToInsert = rowItem.data;
 
-            const tagsWithRecruiter = targetRecruiterId
-              ? Array.from(new Set([...dataToInsert.tags, `assignedRecruiter:${targetRecruiterId}`]))
+            const tagsWithRecruiter = validOwnerRecruiterId
+              ? Array.from(new Set([...dataToInsert.tags, `assignedRecruiter:${validOwnerRecruiterId}`]))
               : dataToInsert.tags;
 
             const created = await tx.candidate.create({
@@ -4102,18 +4127,22 @@ export const bulkImportCandidates = async (
 
             insertedCodes.push(created.candidateCode);
 
-            try {
-              await logCandidateTimeline({
-                candidateId: created.id,
-                userId: currentUserId || null,
-                userName: (req.user as any)?.email,
-                userRole: (req.user as any)?.role,
-                action: 'Candidate Imported',
-                newStatus: 'New',
-                remarks: `Candidate profile created (${created.candidateCode}) via Bulk Import by ${(req.user as any)?.email || 'User'}`,
-                client: tx,
-              });
-            } catch {}
+            if (validCreatedById) {
+              try {
+                await logCandidateTimeline({
+                  candidateId: created.id,
+                  userId: validCreatedById,
+                  userName: (req.user as any)?.email,
+                  userRole: (req.user as any)?.role,
+                  action: 'Candidate Imported',
+                  newStatus: 'New',
+                  remarks: `Candidate profile created (${created.candidateCode}) via Bulk Import by ${(req.user as any)?.email || 'User'}`,
+                  client: tx,
+                });
+              } catch (tlErr) {
+                console.warn('[BULK_IMPORT] Non-fatal timeline log error:', tlErr);
+              }
+            }
           }
         });
       }
@@ -4122,7 +4151,7 @@ export const bulkImportCandidates = async (
     // Audit log for the import batch
     try {
       await logAudit({
-        userId: currentUserId,
+        userId: validCreatedById || undefined,
         action: 'BULK_CANDIDATE_IMPORT',
         module: 'CANDIDATES',
         entity: 'Candidate',
@@ -4133,7 +4162,7 @@ export const bulkImportCandidates = async (
           invalidRows: invalidFieldCount,
           fileName: file.originalname,
           role: userRole,
-          ownerRecruiterId: targetRecruiterId,
+          ownerRecruiterId: validOwnerRecruiterId,
         },
       });
     } catch {}
@@ -4155,7 +4184,8 @@ export const bulkImportCandidates = async (
       },
       'Bulk candidate import processed successfully.'
     );
-  } catch (err) {
+  } catch (err: any) {
+    console.error('[BULK_IMPORT] Error during bulk candidate import:', err);
     next(err);
   }
 };
