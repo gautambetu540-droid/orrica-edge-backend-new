@@ -14,7 +14,10 @@ const createRecruiterSchema = z.object({
   phone: z.string().trim().max(30).optional(),
   avatarUrl: z.string().trim().max(1000).nullable().optional(),
   recruiterType: z.enum(['INTERNAL', 'FREELANCER', 'FREELANCE_RECRUITER', 'AGENCY']).default('INTERNAL').optional(),
-  gender: z.enum(['male', 'female', 'other']).optional(),
+  gender: z.preprocess(
+    (v) => (typeof v === 'string' && v.trim() ? v.trim().toLowerCase() : undefined),
+    z.enum(['male', 'female', 'other']).optional()
+  ),
   role: z.enum(['RECRUITER', 'FREELANCE_RECRUITER']).default('RECRUITER'),
   password: z.string().min(6).max(100).optional(),
   temporaryPassword: z.string().min(6).max(100).optional(),
@@ -26,7 +29,10 @@ const updateRecruiterSchema = z.object({
   phone: z.string().trim().max(30).nullable().optional(),
   avatarUrl: z.string().trim().max(1000).nullable().optional(),
   recruiterType: z.string().optional(),
-  gender: z.enum(['male', 'female', 'other']).nullable().optional(),
+  gender: z.preprocess(
+    (v) => (typeof v === 'string' && v.trim() ? v.trim().toLowerCase() : null),
+    z.enum(['male', 'female', 'other']).nullable().optional()
+  ),
   teamLeaderId: z.string().nullable().optional().or(z.literal('')),
   isActive: z.boolean().optional(),
 });

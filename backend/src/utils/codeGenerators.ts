@@ -130,7 +130,7 @@ export const generateCandidateCodesBatch = async (
           if (!isNaN(startVal) && startVal > 0) {
             if (count > 1) {
               const endVal = startVal + count - 1;
-              await rootClient.$executeRaw`SELECT setval('candidate_code_seq', ${endVal}, true)`;
+              await rootClient.$queryRaw`SELECT setval('candidate_code_seq', ${endVal}, true)`;
             }
             const codes: string[] = [];
             for (let i = 0; i < count; i++) {
@@ -195,7 +195,7 @@ export const generateCandidateCodesBatch = async (
           try {
             const rootClient: any = defaultPrisma || db;
             if (rootClient?.$executeRaw) {
-              await rootClient.$executeRaw`SELECT setval('candidate_code_seq', ${safeStart + count}, true)`;
+              await rootClient.$queryRaw`SELECT setval('candidate_code_seq', ${safeStart + count}, true)`;
             }
           } catch {}
         }

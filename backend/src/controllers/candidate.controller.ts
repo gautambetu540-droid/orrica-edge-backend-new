@@ -2615,8 +2615,8 @@ export const resendWalkInEmail = async (req: Request, res: Response, next: NextF
   try {
     const identifier = req.params.id;
 
-    if (!identifier || (identifier.length > 36 && !/^[0-9a-fA-F-]+$/.test(identifier))) {
-      sendError(res, 'Candidate not found', 404);
+    if (!identifier || typeof identifier !== 'string' || !identifier.trim()) {
+      sendError(res, 'Candidate identifier is required', 400);
       return;
     }
 
@@ -4115,9 +4115,10 @@ export const bulkImportCandidates = async (
       return;
     }
 
-    // 6. Execute atomic batch operations in transactions (batches of 50)
+    // 6. Execute atomic batch operations in transactions (batches of 20 with explicit 60s timeout)
     const insertedCodes: string[] = [];
-    const CHUNK_SIZE = 50;
+    const insertedItems: { id: string; candidateCode: string }[] = [];
+    const CHUNK_SIZE = 20;
 
     if (validRowsToInsert.length > 0) {
       const candidateCodes = await generateCandidateCodesBatch(validRowsToInsert.length);
@@ -4126,45 +4127,60 @@ export const bulkImportCandidates = async (
         const chunk = validRowsToInsert.slice(i, i + CHUNK_SIZE);
         const codesChunk = candidateCodes.slice(i, i + CHUNK_SIZE);
 
-        await prisma.$transaction(async (tx) => {
-          for (let j = 0; j < chunk.length; j++) {
-            const rowItem = chunk[j];
-            const code = codesChunk[j];
-            const dataToInsert = rowItem.data;
+        const chunkResult = await prisma.$transaction(
+          async (tx) => {
+            const batchInserted: { id: string; candidateCode: string }[] = [];
+            for (let j = 0; j < chunk.length; j++) {
+              const rowItem = chunk[j];
+              const code = codesChunk[j];
+              const dataToInsert = rowItem.data;
 
-            const tagsWithRecruiter = validOwnerRecruiterId
-              ? Array.from(new Set([...dataToInsert.tags, `assignedRecruiter:${validOwnerRecruiterId}`]))
-              : dataToInsert.tags;
+              const tagsWithRecruiter = validOwnerRecruiterId
+                ? Array.from(new Set([...dataToInsert.tags, `assignedRecruiter:${validOwnerRecruiterId}`]))
+                : dataToInsert.tags;
 
-            const created = await tx.candidate.create({
-              data: {
-                ...dataToInsert,
-                candidateCode: code,
-                tags: tagsWithRecruiter,
-                source: dataToInsert.source || 'Bulk Import',
-              },
-              select: { id: true, candidateCode: true },
-            });
+              const created = await tx.candidate.create({
+                data: {
+                  ...dataToInsert,
+                  candidateCode: code,
+                  tags: tagsWithRecruiter,
+                  source: dataToInsert.source || 'Bulk Import',
+                },
+                select: { id: true, candidateCode: true },
+              });
 
-            insertedCodes.push(created.candidateCode);
-
-            if (validCreatedById) {
-              try {
-                await logCandidateTimeline({
-                  candidateId: created.id,
-                  userId: validCreatedById,
-                  userName: (req.user as any)?.email,
-                  userRole: (req.user as any)?.role,
-                  action: 'Candidate Imported',
-                  newStatus: 'New',
-                  remarks: `Candidate profile created (${created.candidateCode}) via Bulk Import by ${(req.user as any)?.email || 'User'}`,
-                  client: tx,
-                });
-              } catch (tlErr) {
-                console.warn('[BULK_IMPORT] Non-fatal timeline log error:', tlErr);
-              }
+              batchInserted.push({ id: created.id, candidateCode: created.candidateCode });
             }
+            return batchInserted;
+          },
+          {
+            maxWait: 15000,
+            timeout: 60000,
           }
+        );
+
+        for (const item of chunkResult) {
+          insertedCodes.push(item.candidateCode);
+          insertedItems.push(item);
+        }
+      }
+
+      // 7. Resilient asynchronous timeline logging outside the critical transaction
+      if (validCreatedById && insertedItems.length > 0) {
+        Promise.allSettled(
+          insertedItems.map((item) =>
+            logCandidateTimeline({
+              candidateId: item.id,
+              userId: validCreatedById!,
+              userName: (req.user as any)?.email,
+              userRole: (req.user as any)?.role,
+              action: 'Candidate Imported',
+              newStatus: 'New',
+              remarks: `Candidate profile created (${item.candidateCode}) via Bulk Import by ${(req.user as any)?.email || 'User'}`,
+            })
+          )
+        ).catch((tlErr) => {
+          console.warn('[BULK_IMPORT] Non-fatal timeline log error:', tlErr);
         });
       }
     }
