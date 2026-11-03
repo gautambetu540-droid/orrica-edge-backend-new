@@ -15,7 +15,21 @@ import { formatCandidateGreetingName, formatCandidateGreeting } from '../utils/n
 import { formatWalkInDate, formatReadableInterviewDate } from '../utils/dateFormatter';
 import { findWalkInLocationById } from './walk-in.controller';
 
+export const OFFICIAL_10_PIPELINE_STATUSES = [
+  'Not Called',
+  'No Response',
+  'Callback Scheduled',
+  'On Hold – After 7 Days',
+  'Screening – Under Evaluation',
+  'Shortlisted by Recruiter',
+  'Ready to Go – Walk-in Scheduled',
+  'Client Select',
+  'Onboarding Under Process',
+  'Joined – Winning Option',
+] as const;
+
 export const CANONICAL_PIPELINE_STAGES = [
+  ...OFFICIAL_10_PIPELINE_STATUSES,
   'New',
   'Contacted',
   'Interested',
@@ -81,6 +95,29 @@ export const normalizeCandidateStatus = (status?: string | null): string => {
     submitted: 'Submitted',
     assessment: 'Assessment',
     'joining pending': 'Joining Pending',
+    'not called': 'Not Called',
+    'Not Called': 'Not Called',
+        'No Response': 'No Response',
+    'callback scheduled': 'Callback Scheduled',
+    'Callback Scheduled': 'Callback Scheduled',
+    'on hold – after 7 days': 'On Hold – After 7 Days',
+    'on hold - after 7 days': 'On Hold – After 7 Days',
+    'On Hold – After 7 Days': 'On Hold – After 7 Days',
+    'screening – under evaluation': 'Screening – Under Evaluation',
+    'screening - under evaluation': 'Screening – Under Evaluation',
+    'Screening – Under Evaluation': 'Screening – Under Evaluation',
+    'shortlisted by recruiter': 'Shortlisted by Recruiter',
+    'Shortlisted by Recruiter': 'Shortlisted by Recruiter',
+    'ready to go – walk-in scheduled': 'Ready to Go – Walk-in Scheduled',
+    'ready to go - walk-in scheduled': 'Ready to Go – Walk-in Scheduled',
+    'Ready to Go – Walk-in Scheduled': 'Ready to Go – Walk-in Scheduled',
+    'client select': 'Client Select',
+    'Client Select': 'Client Select',
+    'onboarding under process': 'Onboarding Under Process',
+    'Onboarding Under Process': 'Onboarding Under Process',
+    'joined – winning option': 'Joined – Winning Option',
+    'joined - winning option': 'Joined – Winning Option',
+    'Joined – Winning Option': 'Joined – Winning Option',
   };
 
   const lookup = mapping[trimmed] || mapping[trimmed.toUpperCase()] || mapping[trimmed.toLowerCase()];
