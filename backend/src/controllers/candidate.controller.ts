@@ -2216,6 +2216,8 @@ export const updateCandidate = async (req: Request, res: Response, next: NextFun
         } as any,
       });
 
+      const batchedActivities: any[] = [];
+
       if (candidateData.pipelineStage !== undefined && candidateData.pipelineStage !== existing.pipelineStage) {
         try {
           await (tx as any).candidateStageTransition.create({
@@ -2232,34 +2234,30 @@ export const updateCandidate = async (req: Request, res: Response, next: NextFun
           console.warn('[updateCandidate] Stage transition recording notice:', trErr);
         }
 
-        await tx.candidateActivity.create({
-          data: {
-            candidateId: existing.id,
-            userId: req.user?.userId || null,
-            recruiterId: existing.ownerRecruiterId || (req.user?.role === 'RECRUITER' ? req.user.userId : null),
-            action: 'STAGE_CHANGED',
-            notes: `Pipeline stage moved from "${existing.pipelineStage || 'Unmapped'}" to "${candidateData.pipelineStage}"`,
-            metadata: {
-              fromStage: existing.pipelineStage,
-              toStage: candidateData.pipelineStage,
-            },
+        batchedActivities.push({
+          candidateId: existing.id,
+          userId: req.user?.userId || null,
+          recruiterId: existing.ownerRecruiterId || (req.user?.role === 'RECRUITER' ? req.user.userId : null),
+          action: 'STAGE_CHANGED',
+          notes: `Pipeline stage moved from "${existing.pipelineStage || 'Unmapped'}" to "${candidateData.pipelineStage}"`,
+          metadata: {
+            fromStage: existing.pipelineStage,
+            toStage: candidateData.pipelineStage,
           },
         });
       }
 
       if (walkInWasRescheduled) {
-        await tx.candidateActivity.create({
-          data: {
-            candidateId: existing.id,
-            userId: req.user?.userId || null,
-            recruiterId: existing.ownerRecruiterId || (req.user?.role === 'RECRUITER' ? req.user.userId : null),
-            action: 'WALK_IN_RESCHEDULED',
-            notes: rescheduleReason,
-            metadata: {
-              previousDate: existing.walkInDate?.toISOString(),
-              newDate: data.walkInDate?.toISOString(),
-              newTime: data.walkInTime ?? existing.walkInTime,
-            },
+        batchedActivities.push({
+          candidateId: existing.id,
+          userId: req.user?.userId || null,
+          recruiterId: existing.ownerRecruiterId || (req.user?.role === 'RECRUITER' ? req.user.userId : null),
+          action: 'WALK_IN_RESCHEDULED',
+          notes: rescheduleReason,
+          metadata: {
+            previousDate: existing.walkInDate?.toISOString(),
+            newDate: data.walkInDate?.toISOString(),
+            newTime: data.walkInTime ?? existing.walkInTime,
           },
         });
       }
@@ -2270,12 +2268,11 @@ export const updateCandidate = async (req: Request, res: Response, next: NextFun
         (data.walkInDate !== undefined && data.walkInDate?.getTime() !== existing.walkInDate?.getTime()) ||
         (data.walkInTime !== undefined && data.walkInTime !== existing.walkInTime);
       if (walkInChanged && !walkInWasRescheduled) {
-        await tx.candidateActivity.create({
-          data: {
-            candidateId: existing.id,
-            userId: req.user?.userId || null,
-            recruiterId: existing.ownerRecruiterId || (req.user?.role === 'RECRUITER' ? req.user.userId : null),
-            action: (() => {
+        batchedActivities.push({
+          candidateId: existing.id,
+          userId: req.user?.userId || null,
+          recruiterId: existing.ownerRecruiterId || (req.user?.role === 'RECRUITER' ? req.user.userId : null),
+          action: (() => {
             const st = String(data.walkInStatus || '').toUpperCase();
             if (st === 'ARRIVED' || st === 'ATTENDED' || st === 'COMPLETED') return 'WALK_IN_ATTENDED';
             if (st === 'NO_SHOW') return 'WALK_IN_NO_SHOW';
@@ -2283,37 +2280,32 @@ export const updateCandidate = async (req: Request, res: Response, next: NextFun
             if (st === 'EXPECTED' || st === 'CONFIRMED') return 'WALK_IN_SCHEDULED';
             return 'WALK_IN_UPDATED';
           })(),
-            metadata: {
-              walkInStatus: data.walkInStatus ?? existing.walkInStatus,
-              walkInResponse: data.walkInResponse ?? existing.walkInResponse,
-              walkInDate: data.walkInDate?.toISOString() ?? existing.walkInDate?.toISOString() ?? null,
-              walkInTime: data.walkInTime ?? existing.walkInTime,
-            },
+          metadata: {
+            walkInStatus: data.walkInStatus ?? existing.walkInStatus,
+            walkInResponse: data.walkInResponse ?? existing.walkInResponse,
+            walkInDate: data.walkInDate?.toISOString() ?? existing.walkInDate?.toISOString() ?? null,
+            walkInTime: data.walkInTime ?? existing.walkInTime,
           },
         });
       }
 
       if (data.followUpAt !== undefined && data.followUpAt?.getTime() !== existing.followUpAt?.getTime()) {
-        await tx.candidateActivity.create({
-          data: {
-            candidateId: existing.id,
-            userId: req.user?.userId || null,
-            recruiterId: existing.ownerRecruiterId || (req.user?.role === 'RECRUITER' ? req.user.userId : null),
-            action: 'FOLLOW_UP_SCHEDULED',
-            metadata: { followUpAt: data.followUpAt?.toISOString() ?? null },
-          },
+        batchedActivities.push({
+          candidateId: existing.id,
+          userId: req.user?.userId || null,
+          recruiterId: existing.ownerRecruiterId || (req.user?.role === 'RECRUITER' ? req.user.userId : null),
+          action: 'FOLLOW_UP_SCHEDULED',
+          metadata: { followUpAt: data.followUpAt?.toISOString() ?? null },
         });
       }
 
       if (data.followUpCompletedAt && !existing.followUpCompletedAt) {
-        await tx.candidateActivity.create({
-          data: {
-            candidateId: existing.id,
-            userId: req.user?.userId || null,
-            recruiterId: existing.ownerRecruiterId || (req.user?.role === 'RECRUITER' ? req.user.userId : null),
-            action: 'FOLLOW_UP_COMPLETED',
-            metadata: { followUpAt: existing.followUpAt?.toISOString() ?? null },
-          },
+        batchedActivities.push({
+          candidateId: existing.id,
+          userId: req.user?.userId || null,
+          recruiterId: existing.ownerRecruiterId || (req.user?.role === 'RECRUITER' ? req.user.userId : null),
+          action: 'FOLLOW_UP_COMPLETED',
+          metadata: { followUpAt: existing.followUpAt?.toISOString() ?? null },
         });
       }
 
@@ -2327,84 +2319,98 @@ export const updateCandidate = async (req: Request, res: Response, next: NextFun
           console.warn('[UPDATE_CANDIDATE] Application sync warning:', appSyncErr);
         }
 
-        await logCandidateTimeline({
+        batchedActivities.push({
           candidateId: existing.id,
           userId: req.user?.userId || null,
-          userName: req.user?.email,
-          userRole: req.user?.role,
-          action: 'Status Changed',
-          previousStatus: existing.status,
-          newStatus: nextStatus,
-          remarks: `Candidate status updated from ${existing.status} to ${nextStatus} by ${req.user?.email || 'User'}`,
-          client: tx,
+          recruiterId: existing.ownerRecruiterId || (req.user?.role === 'RECRUITER' ? req.user.userId : null),
+          action: nextStatus === 'Selected' ? 'SELECTED' : nextStatus === 'Joined' ? 'JOINED' : nextStatus === 'Rejected' ? 'REJECTED' : 'STATUS_UPDATED',
+          metadata: { oldStatus: existing.status, newStatus: nextStatus },
         });
+      }
 
-        await tx.candidateActivity.create({
-          data: {
-            candidateId: existing.id,
-            userId: req.user?.userId || null,
-            recruiterId: existing.ownerRecruiterId || (req.user?.role === 'RECRUITER' ? req.user.userId : null),
-            action: nextStatus === 'Selected' ? 'SELECTED' : nextStatus === 'Joined' ? 'JOINED' : nextStatus === 'Rejected' ? 'REJECTED' : 'STATUS_UPDATED',
-            metadata: { oldStatus: existing.status, newStatus: nextStatus },
-          },
-        });
+      if (batchedActivities.length > 0) {
+        await tx.candidateActivity.createMany({ data: batchedActivities });
       }
 
       return candidate;
     });
 
     const isOwnerChanged = existing.ownerRecruiterId !== updated.ownerRecruiterId;
-    let prevRecName = 'Unassigned';
-    let nextRecName = 'Unassigned';
-    if (isOwnerChanged) {
-      if (existing.ownerRecruiterId) {
-        const p = await prisma.user.findUnique({ where: { id: existing.ownerRecruiterId }, select: { fullName: true, email: true } });
-        prevRecName = p?.fullName || p?.email || 'Unassigned';
-      }
-      if (updated.ownerRecruiterId) {
-        const n = await prisma.user.findUnique({ where: { id: updated.ownerRecruiterId }, select: { fullName: true, email: true } });
-        nextRecName = n?.fullName || n?.email || 'Unassigned';
-      }
+
+    // Send response right away to eliminate UI latency
+    const finalCandidate = isOwnerChanged
+      ? (await enrichCandidatesWithRecruiters([updated]))[0]
+      : updated;
+    sendSuccess(res, { candidate: finalCandidate }, 'Candidate profile updated successfully');
+
+    // Async post-response tasks (fire-and-forget)
+    if (nextStatus && nextStatus !== existing.status) {
+      logCandidateTimeline({
+        candidateId: existing.id,
+        userId: req.user?.userId || null,
+        userName: req.user?.email,
+        userRole: req.user?.role,
+        action: 'Status Changed',
+        previousStatus: existing.status,
+        newStatus: nextStatus,
+        remarks: `Candidate status updated from ${existing.status} to ${nextStatus} by ${req.user?.email || 'User'}`,
+      }).catch((e) => console.error('[TIMELINE_ASYNC_ERROR]', e));
     }
 
-    const cName = updated.fullName || updated.name || existing.fullName || existing.name || 'Candidate';
-    const cCode = updated.candidateCode || existing.candidateCode || existing.id;
-    const auditAction = isOwnerChanged
-      ? (existing.ownerRecruiterId ? 'REASSIGN_CANDIDATE_RECRUITER' : 'ASSIGN_CANDIDATE_RECRUITER')
-      : 'UPDATE_CANDIDATE';
-    const auditDetails = isOwnerChanged
-      ? (existing.ownerRecruiterId
-          ? `Candidate "${cName}" (${cCode}) reassigned from ${prevRecName} to ${nextRecName}`
-          : `Candidate "${cName}" (${cCode}) assigned to recruiter ${nextRecName}`)
-      : `Candidate "${cName}" (${cCode}) updated (Status: ${updated.status})`;
+    let prevRecName = 'Unassigned';
+    let nextRecName = 'Unassigned';
+    (async () => {
+      try {
+        if (isOwnerChanged) {
+          if (existing.ownerRecruiterId) {
+            const p = await prisma.user.findUnique({ where: { id: existing.ownerRecruiterId }, select: { fullName: true, email: true } });
+            prevRecName = p?.fullName || p?.email || 'Unassigned';
+          }
+          if (updated.ownerRecruiterId) {
+            const n = await prisma.user.findUnique({ where: { id: updated.ownerRecruiterId }, select: { fullName: true, email: true } });
+            nextRecName = n?.fullName || n?.email || 'Unassigned';
+          }
+        }
 
-    await logAudit({
-      req,
-      action: auditAction,
-      module: 'CANDIDATES',
-      entity: 'Candidate',
-      entityId: existing.id,
-      oldValue: {
-        status: existing.status,
-        ownerRecruiterId: existing.ownerRecruiterId,
-        assignedRecruiterName: prevRecName,
-        candidateName: cName,
-        candidateCode: cCode,
-        candidateId: existing.id,
-      },
-      newValue: {
-        status: updated.status,
-        ownerRecruiterId: updated.ownerRecruiterId,
-        assignedRecruiterName: nextRecName,
-        candidateName: cName,
-        candidateCode: cCode,
-        candidateId: existing.id,
-        details: auditDetails,
-      },
-    });
+        const cName = updated.fullName || updated.name || existing.fullName || existing.name || 'Candidate';
+        const cCode = updated.candidateCode || existing.candidateCode || existing.id;
+        const auditAction = isOwnerChanged
+          ? (existing.ownerRecruiterId ? 'REASSIGN_CANDIDATE_RECRUITER' : 'ASSIGN_CANDIDATE_RECRUITER')
+          : 'UPDATE_CANDIDATE';
+        const auditDetails = isOwnerChanged
+          ? (existing.ownerRecruiterId
+              ? `Candidate "${cName}" (${cCode}) reassigned from ${prevRecName} to ${nextRecName}`
+              : `Candidate "${cName}" (${cCode}) assigned to recruiter ${nextRecName}`)
+          : `Candidate "${cName}" (${cCode}) updated (Status: ${updated.status})`;
 
-    const [enrichedUpdated] = await enrichCandidatesWithRecruiters([updated]);
-    sendSuccess(res, { candidate: enrichedUpdated }, 'Candidate profile updated successfully');
+        await logAudit({
+          req,
+          action: auditAction,
+          module: 'CANDIDATES',
+          entity: 'Candidate',
+          entityId: existing.id,
+          oldValue: {
+            status: existing.status,
+            ownerRecruiterId: existing.ownerRecruiterId,
+            assignedRecruiterName: prevRecName,
+            candidateName: cName,
+            candidateCode: cCode,
+            candidateId: existing.id,
+          },
+          newValue: {
+            status: updated.status,
+            ownerRecruiterId: updated.ownerRecruiterId,
+            assignedRecruiterName: nextRecName,
+            candidateName: cName,
+            candidateCode: cCode,
+            candidateId: existing.id,
+            details: auditDetails,
+          },
+        });
+      } catch (auditErr) {
+        console.error('[AUDIT_ASYNC_ERROR]', auditErr);
+      }
+    })();
   } catch (err) {
     next(err);
   }
@@ -2800,9 +2806,22 @@ const OFFICIAL_PIPELINE_SET = new Set<string>(OFFICIAL_PIPELINE_STAGES_LIST);
 export const updateCandidateStatus = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const identifier = req.params.id;
-    const { status, remarks, notes, operationalStatus, pipelineStage, stage, followUpAt, walkInDate, clientName, dateOfJoin, actualJoiningStatus, sourceActivity } = req.body;
+    const {
+      status,
+      remarks,
+      notes,
+      operationalStatus,
+      pipelineStage,
+      stage,
+      followUpAt,
+      walkInDate,
+      clientName,
+      dateOfJoin,
+      actualJoiningStatus,
+      sourceActivity,
+    } = req.body;
 
-    const opStatus = operationalStatus || (status && !OFFICIAL_PIPELINE_SET.has(status) ? status : undefined);
+    const opStatus = operationalStatus || (status && !OFFICIAL_PIPELINE_SET.has(status) ? normalizeCandidateStatus(status) : undefined);
     const pipeStage = pipelineStage !== undefined ? pipelineStage : (stage !== undefined ? stage : (status && OFFICIAL_PIPELINE_SET.has(status) ? status : undefined));
 
     if (!opStatus && pipeStage === undefined) {
@@ -2810,19 +2829,244 @@ export const updateCandidateStatus = async (req: Request, res: Response, next: N
       return;
     }
 
-    req.body = {
-      ...(opStatus !== undefined ? { operationalStatus: opStatus, status: opStatus } : {}),
-      ...(pipeStage !== undefined ? { pipelineStage: pipeStage } : {}),
-      notes: remarks || notes || '',
-      recruiterRemarks: remarks || notes || '',
-      ...(followUpAt !== undefined ? { followUpAt } : {}),
-      ...(walkInDate !== undefined ? { walkInDate } : {}),
-      ...(clientName !== undefined ? { clientName } : {}),
-      ...(dateOfJoin !== undefined ? { dateOfJoin } : {}),
-      ...(actualJoiningStatus !== undefined ? { actualJoiningStatus } : {}),
-      ...(sourceActivity !== undefined ? { sourceActivity } : {}),
-    };
-    return updateCandidate(req, res, next);
+    // 1. Lightweight, targeted fetch (avoids heavy nested application/job/client includes)
+    const existing = await prisma.candidate.findFirst({
+      where: {
+        OR: [{ id: identifier }, { candidateCode: identifier }],
+      },
+      select: {
+        id: true,
+        candidateCode: true,
+        name: true,
+        fullName: true,
+        status: true,
+        operationalStatus: true,
+        pipelineStage: true,
+        followUpAt: true,
+        nextActionDate: true,
+        walkInDate: true,
+        walkInTime: true,
+        walkInStatus: true,
+        walkInResponse: true,
+        clientName: true,
+        clientId: true,
+        feedback: true,
+        notes: true,
+        dateOfJoin: true,
+        actualJoiningStatus: true,
+        ownerRecruiterId: true,
+        sourcingRecruiterId: true,
+        createdById: true,
+        assignedRecruiterIds: true,
+        ownerRecruiter: {
+          select: { id: true, recruiterId: true, fullName: true, email: true, phone: true },
+        },
+      },
+    });
+
+    if (!existing) {
+      sendError(res, 'Candidate not found', 404);
+      return;
+    }
+
+    // 2. High-speed access check without redundant database query for owners/admins
+    const userRole = req.user?.role;
+    const userId = req.user?.userId;
+    let hasAccess = false;
+    if (userRole === 'ADMIN' || userRole === 'SUPER_ADMIN' || userRole === 'SUB_ADMIN') {
+      hasAccess = true;
+    } else if (
+      userId &&
+      (existing.ownerRecruiterId === userId ||
+        existing.sourcingRecruiterId === userId ||
+        existing.createdById === userId ||
+        (Array.isArray(existing.assignedRecruiterIds) && existing.assignedRecruiterIds.includes(userId)))
+    ) {
+      hasAccess = true;
+    } else {
+      hasAccess = await canAccessCandidate(req, identifier);
+    }
+
+    if (!hasAccess) {
+      sendError(res, 'Candidate not found', 404);
+      return;
+    }
+
+    // 3. Validation gates (Strictly preserved)
+    if (opStatus !== undefined && opStatus !== null) {
+      if (opStatus === 'Callback Requested' || opStatus === 'On Hold' || opStatus === 'Callback Scheduled') {
+        const hasFollowUp = Boolean(
+          followUpAt ||
+          existing.followUpAt ||
+          existing.nextActionDate
+        );
+        if (!hasFollowUp) {
+          sendError(res, 'A follow-up date is required when setting status to Callback Requested or On Hold.', 400);
+          return;
+        }
+      }
+    }
+
+    if (pipeStage !== undefined && pipeStage !== null) {
+      const targetStage = String(pipeStage).trim();
+      if (targetStage === 'Ready to Go – Walk-in Scheduled' || targetStage === 'Ready to Go - Walk-in Scheduled') {
+        const hasWalkIn = Boolean(walkInDate || existing.walkInDate);
+        if (!hasWalkIn) {
+          sendError(res, 'A walk-in date is required for Ready to Go – Walk-in Scheduled.', 400);
+          return;
+        }
+      } else if (targetStage === 'Client Select') {
+        const hasFeedbackOrClient = Boolean(
+          clientName ||
+          existing.clientName ||
+          remarks ||
+          notes ||
+          existing.feedback
+        );
+        if (!hasFeedbackOrClient) {
+          sendError(res, 'Client feedback or client name is required for Client Select.', 400);
+          return;
+        }
+      } else if (targetStage === 'Joined – Winning Option' || targetStage === 'Joined - Winning Option') {
+        const hasJoining = Boolean(
+          dateOfJoin ||
+          existing.dateOfJoin ||
+          actualJoiningStatus ||
+          existing.actualJoiningStatus
+        );
+        if (!hasJoining) {
+          sendError(res, 'Confirmed joining date or status is required for Joined – Winning Option.', 400);
+          return;
+        }
+      }
+    }
+
+    // 4. Build updates payload
+    const finalRemarks = String(remarks || notes || '').trim();
+    const updateData: any = {};
+    if (opStatus !== undefined) {
+      updateData.operationalStatus = opStatus;
+      updateData.status = opStatus;
+    }
+    if (pipeStage !== undefined) {
+      updateData.pipelineStage = pipeStage ? String(pipeStage).trim() : null;
+    }
+    if (finalRemarks) {
+      updateData.notes = finalRemarks;
+      updateData.feedback = finalRemarks;
+    }
+    if (followUpAt !== undefined) updateData.followUpAt = followUpAt ? new Date(followUpAt) : null;
+    if (walkInDate !== undefined) updateData.walkInDate = walkInDate ? new Date(walkInDate) : null;
+    if (clientName !== undefined) updateData.clientName = String(clientName).trim();
+    if (dateOfJoin !== undefined) updateData.dateOfJoin = dateOfJoin ? new Date(dateOfJoin) : null;
+    if (actualJoiningStatus !== undefined) updateData.actualJoiningStatus = String(actualJoiningStatus).trim();
+
+    // 5. Transaction: candidate update + stage transition + batched activities
+    const activitiesToCreate: any[] = [];
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const candidate = await tx.candidate.update({
+        where: { id: existing.id },
+        data: updateData,
+        include: {
+          ownerRecruiter: {
+            select: { id: true, recruiterId: true, fullName: true, email: true, phone: true },
+          },
+        },
+      });
+
+      if (updateData.pipelineStage !== undefined && updateData.pipelineStage !== existing.pipelineStage) {
+        try {
+          await (tx as any).candidateStageTransition.create({
+            data: {
+              candidateId: existing.id,
+              fromStage: existing.pipelineStage || null,
+              toStage: updateData.pipelineStage,
+              changedById: req.user?.userId || null,
+              sourceActivity: sourceActivity || 'MANUAL_UPDATE',
+              notes: finalRemarks || null,
+            },
+          });
+        } catch (trErr) {
+          console.warn('[updateCandidateStatus] Stage transition recording notice:', trErr);
+        }
+
+        activitiesToCreate.push({
+          candidateId: existing.id,
+          userId: req.user?.userId || null,
+          recruiterId: existing.ownerRecruiterId || (req.user?.role === 'RECRUITER' ? req.user.userId : null),
+          action: 'STAGE_CHANGED',
+          notes: `Pipeline stage moved from "${existing.pipelineStage || 'Unmapped'}" to "${updateData.pipelineStage}"`,
+          metadata: {
+            fromStage: existing.pipelineStage,
+            toStage: updateData.pipelineStage,
+          },
+        });
+      }
+
+      if (updateData.status && updateData.status !== existing.status) {
+        try {
+          await tx.application.updateMany({
+            where: { candidateId: existing.id },
+            data: { status: updateData.status },
+          });
+        } catch (appSyncErr) {
+          console.warn('[updateCandidateStatus] Application sync warning:', appSyncErr);
+        }
+
+        activitiesToCreate.push({
+          candidateId: existing.id,
+          userId: req.user?.userId || null,
+          recruiterId: existing.ownerRecruiterId || (req.user?.role === 'RECRUITER' ? req.user.userId : null),
+          action: updateData.status === 'Selected' ? 'SELECTED' : updateData.status === 'Joined' ? 'JOINED' : updateData.status === 'Rejected' ? 'REJECTED' : 'STATUS_UPDATED',
+          metadata: { oldStatus: existing.status, newStatus: updateData.status },
+        });
+      }
+
+      if (activitiesToCreate.length > 0) {
+        await tx.candidateActivity.createMany({ data: activitiesToCreate });
+      }
+
+      return candidate;
+    });
+
+    // 6. Return response to recruiter IMMEDIATELY
+    sendSuccess(res, { candidate: updated }, 'Candidate status updated successfully');
+
+    // 7. Fire-and-forget non-blocking timeline and audit writes
+    if (updateData.status && updateData.status !== existing.status) {
+      logCandidateTimeline({
+        candidateId: existing.id,
+        userId: req.user?.userId || null,
+        userName: req.user?.email,
+        userRole: req.user?.role,
+        action: 'Status Changed',
+        previousStatus: existing.status,
+        newStatus: updateData.status,
+        remarks: `Candidate status updated from ${existing.status} to ${updateData.status} by ${req.user?.email || 'User'}`,
+      }).catch((e) => console.error('[TIMELINE_ASYNC_ERROR]', e));
+    }
+
+    const cName = updated.fullName || updated.name || 'Candidate';
+    const cCode = updated.candidateCode || existing.candidateCode || existing.id;
+    logAudit({
+      req,
+      action: 'UPDATE_CANDIDATE_STATUS',
+      module: 'CANDIDATES',
+      entity: 'Candidate',
+      entityId: existing.id,
+      oldValue: {
+        status: existing.status,
+        operationalStatus: existing.operationalStatus,
+        pipelineStage: existing.pipelineStage,
+      },
+      newValue: {
+        status: updated.status,
+        operationalStatus: updated.operationalStatus,
+        pipelineStage: updated.pipelineStage,
+        details: `Candidate "${cName}" (${cCode}) status updated to ${updated.status || updated.pipelineStage}`,
+      },
+    }).catch((e) => console.error('[AUDIT_ASYNC_ERROR]', e));
   } catch (err) {
     next(err);
   }
@@ -2830,12 +3074,6 @@ export const updateCandidateStatus = async (req: Request, res: Response, next: N
 
 
 
-/**
- * Manual Resend of Walk-in Confirmation Email: POST /api/v1/candidates/:id/resend-walk-in-email
- * Re-dispatches personalized walk-in email with secure confirmation link.
- * Handles 404 for missing candidate, 400 for missing walk-in session or invalid email,
- * 502 for email-provider failures, and enforces idempotency cooldown.
- */
 export const resendWalkInEmail = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const identifier = req.params.id;

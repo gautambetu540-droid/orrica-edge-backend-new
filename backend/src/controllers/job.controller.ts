@@ -176,22 +176,26 @@ export const getJobs = async (req: Request, res: Response, next: NextFunction): 
 
     const userRole = req.user?.role;
     const currentUserId = req.user?.userId;
-    const isAdmin = userRole === 'ADMIN' || userRole === 'SUPER_ADMIN';
+    const isAdmin = userRole === 'ADMIN' || userRole === 'SUPER_ADMIN' || userRole === 'SUB_ADMIN';
     const isRecruiter = userRole === 'RECRUITER' || userRole === 'FREELANCE_RECRUITER';
     const isTeamLeader = userRole === 'TEAM_LEADER';
 
-    const visibleStatus = isAdmin ? status : 'PUBLISHED';
+    const where: any = {};
+    if (isAdmin) {
+      if (status && status !== 'ALL') {
+        where.status = status as any;
+      }
+    } else {
+      where.status = 'PUBLISHED';
+    }
+
     const scope = isAdmin ? req.user!.role : isRecruiter ? `recruiter:${currentUserId}` : isTeamLeader ? `tl:${currentUserId}` : 'public';
-    const cacheKey = `jobs:${scope}:${search || ''}:${department || ''}:${category || ''}:${location || ''}:${workMode || ''}:${employmentType || ''}:${visibleStatus}:${pageNum}:${limitNum}`;
+    const cacheKey = `jobs:${scope}:${search || ''}:${department || ''}:${category || ''}:${location || ''}:${workMode || ''}:${employmentType || ''}:${where.status || 'ALL'}:${pageNum}:${limitNum}`;
     const cachedData = cache.get(cacheKey);
     if (cachedData) {
       sendSuccess(res, cachedData);
       return;
     }
-
-    const where: any = {
-      status: visibleStatus as any,
-    };
 
     if (isRecruiter && currentUserId) {
       where.assignedRecruiters = { some: { id: currentUserId } };
@@ -414,8 +418,17 @@ export const createJob = async (req: Request, res: Response, next: NextFunction)
 export const updateJob = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const { id } = req.params;
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id);
 
-    const existing = await prisma.job.findUnique({ where: { id } });
+    const existing = await prisma.job.findFirst({
+      where: {
+        OR: [
+          ...(isUuid ? [{ id }] : []),
+          { jobCode: id },
+          { slug: id },
+        ],
+      },
+    });
     if (!existing) {
       sendError(res, 'Job not found', 404);
       return;
@@ -427,7 +440,6 @@ export const updateJob = async (req: Request, res: Response, next: NextFunction)
     const updateData: any = {};
 
     const scalarFields = [
-      'jobCode',
       'title',
       'slug',
       'department',
@@ -561,7 +573,7 @@ export const updateJob = async (req: Request, res: Response, next: NextFunction)
     }
 
     const updatedJob = await prisma.job.update({
-      where: { id },
+      where: { id: existing.id },
       data: updateData,
       include: {
         client: {
@@ -588,9 +600,24 @@ export const updateJob = async (req: Request, res: Response, next: NextFunction)
 export const deleteJob = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const { id } = req.params;
-    const existing = await prisma.job.findUnique({ where: { id } });
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id);
 
-    await prisma.job.delete({ where: { id } });
+    const existing = await prisma.job.findFirst({
+      where: {
+        OR: [
+          ...(isUuid ? [{ id }] : []),
+          { jobCode: id },
+          { slug: id },
+        ],
+      },
+    });
+
+    if (!existing) {
+      sendError(res, 'Job not found', 404);
+      return;
+    }
+
+    await prisma.job.delete({ where: { id: existing.id } });
 
     // Invalidate every cached jobs-list variant after deletion.
     cache.del('jobs:');

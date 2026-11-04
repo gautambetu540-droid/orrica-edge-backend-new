@@ -5,7 +5,8 @@
   "main": "dist/server.js",
   "scripts": {
     "dev": "tsx watch src/server.ts",
-    "build": "prisma generate && (prisma migrate deploy || true) && tsc",
+    "build": "prisma generate && (prisma migrate deploy || echo [WARN] prisma migrate deploy encountered errors, falling back to bootstrap-db) && tsc",
+    "db:migrate:status": "prisma migrate status",
     "start": "node dist/server.js",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
