@@ -264,6 +264,37 @@ export const ensureDatabaseSchema = async () => {
     'Synchronize candidate_code_seq'
   );
 
+  // 9. Ensure canonical default clients exist in database
+  const defaultClients = [
+    { companyName: 'Digitide Solutions', industry: 'IT Services & Consulting', contactEmail: 'contact@digitidesolutions.com', contactPhone: '+91 98765 43210' },
+    { companyName: 'Radical Minds', industry: 'BPO / IT Enabled Services', contactEmail: 'careers@radicalminds.net', contactPhone: '+91 98765 43211' },
+    { companyName: 'Apex Global Solutions', industry: 'Staffing & Recruiting', contactEmail: 'info@apexsolutions.internal', contactPhone: '+91 98765 43212' },
+  ];
+
+  for (const dc of defaultClients) {
+    try {
+      const exists = await prisma.client.findFirst({
+        where: { companyName: { equals: dc.companyName, mode: 'insensitive' } },
+        select: { id: true },
+      });
+      if (!exists) {
+        await prisma.client.create({
+          data: {
+            companyName: dc.companyName,
+            industry: dc.industry,
+            contactPerson: 'Corporate HR',
+            contactEmail: dc.contactEmail,
+            contactPhone: dc.contactPhone,
+            status: 'ACTIVE',
+          },
+        });
+        console.log(`[SCHEMA] Seeded canonical client: ${dc.companyName}`);
+      }
+    } catch (clientSeedErr: any) {
+      console.warn(`[SCHEMA] Notice verifying client ${dc.companyName}:`, clientSeedErr?.message || clientSeedErr);
+    }
+  }
+
   console.log('[SCHEMA] Verified and ensured all PostgreSQL enums, tables, and columns exist.');
 
 };

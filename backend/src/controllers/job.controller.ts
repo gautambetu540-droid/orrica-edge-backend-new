@@ -429,7 +429,6 @@ export const updateJob = async (req: Request, res: Response, next: NextFunction)
     const scalarFields = [
       'jobCode',
       'title',
-      'clientId',
       'slug',
       'department',
       'category',
@@ -490,27 +489,71 @@ export const updateJob = async (req: Request, res: Response, next: NextFunction)
       updateData.salaryMax = normalized.salaryMax;
     }
 
-    // Frontend sends clientId; Prisma relation updates use `client`.
+    // Frontend sends clientId; Prisma relation updates use `client.connect`.
+    // Do NOT pass `clientId` directly in `updateData` to avoid Prisma validation conflicts.
     if (body.clientId !== undefined && body.clientId !== null && body.clientId !== '') {
-      const clientId = String(body.clientId);
+      const clientId = String(body.clientId).trim();
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(clientId);
 
-      const client = await prisma.client.findUnique({
-        where: { id: clientId },
-        select: { id: true },
-      });
+      let client = null;
+
+      if (isUuid) {
+        client = await prisma.client.findUnique({
+          where: { id: clientId },
+          select: { id: true },
+        });
+      }
+
+      // Fallback: match by companyName if client was selected by name or legacy seed ID
+      if (!client) {
+        const candidateName = String(body.clientName || clientId.replace(/^cli-/, '')).trim();
+        if (candidateName) {
+          client = await prisma.client.findFirst({
+            where: {
+              OR: [
+                { companyName: { equals: candidateName, mode: 'insensitive' } },
+                { companyName: { contains: candidateName, mode: 'insensitive' } },
+              ],
+            },
+            select: { id: true },
+          });
+        }
+      }
+
+      // Auto-provision if client record is missing in database
+      if (!client) {
+        const fallbackName = String(body.clientName || (clientId.startsWith('cli-') ? clientId.replace(/^cli-/, '') : clientId)).trim();
+        if (fallbackName && fallbackName.length >= 2) {
+          try {
+            client = await prisma.client.create({
+              data: {
+                companyName: fallbackName,
+                industry: String(body.department || 'General').trim(),
+                status: 'ACTIVE',
+                contactPerson: 'Corporate HR',
+                contactEmail: `contact@${fallbackName.toLowerCase().replace(/[^a-z0-9]/g, '') || 'company'}.internal`,
+                contactPhone: '+91 99999 99999',
+              },
+              select: { id: true },
+            });
+          } catch (createErr) {
+            console.warn('[updateJob] Auto-provision client notice:', createErr);
+          }
+        }
+      }
 
       if (!client) {
-        sendError(res, 'Selected client not found', 400);
+        sendError(res, 'Selected client not found. Please choose an active client from the dropdown.', 400);
         return;
       }
 
       updateData.client = {
-        connect: { id: clientId },
+        connect: { id: client.id },
       };
     }
 
     if (body.vacancies !== undefined) {
-      updateData.vacancies = Number(body.vacancies);
+      updateData.vacancies = Math.max(1, Math.round(Number(body.vacancies) || 1));
     }
 
     if (body.status === 'PUBLISHED' && existing.status !== 'PUBLISHED' && body.publishedAt === undefined) {
@@ -520,6 +563,11 @@ export const updateJob = async (req: Request, res: Response, next: NextFunction)
     const updatedJob = await prisma.job.update({
       where: { id },
       data: updateData,
+      include: {
+        client: {
+          select: { id: true, companyName: true, industry: true, website: true },
+        },
+      },
     });
 
     // Invalidate every cached jobs-list variant after any update.
