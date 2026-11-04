@@ -126,14 +126,15 @@ export const publishGoogleIndexingUrl = async (
 
 export const notifyJobUrlUpdated = (slug: string): void => {
   if (!slug) return;
-  const baseUrl = process.env.FRONTEND_URL || 'https://orricaedge.com';
+  const baseUrl = process.env.FRONTEND_URL || 'https://www.orricaedge.com';
   const url = `${baseUrl.replace(/\/+$/, '')}/jobs/${slug}`;
   publishGoogleIndexingUrl(url, 'URL_UPDATED').catch(() => {});
 };
 
 export const notifyJobUrlDeleted = (slug: string): void => {
   if (!slug) return;
-  const baseUrl = process.env.FRONTEND_URL || 'https://orricaedge.com';
+  const baseUrl = process.env.FRONTEND_URL || 'https://www.orricaedge.com';
   const url = `${baseUrl.replace(/\/+$/, '')}/jobs/${slug}`;
   publishGoogleIndexingUrl(url, 'URL_DELETED').catch(() => {});
 };
+

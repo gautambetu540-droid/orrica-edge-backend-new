@@ -183,14 +183,24 @@ export const getJobs = async (req: Request, res: Response, next: NextFunction): 
         return;
       }
 
+      const now = new Date();
       const sitemapJobs = await prisma.job.findMany({
-        where: { status: 'PUBLISHED' },
-        orderBy: { publishedAt: 'desc' },
+        where: {
+          status: 'PUBLISHED',
+          OR: [
+            { closingDate: null },
+            { closingDate: { gt: now } },
+          ],
+        },
+        orderBy: { updatedAt: 'desc' },
         select: {
           id: true,
+          jobCode: true,
+          title: true,
           slug: true,
           status: true,
           publishedAt: true,
+          closingDate: true,
           updatedAt: true,
         },
       });
