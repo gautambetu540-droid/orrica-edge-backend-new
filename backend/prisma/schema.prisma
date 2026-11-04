@@ -179,6 +179,7 @@ model User {
   notifications        Notification[]
   auditLogs            AuditLog[]
   candidateActivitiesAsRecruiter CandidateActivity[] @relation("CandidateActivityRecruiter")
+  stageTransitions               CandidateStageTransition[] @relation("StageTransitionChangedBy")
   recruiterPermissions RecruiterPermission?
 
   @@map("users")
@@ -343,6 +344,8 @@ model Candidate {
   followUpCompletedAt DateTime?
   rescheduleCount     Int                 @default(0)
   status              String              @default("New")
+  operationalStatus   String?
+  pipelineStage       String?
   nextActionDate      DateTime?
   nextActionType      String?
   nextActionRemarks   String?             @db.Text
@@ -372,6 +375,7 @@ model Candidate {
   universalFormSubmissions UniversalFormSubmission[]
   activities          CandidateActivity[]
   timelines           CandidateTimeline[]
+  stageTransitions    CandidateStageTransition[]
 
   @@index([isArchived])
   @@index([isArchived, archivedAt])
@@ -379,6 +383,8 @@ model Candidate {
   @@index([actualJoiningStatus])
   @@index([selectionDate])
   @@index([status])
+  @@index([pipelineStage])
+  @@index([operationalStatus])
   @@index([status, email, phone])
   @@index([phone])
   @@index([email])
@@ -761,4 +767,22 @@ model UniversalFormSubmission {
   @@index([formId, createdAt])
   @@index([candidateId])
   @@map("universal_form_submissions")
+}
+
+model CandidateStageTransition {
+  id              String    @id @default(uuid())
+  candidateId     String
+  candidate       Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  fromStage       String?
+  toStage         String?
+  changedById     String?
+  changedBy       User?     @relation("StageTransitionChangedBy", fields: [changedById], references: [id], onDelete: SetNull)
+  sourceActivity  String?
+  notes           String?   @db.Text
+  changedAt       DateTime  @default(now())
+
+  @@index([candidateId, changedAt])
+  @@index([changedById, changedAt])
+  @@index([toStage, changedAt])
+  @@map("candidate_stage_transitions")
 }

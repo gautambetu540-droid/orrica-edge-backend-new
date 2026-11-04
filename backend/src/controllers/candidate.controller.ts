@@ -95,9 +95,17 @@ export const normalizeCandidateStatus = (status?: string | null): string => {
     submitted: 'Submitted',
     assessment: 'Assessment',
     'joining pending': 'Joining Pending',
-    'not called': 'Not Interested',
-    'Not Called': 'Not Interested',
-        'No Response': 'No Response',
+    'not called': 'Not Called',
+    'Not Called': 'Not Called',
+    'not reachable': 'Not Reachable',
+    'Not Reachable': 'Not Reachable',
+    'wrong number': 'Wrong Number',
+    'Wrong Number': 'Wrong Number',
+    'do not call': 'Do Not Call',
+    'Do Not Call': 'Do Not Call',
+    'callback requested': 'Callback Requested',
+    'Callback Requested': 'Callback Requested',
+    'No Response': 'No Response',
     'callback scheduled': 'Callback Scheduled',
     'Callback Scheduled': 'Callback Scheduled',
     'on hold – after 7 days': 'On Hold – After 7 Days',
@@ -198,7 +206,8 @@ const createCandidateSchema = z.object({
   followUpCompletedAt: safeDate,
   rescheduleReason: z.string().trim().max(1000).optional(),
   status: candidateStatus.optional(),
-  pipelineStage: z.string().optional(),
+  operationalStatus: z.string().trim().max(64).nullable().optional(),
+  pipelineStage: z.string().trim().max(64).nullable().optional(),
   stage: z.string().optional(),
   sourcingRecruiterId: z.string().nullable().optional(),
   teamLeaderId: z.string().nullable().optional(),
@@ -213,6 +222,8 @@ const createCandidateSchema = z.object({
 
 const updateCandidateSchema = createCandidateSchema.partial().extend({
   candidateCode: z.string().optional(),
+  operationalStatus: z.string().trim().max(64).nullable().optional(),
+  sourceActivity: z.string().optional(),
   pipelineStage: z.string().optional(),
   stage: z.string().optional(),
   clientName: z.string().trim().max(160).optional(),
@@ -588,6 +599,9 @@ export const getCandidates = async (req: Request, res: Response, next: NextFunct
     const {
       search,
       status,
+      operationalStatus,
+      pipelineStage,
+      assignmentStatus,
       location,
       skill,
       language,
@@ -677,6 +691,57 @@ export const getCandidates = async (req: Request, res: Response, next: NextFunct
         }
       }
     }
+    
+    if (operationalStatus && operationalStatus !== 'ALL') {
+      const opStr = String(operationalStatus).trim();
+      if (opStr.includes(',')) {
+        const opStatuses = opStr.split(',').map((s) => s.trim()).filter(Boolean);
+        andFilters.push({
+          OR: [
+            { operationalStatus: { in: opStatuses } },
+            { operationalStatus: null, status: { in: opStatuses } },
+          ],
+        });
+      } else {
+        andFilters.push({
+          OR: [
+            { operationalStatus: opStr },
+            { operationalStatus: null, status: opStr },
+          ],
+        });
+      }
+    }
+
+    if (pipelineStage && pipelineStage !== 'ALL') {
+      const psStr = String(pipelineStage).trim();
+      if (psStr.toUpperCase() === 'UNMAPPED') {
+        andFilters.push({ pipelineStage: null });
+      } else if (psStr.includes(',')) {
+        const stages = psStr.split(',').map((s) => s.trim()).filter(Boolean);
+        andFilters.push({ pipelineStage: { in: stages } });
+      } else {
+        andFilters.push({ pipelineStage: psStr });
+      }
+    }
+
+    if (assignmentStatus && assignmentStatus !== 'ALL') {
+      const asStr = String(assignmentStatus).trim().toUpperCase();
+      if (asStr === 'UNASSIGNED') {
+        andFilters.push({
+          ownerRecruiterId: null,
+          sourcingRecruiterId: null,
+          assignedRecruiterIds: { isEmpty: true },
+        });
+      } else if (asStr === 'ASSIGNED') {
+        andFilters.push({
+          OR: [
+            { ownerRecruiterId: { not: null } },
+            { sourcingRecruiterId: { not: null } },
+            { assignedRecruiterIds: { isEmpty: false } },
+          ],
+        });
+      }
+    }
     if (location) andFilters.push({ location: { contains: String(location), mode: 'insensitive' } });
     if (skill) andFilters.push({ skills: { has: String(skill) } });
     if (language) andFilters.push({ languages: { has: String(language) } });
@@ -754,6 +819,13 @@ export const getCandidates = async (req: Request, res: Response, next: NextFunct
     const applicationSome: any = {};
     if (recruiterId) {
       const recIdStr = String(recruiterId).trim();
+      if (recIdStr.toUpperCase() === 'UNASSIGNED') {
+        andFilters.push({
+          ownerRecruiterId: null,
+          sourcingRecruiterId: null,
+          assignedRecruiterIds: { isEmpty: true },
+        });
+      } else {
       let targetIds = [recIdStr];
       try {
         const targetUser = await prisma.user.findFirst({
@@ -786,6 +858,7 @@ export const getCandidates = async (req: Request, res: Response, next: NextFunct
         );
       }
       andFilters.push({ OR: filterConditions });
+    }
     }
     if (jobId) applicationSome.jobId = String(jobId);
 
@@ -1199,7 +1272,9 @@ export const createCandidate = async (req: Request, res: Response, next: NextFun
           walkInTime: data.walkInTime,
           followUpAt: data.followUpAt,
           followUpCompletedAt: data.followUpCompletedAt,
-          status: normalizeCandidateStatus(data.status),
+          status: normalizeCandidateStatus(data.status || data.operationalStatus || 'Not Called'),
+          operationalStatus: data.operationalStatus ? normalizeCandidateStatus(data.operationalStatus) : (data.status ? normalizeCandidateStatus(data.status) : 'Not Called'),
+          pipelineStage: data.pipelineStage || null,
           nextActionDate: data.nextActionDate || null,
           nextActionType: data.nextActionType || null,
           nextActionRemarks: data.nextActionRemarks || null,
@@ -1737,8 +1812,10 @@ export const updateCandidate = async (req: Request, res: Response, next: NextFun
       return;
     }
 
-    const rawStatus = data.status ?? (data as any).pipelineStage ?? (data as any).stage;
-    const nextStatus = rawStatus !== undefined ? normalizeCandidateStatus(rawStatus) : undefined;
+        // Operational Status and Pipeline Stage decoupling
+    const rawOpStatus = (data as any).operationalStatus ?? data.status;
+    const nextOpStatus = rawOpStatus !== undefined ? (rawOpStatus ? normalizeCandidateStatus(rawOpStatus) : null) : undefined;
+    const nextStatus = nextOpStatus ?? (data.status !== undefined ? normalizeCandidateStatus(data.status) : undefined);
     const {
       rescheduleReason,
       recruiterRemarks,
@@ -1802,6 +1879,8 @@ export const updateCandidate = async (req: Request, res: Response, next: NextFun
       'followUpCompletedAt',
       'rescheduleCount',
       'status',
+      'operationalStatus',
+      'pipelineStage',
       'nextActionDate',
       'nextActionType',
       'nextActionRemarks',
@@ -1823,11 +1902,68 @@ export const updateCandidate = async (req: Request, res: Response, next: NextFun
       'assignedRecruiterIds',
     ]);
 
-    const candidateData: Record<string, any> = {};
+        const candidateData: Record<string, any> = {};
     for (const [key, val] of Object.entries(rawCandidateData)) {
       if (allowedCandidateFields.has(key) && val !== undefined) {
         candidateData[key] = val;
       }
+    }
+
+    // A. Operational Status rules
+    if (nextOpStatus !== undefined && nextOpStatus !== null) {
+      if (nextOpStatus === 'Callback Requested' || nextOpStatus === 'On Hold' || nextOpStatus === 'Callback Scheduled') {
+        const hasFollowUp = Boolean(
+          data.followUpAt ||
+          data.nextActionDate ||
+          existing.followUpAt ||
+          existing.nextActionDate
+        );
+        if (!hasFollowUp) {
+          sendError(res, 'A follow-up date is required when setting status to Callback Requested or On Hold.', 400);
+          return;
+        }
+      }
+      candidateData.operationalStatus = nextOpStatus;
+      candidateData.status = nextOpStatus;
+    }
+
+    // B. Official Pipeline Stage progression gates
+    if ((data as any).pipelineStage !== undefined) {
+      const targetStage = (data as any).pipelineStage ? String((data as any).pipelineStage).trim() : null;
+      if (targetStage) {
+        if (targetStage === 'Ready to Go – Walk-in Scheduled' || targetStage === 'Ready to Go - Walk-in Scheduled') {
+          const hasWalkIn = Boolean(data.walkInDate || existing.walkInDate);
+          if (!hasWalkIn) {
+            sendError(res, 'A walk-in date is required for Ready to Go – Walk-in Scheduled.', 400);
+            return;
+          }
+        } else if (targetStage === 'Client Select') {
+          const hasFeedbackOrClient = Boolean(
+            clientName ||
+            existing.clientName ||
+            data.feedback ||
+            existing.feedback ||
+            recruiterRemarks ||
+            remarks
+          );
+          if (!hasFeedbackOrClient) {
+            sendError(res, 'Client feedback or client name is required for Client Select.', 400);
+            return;
+          }
+        } else if (targetStage === 'Joined – Winning Option' || targetStage === 'Joined - Winning Option') {
+          const hasJoining = Boolean(
+            data.dateOfJoin ||
+            existing.dateOfJoin ||
+            actualJoiningStatus ||
+            existing.actualJoiningStatus
+          );
+          if (!hasJoining) {
+            sendError(res, 'Confirmed joining date or status is required for Joined – Winning Option.', 400);
+            return;
+          }
+        }
+      }
+      candidateData.pipelineStage = targetStage;
     }
 
     // Safely map recruiter remarks to feedback and notes columns
@@ -2070,15 +2206,46 @@ export const updateCandidate = async (req: Request, res: Response, next: NextFun
         candidateData.tags = updatedTags;
       }
 
-      const candidate = await tx.candidate.update({
+            const candidate = await tx.candidate.update({
         where: { id: existing.id },
         data: {
           ...candidateData,
-          status: nextStatus ?? undefined,
+          status: candidateData.status ?? nextStatus ?? undefined,
           email: data.email ? data.email.toLowerCase() : undefined,
           ...(walkInWasRescheduled ? { rescheduleCount: { increment: 1 } } : {}),
         } as any,
       });
+
+      if (candidateData.pipelineStage !== undefined && candidateData.pipelineStage !== existing.pipelineStage) {
+        try {
+          await (tx as any).candidateStageTransition.create({
+            data: {
+              candidateId: existing.id,
+              fromStage: existing.pipelineStage || null,
+              toStage: candidateData.pipelineStage,
+              changedById: req.user?.userId || null,
+              sourceActivity: (data as any).sourceActivity || 'MANUAL_UPDATE',
+              notes: recruiterRemarks || remarks || null,
+            },
+          });
+        } catch (trErr) {
+          console.warn('[updateCandidate] Stage transition recording notice:', trErr);
+        }
+
+        await tx.candidateActivity.create({
+          data: {
+            candidateId: existing.id,
+            userId: req.user?.userId || null,
+            recruiterId: existing.ownerRecruiterId || (req.user?.role === 'RECRUITER' ? req.user.userId : null),
+            action: 'STAGE_CHANGED',
+            notes: `Pipeline stage moved from "${existing.pipelineStage || 'Unmapped'}" to "${candidateData.pipelineStage}"`,
+            metadata: {
+              fromStage: existing.pipelineStage,
+              toStage: candidateData.pipelineStage,
+            },
+          },
+        });
+      }
 
       if (walkInWasRescheduled) {
         await tx.candidateActivity.create({
@@ -2616,23 +2783,44 @@ export const getCandidateTimeline = async (req: Request, res: Response, next: Ne
 /**
  * Dedicated Candidate Status Update: PATCH /api/candidates/:id/status
  */
+const OFFICIAL_PIPELINE_STAGES_LIST = [
+  'Not Called',
+  'No Response',
+  'Callback Scheduled',
+  'On Hold – After 7 Days',
+  'Screening – Under Evaluation',
+  'Shortlisted by Recruiter',
+  'Ready to Go – Walk-in Scheduled',
+  'Client Select',
+  'Onboarding Under Process',
+  'Joined – Winning Option',
+] as const;
+const OFFICIAL_PIPELINE_SET = new Set<string>(OFFICIAL_PIPELINE_STAGES_LIST);
+
 export const updateCandidateStatus = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const identifier = req.params.id;
-    const { status, remarks, notes, pipelineStage, stage } = req.body;
+    const { status, remarks, notes, operationalStatus, pipelineStage, stage, followUpAt, walkInDate, clientName, dateOfJoin, actualJoiningStatus, sourceActivity } = req.body;
 
-    const rawStatus = status || pipelineStage || stage;
-    if (!rawStatus || typeof rawStatus !== 'string') {
-      sendError(res, 'A valid candidate status string is required.', 400);
+    const opStatus = operationalStatus || (status && !OFFICIAL_PIPELINE_SET.has(status) ? status : undefined);
+    const pipeStage = pipelineStage !== undefined ? pipelineStage : (stage !== undefined ? stage : (status && OFFICIAL_PIPELINE_SET.has(status) ? status : undefined));
+
+    if (!opStatus && pipeStage === undefined) {
+      sendError(res, 'A valid operational status or pipeline stage is required.', 400);
       return;
     }
 
     req.body = {
-      status: rawStatus,
-      pipelineStage: rawStatus,
-      stage: rawStatus,
+      ...(opStatus !== undefined ? { operationalStatus: opStatus, status: opStatus } : {}),
+      ...(pipeStage !== undefined ? { pipelineStage: pipeStage } : {}),
       notes: remarks || notes || '',
       recruiterRemarks: remarks || notes || '',
+      ...(followUpAt !== undefined ? { followUpAt } : {}),
+      ...(walkInDate !== undefined ? { walkInDate } : {}),
+      ...(clientName !== undefined ? { clientName } : {}),
+      ...(dateOfJoin !== undefined ? { dateOfJoin } : {}),
+      ...(actualJoiningStatus !== undefined ? { actualJoiningStatus } : {}),
+      ...(sourceActivity !== undefined ? { sourceActivity } : {}),
     };
     return updateCandidate(req, res, next);
   } catch (err) {
