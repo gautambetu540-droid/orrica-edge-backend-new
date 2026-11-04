@@ -1,3 +1,4 @@
+import { notifyJobUrlUpdated, notifyJobUrlDeleted } from '../services/googleIndexing.service';
 import { Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import { prisma } from '../prisma/client';
@@ -441,6 +442,9 @@ export const createJob = async (req: Request, res: Response, next: NextFunction)
     // Invalidate every cached jobs-list variant after creation.
     cache.del('jobs:');
 
+    if (newJob.status === 'PUBLISHED') {
+      notifyJobUrlUpdated(newJob.slug);
+    }
     sendSuccess(res, { job: newJob }, 'Job created successfully', 201);
   } catch (err) {
     next(err);
@@ -623,6 +627,11 @@ export const updateJob = async (req: Request, res: Response, next: NextFunction)
       cache.del('job:slug:' + updatedJob.slug);
     }
 
+    if (updatedJob.status === 'PUBLISHED') {
+      notifyJobUrlUpdated(updatedJob.slug);
+    } else if (updatedJob.status === 'CLOSED' || updatedJob.status === 'ARCHIVED') {
+      notifyJobUrlDeleted(updatedJob.slug);
+    }
     sendSuccess(res, { job: updatedJob }, 'Job updated successfully');
   } catch (err) {
     next(err);
@@ -656,6 +665,9 @@ export const deleteJob = async (req: Request, res: Response, next: NextFunction)
     cache.del('jobs:');
     if (existing?.slug) cache.del(`job:slug:${existing.slug}`);
 
+    if (existing?.slug) {
+      notifyJobUrlDeleted(existing.slug);
+    }
     sendSuccess(res, null, 'Job deleted successfully');
   } catch (err) {
     next(err);
