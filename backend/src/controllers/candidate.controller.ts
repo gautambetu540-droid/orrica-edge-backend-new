@@ -16,7 +16,7 @@ import { formatWalkInDate, formatReadableInterviewDate } from '../utils/dateForm
 import { findWalkInLocationById } from './walk-in.controller';
 
 export const OFFICIAL_10_PIPELINE_STATUSES = [
-  'Not Called',
+  'Not Interested',
   'No Response',
   'Callback Scheduled',
   'On Hold – After 7 Days',
@@ -95,8 +95,8 @@ export const normalizeCandidateStatus = (status?: string | null): string => {
     submitted: 'Submitted',
     assessment: 'Assessment',
     'joining pending': 'Joining Pending',
-    'not called': 'Not Called',
-    'Not Called': 'Not Called',
+    'not called': 'Not Interested',
+    'Not Called': 'Not Interested',
         'No Response': 'No Response',
     'callback scheduled': 'Callback Scheduled',
     'Callback Scheduled': 'Callback Scheduled',
