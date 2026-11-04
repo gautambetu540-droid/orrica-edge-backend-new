@@ -269,6 +269,24 @@ const startServer = async () => {
       });
     };
 
+    // Render Keep-Awake mechanism to prevent cold starts
+    const renderExternalUrl = process.env.RENDER_EXTERNAL_URL || (process.env.NODE_ENV === 'production' ? 'https://orrica-edge-backend-new.onrender.com' : null);
+    if (renderExternalUrl) {
+      const KEEP_AWAKE_MS = 10 * 60 * 1000;
+      const keepAwakeTimer = setInterval(async () => {
+        try {
+          const pingRes = await fetch(`${renderExternalUrl}/health/live`);
+          if (pingRes.ok) {
+            console.log('[KEEP-AWAKE] Heartbeat ping successful to keep Render awake');
+          }
+        } catch (err: any) {
+          console.warn('[KEEP-AWAKE] Ping warning:', err?.message || err);
+        }
+      }, KEEP_AWAKE_MS);
+
+      keepAwakeTimer.unref();
+    }
+
     process.on('SIGTERM', () => handleShutdown('SIGTERM'));
     process.on('SIGINT', () => handleShutdown('SIGINT'));
   }
