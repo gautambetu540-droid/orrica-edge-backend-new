@@ -54,6 +54,9 @@ export const ensureDatabaseSchema = async () => {
       AND "finished_at" IS NULL;
   `, 'Clear failed migration lock');
 
+  // 2.5 Job table columns
+  await executeSafe('ALTER TABLE "jobs" ADD COLUMN IF NOT EXISTS "closingDate" TIMESTAMP(3);', 'Add jobs.closingDate');
+
   // 3. User table columns & indexes
   await executeSafe(`
     ALTER TABLE "users" 

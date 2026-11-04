@@ -273,6 +273,7 @@ model Job {
   status               JobStatus      @default(DRAFT)
   views                Int            @default(0)
   publishedAt          DateTime?
+  closingDate          DateTime?
   metaTitle            String?
   metaDescription      String?        @db.Text
   createdById           String

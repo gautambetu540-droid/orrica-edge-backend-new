@@ -144,6 +144,7 @@ const createJobSchema = z.object({
   })).default([]),
   contentHtml: z.string().trim().min(10),
   status: z.enum(['DRAFT', 'PUBLISHED', 'PAUSED', 'CLOSED', 'ARCHIVED']).default('DRAFT'),
+  closingDate: z.coerce.date().optional().nullable(),
 });
 
 const slugify = (text: string): string => {
