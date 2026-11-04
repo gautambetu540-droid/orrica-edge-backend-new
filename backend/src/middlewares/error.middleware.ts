@@ -16,6 +16,7 @@ export const errorHandler = (
     name: err?.name,
     code: err?.code,
     message: err?.message,
+    stack: err?.stack,
   });
 
   // 1. Zod Validation Errors

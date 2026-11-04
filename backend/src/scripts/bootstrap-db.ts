@@ -100,6 +100,8 @@ export const ensureDatabaseSchema = async () => {
       ADD COLUMN IF NOT EXISTS "actualJoiningStatus" TEXT,
       ADD COLUMN IF NOT EXISTS "totalWorkingDays" INTEGER,
       ADD COLUMN IF NOT EXISTS "lastWorkingDate" TIMESTAMP(3),
+      ADD COLUMN IF NOT EXISTS "operationalStatus" TEXT,
+      ADD COLUMN IF NOT EXISTS "pipelineStage" TEXT,
       ADD COLUMN IF NOT EXISTS "assignedRecruiterIds" TEXT[] DEFAULT ARRAY[]::TEXT[];
   `, 'Add candidate columns');
 
@@ -113,6 +115,18 @@ export const ensureDatabaseSchema = async () => {
     CREATE INDEX IF NOT EXISTS "candidates_actualJoiningStatus_idx" ON "candidates"("actualJoiningStatus");
     CREATE INDEX IF NOT EXISTS "candidates_selectionDate_idx" ON "candidates"("selectionDate");
   `, 'Index candidate selection columns');
+
+  await executeSafe(`
+    CREATE INDEX IF NOT EXISTS "candidates_operationalStatus_idx" ON "candidates"("operationalStatus");
+    CREATE INDEX IF NOT EXISTS "candidates_pipelineStage_idx" ON "candidates"("pipelineStage");
+  `, 'Index candidate operationalStatus and pipelineStage');
+
+  // Initial population of operationalStatus from existing status if NULL
+  await executeSafe(`
+    UPDATE "candidates"
+    SET "operationalStatus" = "status"
+    WHERE "operationalStatus" IS NULL AND "status" IS NOT NULL;
+  `, 'Backfill operationalStatus from existing status');
 
   // Safely migrate candidates.status to TEXT if it is still CandidateStatus enum
   await executeSafe(`
@@ -174,7 +188,46 @@ export const ensureDatabaseSchema = async () => {
   await executeSafe(`CREATE INDEX IF NOT EXISTS "candidate_timelines_applicationId_createdAt_idx" ON "candidate_timelines"("applicationId", "createdAt");`, 'Index timelines applicationId');
   await executeSafe(`CREATE INDEX IF NOT EXISTS "candidate_timelines_userId_createdAt_idx" ON "candidate_timelines"("userId", "createdAt");`, 'Index timelines userId');
 
-  // 7. Recruiter applications table
+  // 7. Candidate stage transitions table
+  await executeSafe(`
+    CREATE TABLE IF NOT EXISTS "candidate_stage_transitions" (
+      "id" TEXT NOT NULL,
+      "candidateId" TEXT NOT NULL,
+      "fromStage" TEXT,
+      "toStage" TEXT,
+      "changedById" TEXT,
+      "sourceActivity" TEXT,
+      "notes" TEXT,
+      "changedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "candidate_stage_transitions_pkey" PRIMARY KEY ("id")
+    );
+  `, 'Create candidate_stage_transitions table');
+
+  await executeSafe(`CREATE INDEX IF NOT EXISTS "candidate_stage_transitions_candidateId_changedAt_idx" ON "candidate_stage_transitions"("candidateId", "changedAt");`, 'Index transitions candidateId');
+  await executeSafe(`CREATE INDEX IF NOT EXISTS "candidate_stage_transitions_changedById_changedAt_idx" ON "candidate_stage_transitions"("changedById", "changedAt");`, 'Index transitions changedById');
+  await executeSafe(`CREATE INDEX IF NOT EXISTS "candidate_stage_transitions_toStage_changedAt_idx" ON "candidate_stage_transitions"("toStage", "changedAt");`, 'Index transitions toStage');
+
+  await executeSafe(`
+    DO $$ BEGIN
+      ALTER TABLE "candidate_stage_transitions"
+        ADD CONSTRAINT "candidate_stage_transitions_candidateId_fkey"
+        FOREIGN KEY ("candidateId") REFERENCES "candidates"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+    EXCEPTION
+      WHEN duplicate_object THEN null;
+    END $$;
+  `, 'Add FK candidate_stage_transitions.candidateId');
+
+  await executeSafe(`
+    DO $$ BEGIN
+      ALTER TABLE "candidate_stage_transitions"
+        ADD CONSTRAINT "candidate_stage_transitions_changedById_fkey"
+        FOREIGN KEY ("changedById") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+    EXCEPTION
+      WHEN duplicate_object THEN null;
+    END $$;
+  `, 'Add FK candidate_stage_transitions.changedById');
+
+  // 8. Recruiter applications table
   await executeSafe(`
     CREATE TABLE IF NOT EXISTS "recruiter_applications" (
       "id" TEXT NOT NULL,
