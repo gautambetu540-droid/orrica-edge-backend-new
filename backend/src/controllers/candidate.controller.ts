@@ -623,7 +623,7 @@ export const getCandidates = async (req: Request, res: Response, next: NextFunct
     } = req.query;
 
     const pageNum = Math.max(1, parseInt(String(page), 10) || 1);
-    const limitNum = Math.min(100, Math.max(1, parseInt(String(limit), 10) || 20));
+    const limitNum = Math.min(5000, Math.max(1, parseInt(String(limit), 10) || 20));
     const skip = (pageNum - 1) * limitNum;
 
     const from = parseDate(dateFrom);
