@@ -31,6 +31,7 @@ import { ensureDefaultUniversalForm } from './controllers/universal-form.control
 import { ensureDatabaseSchema } from './scripts/bootstrap-db';
 import userRoutes from './routes/user.routes';
 import walkInRoutes from './routes/walk-in.routes';
+import clientRoutes from './routes/client.routes';
 import swaggerRouter from './swagger/swagger';
 
 const app = express();
@@ -156,6 +157,7 @@ const registerApiRoutes = (prefix: string) => {
   app.use(`${prefix}/profile`, userRoutes);
   app.use(`${prefix}/settings`, userRoutes);
   app.use(`${prefix}/jobs`, jobRoutes);
+  app.use(`${prefix}/clients`, clientRoutes);
   app.use(`${prefix}/applications`, applicationRoutes);
   app.use(`${prefix}/blogs`, blogRoutes);
   app.use(`${prefix}/inquiries`, inquiryRoutes);

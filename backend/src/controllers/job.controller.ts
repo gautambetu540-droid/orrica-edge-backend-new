@@ -429,6 +429,7 @@ export const updateJob = async (req: Request, res: Response, next: NextFunction)
     const scalarFields = [
       'jobCode',
       'title',
+      'clientId',
       'slug',
       'department',
       'category',
