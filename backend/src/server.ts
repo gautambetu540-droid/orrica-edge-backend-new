@@ -74,8 +74,22 @@ app.use(
 // Rate Limiting (Prevent abuse on public endpoints)
 const generalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 300,
+  max: 1000, // Raised limit
   message: { success: false, message: 'Too many requests from this IP, please try again later.' },
+  skip: (req) => {
+    // Exempt GET requests on public jobs, resources, and health check endpoints from rate limiting
+    if (req.method === 'GET') {
+      const urlPath = req.path || req.originalUrl || '';
+      if (
+        urlPath.includes('/jobs') ||
+        urlPath.includes('/blogs') ||
+        urlPath.includes('/health')
+      ) {
+        return true;
+      }
+    }
+    return false;
+  },
 });
 app.use('/api/', generalLimiter);
 

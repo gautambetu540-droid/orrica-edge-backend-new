@@ -19,6 +19,7 @@ const requireRecruiterJobPermission = (req: import('express').Request, res: impo
 };
 
 // Public routes
+router.get('/sitemap', getJobs);
 router.get('/', optionalAuthenticateJwt, requireRecruiterJobPermission, getJobs);
 router.get('/:slug', optionalAuthenticateJwt, requireRecruiterJobPermission, getJobBySlug);
 

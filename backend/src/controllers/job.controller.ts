@@ -166,12 +166,45 @@ export const getJobs = async (req: Request, res: Response, next: NextFunction): 
       workMode,
       employmentType,
       status = 'PUBLISHED',
+      fields,
       page = '1',
       limit = '10',
     } = req.query;
 
+    const isSitemap = fields === 'sitemap' || req.path === '/sitemap' || req.originalUrl?.includes('/jobs/sitemap');
+
+    if (isSitemap) {
+      const sitemapCacheKey = 'jobs:sitemap';
+      const cachedSitemap = cache.get(sitemapCacheKey);
+      if (cachedSitemap) {
+        sendSuccess(res, cachedSitemap);
+        return;
+      }
+
+      const sitemapJobs = await prisma.job.findMany({
+        where: { status: 'PUBLISHED' },
+        orderBy: { publishedAt: 'desc' },
+        select: {
+          id: true,
+          slug: true,
+          status: true,
+          publishedAt: true,
+          updatedAt: true,
+        },
+      });
+
+      const sitemapResult = {
+        jobs: sitemapJobs,
+        total: sitemapJobs.length,
+      };
+
+      cache.set(sitemapCacheKey, sitemapResult, 300);
+      sendSuccess(res, sitemapResult);
+      return;
+    }
+
     const pageNum = Math.max(1, parseInt(page as string, 10));
-    const limitNum = Math.min(50, Math.max(1, parseInt(limit as string, 10)));
+    const limitNum = Math.min(100, Math.max(1, parseInt(limit as string, 10)));
     const skip = (pageNum - 1) * limitNum;
 
     const userRole = req.user?.role;
@@ -250,7 +283,6 @@ export const getJobs = async (req: Request, res: Response, next: NextFunction): 
           skills: true,
           hiringProcess: true,
           faqs: true,
-          contentHtml: true,
           status: true,
           views: true,
           publishedAt: true,
