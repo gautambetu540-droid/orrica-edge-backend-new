@@ -803,6 +803,11 @@ export const getRecruiters = async (
 
     if (user?.role === 'TEAM_LEADER') {
       where.teamLeaderId = user.userId;
+    } else if (user?.role === 'SUB_ADMIN') {
+      where.OR = [
+        { subAdminId: user.userId },
+        { teamLeaderId: user.userId },
+      ];
     } else if (user?.role === 'RECRUITER' || user?.role === 'FREELANCE_RECRUITER') {
       where.isActive = true;
     }

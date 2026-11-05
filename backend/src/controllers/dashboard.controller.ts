@@ -1,6 +1,8 @@
 import { Request, Response, NextFunction } from 'express';
 import { prisma } from '../prisma/client';
 import { sendSuccess } from '../utils/response';
+import { maskEmail, maskPhone } from '../utils/masking';
+import { buildSubAdminCandidateFilter, getSubAdminAssignedScope } from '../utils/subAdminScoping';
 
 interface CacheEntry<T> {
   data: T;
@@ -134,6 +136,70 @@ export const getAdminDashboard = async (req: Request, res: Response, next: NextF
     const todayStart = new Date(new Date().setHours(0, 0, 0, 0));
     const todayEnd = new Date(new Date().setHours(23, 59, 59, 999));
 
+    const isSubAdmin = req.user?.role === 'SUB_ADMIN';
+    const subAdminUserId = req.user?.userId || '';
+
+    let candidateWhere: any = { isArchived: false };
+    let candidateArchiveWhere: any = { isArchived: true };
+    let assignedRecruitersData: any[] = [];
+    let subAdminInfo: any = null;
+
+    if (isSubAdmin) {
+      const subAdminFilter = await buildSubAdminCandidateFilter(subAdminUserId);
+      candidateWhere = {
+        isArchived: false,
+        AND: [subAdminFilter],
+      };
+      candidateArchiveWhere = {
+        isArchived: true,
+        AND: [subAdminFilter],
+      };
+
+      const [assignedList, subAdminUser] = await Promise.all([
+        prisma.user.findMany({
+          where: {
+            OR: [
+              { subAdminId: subAdminUserId },
+              { teamLeaderId: subAdminUserId },
+            ],
+            isActive: true,
+          },
+          select: {
+            id: true,
+            fullName: true,
+            recruiterId: true,
+            email: true,
+            isActive: true,
+            _count: {
+              select: {
+                sourcedCandidates: true,
+              },
+            },
+          },
+          orderBy: { fullName: 'asc' },
+        }),
+        prisma.user.findUnique({
+          where: { id: subAdminUserId },
+          select: { fullName: true, email: true },
+        }),
+      ]);
+
+      assignedRecruitersData = assignedList;
+      subAdminInfo = {
+        name: subAdminUser?.fullName || 'Sub-admin',
+        recruiterCount: assignedRecruitersData.length,
+        assignedRecruiters: assignedRecruitersData.map((r) => ({
+          id: r.id,
+          name: r.fullName,
+          fullName: r.fullName,
+          recruiterId: r.recruiterId,
+          email: r.email,
+          isActive: r.isActive,
+          candidatesCount: r._count?.sourcedCandidates || 0,
+        })),
+      };
+    }
+
     const [
       totalCandidates,
       activeCandidates,
@@ -152,14 +218,14 @@ export const getAdminDashboard = async (req: Request, res: Response, next: NextF
       activeTeamLeaders,
       todayInterviewsCount,
       totalInterviews,
-      recentApplications,
+      recentApplicationsRaw,
       locationRows,
       noticeRows,
     ] = await Promise.all([
-      prisma.candidate.count({ where: { isArchived: false } }),
-      prisma.candidate.count({ where: { isArchived: false, status: { notIn: ['REJECTED', 'DROPPED', 'Rejected', 'Not Interested', 'Not Eligible', 'Withdrawn'] } } }),
-      prisma.candidate.count({ where: { isArchived: false, status: { in: ['NEW', 'New'] } } }),
-      prisma.candidate.count({ where: { isArchived: true } }),
+      prisma.candidate.count({ where: candidateWhere }),
+      prisma.candidate.count({ where: { ...candidateWhere, status: { notIn: ['REJECTED', 'DROPPED', 'Rejected', 'Not Interested', 'Not Eligible', 'Withdrawn'] } } }),
+      prisma.candidate.count({ where: { ...candidateWhere, status: { in: ['NEW', 'New'] } } }),
+      prisma.candidate.count({ where: candidateArchiveWhere }),
       prisma.job.count({ where: { status: 'PUBLISHED' } }),
       prisma.job.count({ where: { status: { in: ['CLOSED', 'ARCHIVED'] } } }),
       prisma.application.count(),
@@ -169,8 +235,8 @@ export const getAdminDashboard = async (req: Request, res: Response, next: NextF
       prisma.application.count({ where: { stage: 'SELECTED' } }),
       prisma.application.count({ where: { stage: 'JOINED' } }),
       prisma.application.count({ where: { stage: 'REJECTED' } }),
-      prisma.user.count({ where: { role: { in: ['RECRUITER', 'FREELANCE_RECRUITER'] }, isActive: true } }),
-      prisma.user.count({ where: { role: 'TEAM_LEADER', isActive: true } }),
+      isSubAdmin ? Promise.resolve(assignedRecruitersData.length) : prisma.user.count({ where: { role: { in: ['RECRUITER', 'FREELANCE_RECRUITER'] }, isActive: true } }),
+      isSubAdmin ? Promise.resolve(0) : prisma.user.count({ where: { role: 'TEAM_LEADER', isActive: true } }),
 
       prisma.interview.count({ where: { scheduledAt: { gte: todayStart, lte: todayEnd } } }),
       prisma.interview.count(),
@@ -187,17 +253,29 @@ export const getAdminDashboard = async (req: Request, res: Response, next: NextF
       prisma.candidate.groupBy({
         by: ['location'],
         _count: { _all: true },
-        where: { location: { not: '' } },
+        where: { ...candidateWhere, location: { not: '' } },
         orderBy: { _count: { location: 'desc' } },
         take: 5,
       }),
       prisma.candidate.groupBy({
         by: ['noticePeriodDays'],
         _count: { _all: true },
+        where: candidateWhere,
         orderBy: { _count: { noticePeriodDays: 'desc' } },
         take: 8,
       }),
     ]);
+
+    const recentApplications = recentApplicationsRaw.map((app) => ({
+      ...app,
+      candidate: app.candidate
+        ? {
+            ...app.candidate,
+            email: isSubAdmin ? maskEmail(app.candidate.email) : app.candidate.email,
+            phone: isSubAdmin ? maskPhone(app.candidate.phone) : app.candidate.phone,
+          }
+        : null,
+    }));
 
     const totalForRate = Math.max(totalApplications, 1);
     const interviewConversion = Math.round((interviewCount / totalForRate) * 100);
@@ -260,6 +338,7 @@ export const getAdminDashboard = async (req: Request, res: Response, next: NextF
         count: r._count?._all ?? 0,
       })),
       recentApplications,
+      subAdminInfo,
     });
   } catch (err) {
     next(err);

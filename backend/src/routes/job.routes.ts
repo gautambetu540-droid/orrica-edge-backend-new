@@ -6,13 +6,17 @@ import {
   updateJob,
   deleteJob,
 } from '../controllers/job.controller';
-import { authenticateJwt, optionalAuthenticateJwt, requireRoles, requireRecruiterPermission } from '../middlewares/auth.middleware';
+import { authenticateJwt, optionalAuthenticateJwt, requireRoles, requireRecruiterPermission, requirePermission } from '../middlewares/auth.middleware';
 
 const router = Router();
 
 const requireRecruiterJobPermission = (req: import('express').Request, res: import('express').Response, next: import('express').NextFunction): void => {
   if (req.user?.role === 'RECRUITER') {
     void requireRecruiterPermission('jobs')(req, res, next);
+    return;
+  }
+  if (req.user?.role === 'SUB_ADMIN') {
+    void requirePermission('jobs')(req, res, next);
     return;
   }
   next();
@@ -24,9 +28,9 @@ router.get('/', optionalAuthenticateJwt, requireRecruiterJobPermission, getJobs)
 router.get('/:slug', optionalAuthenticateJwt, requireRecruiterJobPermission, getJobBySlug);
 
 // Administrative job management
-router.post('/', authenticateJwt, requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN'), createJob);
-router.put('/:id', authenticateJwt, requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN'), updateJob);
-router.patch('/:id', authenticateJwt, requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN'), updateJob);
-router.delete('/:id', authenticateJwt, requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN'), deleteJob);
+router.post('/', authenticateJwt, requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN'), requirePermission('jobs'), createJob);
+router.put('/:id', authenticateJwt, requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN'), requirePermission('jobs'), updateJob);
+router.patch('/:id', authenticateJwt, requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN'), requirePermission('jobs'), updateJob);
+router.delete('/:id', authenticateJwt, requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN'), requirePermission('jobs'), deleteJob);
 
 export default router;

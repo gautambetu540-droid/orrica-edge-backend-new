@@ -170,6 +170,10 @@ model User {
   teamLeaderId         String?
   teamLeader           User?             @relation("TeamLeaderRecruiters", fields: [teamLeaderId], references: [id], onDelete: SetNull)
   recruiterPod         User[]            @relation("TeamLeaderRecruiters")
+  subAdminId           String?
+  subAdmin             User?             @relation("SubAdminRecruiters", fields: [subAdminId], references: [id], onDelete: SetNull)
+  assignedRecruiters   User[]            @relation("SubAdminRecruiters")
+  permissions          String[]          @default([])
   sourcedCandidates    Candidate[]       @relation("CandidateSourcingRecruiter")
   tlCandidates         Candidate[]       @relation("CandidateTeamLeader")
   tlApplications       Application[]     @relation("TeamLeaderApplications")
@@ -182,6 +186,7 @@ model User {
   stageTransitions               CandidateStageTransition[] @relation("StageTransitionChangedBy")
   recruiterPermissions RecruiterPermission?
 
+  @@index([subAdminId])
   @@map("users")
 }
 

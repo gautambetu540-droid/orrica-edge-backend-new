@@ -20,6 +20,31 @@ export type RecruiterPermissionKey =
   | 'reports'
   | 'settings';
 
+export type SubAdminSectionKey =
+  | 'candidates'
+  | 'recruiters'
+  | 'jobs'
+  | 'interviews'
+  | 'walkins'
+  | 'reports';
+
+export const ALLOWED_SUB_ADMIN_SECTIONS: SubAdminSectionKey[] = [
+  'candidates',
+  'recruiters',
+  'jobs',
+  'interviews',
+  'walkins',
+  'reports',
+];
+
+export const ADMIN_ONLY_SECTIONS = [
+  'settings',
+  'sub-admin management',
+  'billing',
+  'bulk import',
+  'exports',
+];
+
 declare global {
   namespace Express {
     interface Request {
@@ -110,6 +135,81 @@ export const requireRoles = (...allowedRoles: string[]) => {
 
     next();
   };
+};
+
+/**
+ * Section permission guard for SUB_ADMIN role.
+ * - SUPER_ADMIN & ADMIN always pass.
+ * - SUB_ADMIN only passes if the section is in their granted permissions array.
+ * - Other roles pass through (handled by their respective role guards).
+ */
+export const requirePermission = (sectionKey: SubAdminSectionKey) => {
+  return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    if (!req.user) {
+      res.status(401).json({ success: false, message: 'Unauthorized' });
+      return;
+    }
+
+    // Admins always have unrestricted access
+    if (req.user.role === 'SUPER_ADMIN' || req.user.role === 'ADMIN') {
+      next();
+      return;
+    }
+
+    // For SUB_ADMIN, check their database record permissions
+    if (req.user.role === 'SUB_ADMIN') {
+      try {
+        const user = await prisma.user.findUnique({
+          where: { id: req.user.userId },
+          select: { permissions: true, isActive: true },
+        });
+
+        if (!user || !user.isActive) {
+          res.status(403).json({
+            success: false,
+            code: 'ACCOUNT_INACTIVE',
+            message: 'Your Sub-Admin account is inactive or suspended.',
+          });
+          return;
+        }
+
+        const userPerms = Array.isArray(user.permissions) ? user.permissions : [];
+        if (!userPerms.includes(sectionKey)) {
+          res.status(403).json({
+            success: false,
+            code: 'SECTION_PERMISSION_DENIED',
+            message: `Forbidden: You do not have permission to access the '${sectionKey}' section.`,
+          });
+          return;
+        }
+
+        next();
+        return;
+      } catch (error) {
+        next(error);
+        return;
+      }
+    }
+
+    // Other roles proceed through to their own handlers
+    next();
+  };
+};
+
+/**
+ * Strict export guard: blocks SUB_ADMIN and non-admin roles from bulk export,
+ * downloads, templates, CSVs, and Excel reports.
+ */
+export const blockSubAdminExport = (req: Request, res: Response, next: NextFunction): void => {
+  if (req.user?.role === 'SUB_ADMIN') {
+    res.status(403).json({
+      success: false,
+      code: 'EXPORT_FORBIDDEN',
+      message: 'Forbidden: Export, report download, and bulk extract capabilities are disabled for Sub-Admin.',
+    });
+    return;
+  }
+  next();
 };
 
 export const requireRecruiterPermission = (permission: RecruiterPermissionKey) => {

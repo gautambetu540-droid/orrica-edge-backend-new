@@ -1,4 +1,6 @@
 import { computeWorkingDays, normalizeClientName, validateSelectionDates } from '../utils/workingDays';
+import { maskCandidateForRole, maskCandidatesListForRole, maskPhone, maskEmail } from '../utils/masking';
+import { buildSubAdminCandidateFilter } from '../utils/subAdminScoping';
 import ExcelJS from 'exceljs';
 import * as XLSX from 'xlsx';
 import { Request, Response, NextFunction } from 'express';
@@ -259,12 +261,24 @@ const buildDateFilter = (from?: Date, to?: Date) => {
 const canAccessCandidate = async (req: Request, candidateIdentifier: string): Promise<boolean> => {
   const user = req.user;
   if (!user) return false;
-  if (user.role === 'ADMIN' || user.role === 'SUPER_ADMIN' || user.role === 'SUB_ADMIN') return true;
+  if (user.role === 'ADMIN' || user.role === 'SUPER_ADMIN') return true;
 
   const candidateIdFilter = [
     { id: candidateIdentifier },
     { candidateCode: candidateIdentifier },
   ];
+
+  if (user.role === 'SUB_ADMIN') {
+    const subAdminFilter = await buildSubAdminCandidateFilter(user.userId);
+    const accessible = await prisma.candidate.findFirst({
+      where: {
+        OR: candidateIdFilter,
+        AND: [subAdminFilter],
+      },
+      select: { id: true },
+    });
+    return !!accessible;
+  }
 
   if (user.role === 'TEAM_LEADER') {
     const podRecruiters = await prisma.user.findMany({
@@ -567,8 +581,8 @@ export const checkDuplicateCandidate = async (
           id: candidate.id,
           candidateCode: candidate.candidateCode,
           name: candidate.name || candidate.fullName,
-          phone: candidate.phone,
-          email: candidate.email,
+          phone: req.user?.role === 'SUB_ADMIN' ? maskPhone(candidate.phone) : candidate.phone,
+          email: req.user?.role === 'SUB_ADMIN' ? maskEmail(candidate.email) : candidate.email,
           status: candidate.status,
           sourcingRecruiterName,
           teamLeaderName,
@@ -813,6 +827,9 @@ export const getCandidates = async (req: Request, res: Response, next: NextFunct
           { ownerRecruiterId: currentUserId },
         ],
       });
+    } else if (userRole === 'SUB_ADMIN') {
+      const subAdminFilter = await buildSubAdminCandidateFilter(currentUserId || '');
+      andFilters.push(subAdminFilter);
     }
     // Admins and Super Admins have global visibility across all candidates.
 
@@ -1094,9 +1111,10 @@ export const getCandidates = async (req: Request, res: Response, next: NextFunct
     }
 
     const enrichedCandidates = await enrichCandidatesWithRecruiters(candidates);
+    const maskedCandidates = maskCandidatesListForRole(enrichedCandidates, userRole);
 
     sendSuccess(res, {
-      candidates: enrichedCandidates,
+      candidates: maskedCandidates,
       statusCounts,
       pagination: {
         total,
@@ -1393,7 +1411,7 @@ export const createCandidate = async (req: Request, res: Response, next: NextFun
       },
     });
 
-    sendSuccess(res, { candidate: fullCandidate || candidate }, 'Candidate created successfully', 201);
+    sendSuccess(res, { candidate: maskCandidateForRole(fullCandidate || candidate, req.user?.role) }, 'Candidate created successfully', 201);
   } catch (err) {
     next(err);
   }
@@ -1574,7 +1592,7 @@ export const assignCandidate = async (req: Request, res: Response, next: NextFun
       return candidate;
     });
 
-    sendSuccess(res, { candidate: updated }, 'Candidate recruiter assignment updated successfully');
+    sendSuccess(res, { candidate: maskCandidateForRole(updated, req.user?.role) }, 'Candidate recruiter assignment updated successfully');
   } catch (err) {
     next(err);
   }
@@ -1733,7 +1751,8 @@ export const getCandidateById = async (req: Request, res: Response, next: NextFu
     }
 
     const [enrichedCandidate] = await enrichCandidatesWithRecruiters([candidate]);
-    sendSuccess(res, { candidate: enrichedCandidate });
+    const maskedCandidate = maskCandidateForRole(enrichedCandidate, req.user?.role);
+    sendSuccess(res, { candidate: maskedCandidate });
   } catch (err) {
     next(err);
   }
@@ -2341,7 +2360,7 @@ export const updateCandidate = async (req: Request, res: Response, next: NextFun
     const finalCandidate = isOwnerChanged
       ? (await enrichCandidatesWithRecruiters([updated]))[0]
       : updated;
-    sendSuccess(res, { candidate: finalCandidate }, 'Candidate profile updated successfully');
+    sendSuccess(res, { candidate: maskCandidateForRole(finalCandidate, req.user?.role) }, 'Candidate profile updated successfully');
 
     // Async post-response tasks (fire-and-forget)
     if (nextStatus && nextStatus !== existing.status) {
@@ -3031,7 +3050,7 @@ export const updateCandidateStatus = async (req: Request, res: Response, next: N
     });
 
     // 6. Return response to recruiter IMMEDIATELY
-    sendSuccess(res, { candidate: updated }, 'Candidate status updated successfully');
+    sendSuccess(res, { candidate: maskCandidateForRole(updated, req.user?.role) }, 'Candidate status updated successfully');
 
     // 7. Fire-and-forget non-blocking timeline and audit writes
     if (updateData.status && updateData.status !== existing.status) {

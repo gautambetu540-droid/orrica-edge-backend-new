@@ -1,6 +1,8 @@
 import { Request, Response, NextFunction } from 'express';
 import { prisma } from '../prisma/client';
 import { sendSuccess, sendError } from '../utils/response';
+import { maskCandidatesListForRole } from '../utils/masking';
+import { buildSubAdminCandidateFilter, getSubAdminAssignedScope } from '../utils/subAdminScoping';
 
 /**
  * Global Search API: GET /api/search
@@ -49,6 +51,8 @@ export const globalSearch = async (
           { ownerRecruiterId: currentUserId },
         ],
       });
+    } else if (userRole === 'SUB_ADMIN') {
+      candidateRbacFilters.push(await buildSubAdminCandidateFilter(currentUserId || ''));
     }
 
     // Build Job RBAC filter
@@ -68,6 +72,16 @@ export const globalSearch = async (
           },
         },
       });
+    } else if (userRole === 'SUB_ADMIN') {
+      const scope = await getSubAdminAssignedScope(currentUserId || '');
+      if (scope.recruiterUserIds.length > 0) {
+        jobRbacFilters.push({
+          OR: [
+            { assignedRecruiters: { some: { id: { in: scope.recruiterUserIds } } } },
+            { createdById: currentUserId },
+          ],
+        });
+      }
     }
 
     // Candidate Search OR conditions:
@@ -176,7 +190,7 @@ export const globalSearch = async (
     });
 
     sendSuccess(res, {
-      candidates: formattedCandidates,
+      candidates: maskCandidatesListForRole(formattedCandidates, userRole),
       jobs,
       query: rawQuery,
       totalResults: formattedCandidates.length + jobs.length,

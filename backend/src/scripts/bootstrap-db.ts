@@ -67,9 +67,12 @@ export const ensureDatabaseSchema = async () => {
       ADD COLUMN IF NOT EXISTS "mfaSecret" TEXT,
       ADD COLUMN IF NOT EXISTS "mfaBackupCodes" JSONB,
       ADD COLUMN IF NOT EXISTS "lastLoginAt" TIMESTAMP(3),
-      ADD COLUMN IF NOT EXISTS "teamLeaderId" TEXT;
+      ADD COLUMN IF NOT EXISTS "teamLeaderId" TEXT,
+      ADD COLUMN IF NOT EXISTS "subAdminId" TEXT,
+      ADD COLUMN IF NOT EXISTS "permissions" TEXT[] DEFAULT ARRAY[]::TEXT[];
   `, 'Add user columns');
   await executeSafe(`CREATE INDEX IF NOT EXISTS "users_teamLeaderId_idx" ON "users"("teamLeaderId");`, 'Index users.teamLeaderId');
+  await executeSafe(`CREATE INDEX IF NOT EXISTS "users_subAdminId_idx" ON "users"("subAdminId");`, 'Index users.subAdminId');
 
   // 4. Candidate table columns
   await executeSafe(`

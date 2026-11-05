@@ -8,6 +8,7 @@ import { sendSuccess, sendError } from '../utils/response';
 import { logAudit } from '../services/audit.service';
 import { dispatchEmail, sendDynamicEmail } from '../services/email.service';
 import { generateSecureTemporaryPassword } from '../utils/password';
+import { ALLOWED_SUB_ADMIN_SECTIONS, ADMIN_ONLY_SECTIONS } from '../middlewares/auth.middleware';
 
 export const getAdminPortalData = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
@@ -490,17 +491,25 @@ export const createEmployeeUser = async (req: Request, res: Response, next: Next
       designation: z.string().trim().optional(),
       teamLeaderId: z.string().uuid().nullable().optional(),
       permissions: z.array(z.string()).optional(),
+      assignedRecruiterIds: z.array(z.string()).optional(),
     });
 
     const data = schema.parse(req.body);
-    if (req.user?.role === 'SUB_ADMIN' && (data.role === 'RECRUITER' || data.role === 'FREELANCE_RECRUITER')) {
-      sendError(res, 'Forbidden: Sub-Admin accounts cannot create new recruiters.', 403, 'SUB_ADMIN_CANNOT_CREATE_RECRUITER');
+    if (req.user?.role === 'SUB_ADMIN') {
+      sendError(res, 'Forbidden: Sub-Admin accounts cannot manage employees or recruiters.', 403, 'PRIVILEGE_ESCALATION_BLOCKED');
       return;
     }
-    if (req.user?.role === 'SUB_ADMIN' && (data.role === 'SUPER_ADMIN' || data.role === 'ADMIN')) {
-      sendError(res, 'Forbidden: Sub-Admin accounts cannot assign Admin or Super Admin roles.', 403, 'PRIVILEGE_ESCALATION_BLOCKED');
-      return;
+
+    if (data.role === 'SUB_ADMIN') {
+      const perms = data.permissions || [];
+      for (const p of perms) {
+        if (ADMIN_ONLY_SECTIONS.includes(p) || !ALLOWED_SUB_ADMIN_SECTIONS.includes(p as any)) {
+          sendError(res, `Forbidden permission key "${p}". Admin-only and unrecognized capabilities cannot be granted to Sub-Admin.`, 400);
+          return;
+        }
+      }
     }
+
     const existing = await prisma.user.findUnique({
       where: { email: data.email },
       select: { id: true },
@@ -550,6 +559,7 @@ export const createEmployeeUser = async (req: Request, res: Response, next: Next
         recruiterId,
         recruiterType: recruiterType || undefined,
         teamLeaderId: data.teamLeaderId || null,
+        permissions: data.permissions || [],
         mustSetPassword: true,
         resetPasswordToken: tokenHash,
         resetPasswordExpires: tokenExpiry,
@@ -564,10 +574,19 @@ export const createEmployeeUser = async (req: Request, res: Response, next: Next
         recruiterId: true,
         recruiterType: true,
         teamLeaderId: true,
+        permissions: true,
+        subAdminId: true,
         isActive: true,
         createdAt: true,
       },
     });
+
+    if (data.role === 'SUB_ADMIN' && Array.isArray(data.assignedRecruiterIds) && data.assignedRecruiterIds.length > 0) {
+      await prisma.user.updateMany({
+        where: { id: { in: data.assignedRecruiterIds } },
+        data: { subAdminId: user.id },
+      });
+    }
 
     const frontendBaseUrl = (process.env.FRONTEND_URL || 'https://orricaedge.com').replace(/\/+$/, '');
     const loginUrl = `${frontendBaseUrl}/login`;
@@ -673,6 +692,17 @@ export const getEmployeeUsers = async (req: Request, res: Response, next: NextFu
       recruiterType: true,
       teamLeaderId: true,
       teamLeader: { select: { id: true, fullName: true, email: true } },
+      permissions: true,
+      subAdminId: true,
+      assignedRecruiters: {
+        select: {
+          id: true,
+          fullName: true,
+          recruiterId: true,
+          email: true,
+          isActive: true,
+        },
+      },
       createdAt: true,
     };
 
@@ -752,9 +782,36 @@ export const updateEmployeeUser = async (req: Request, res: Response, next: Next
       department: z.string().trim().optional(),
       designation: z.string().trim().optional(),
       isActive: z.boolean().optional(),
+      permissions: z.array(z.string()).optional(),
+      assignedRecruiterIds: z.array(z.string()).optional(),
     });
 
     const parsed = schema.parse(req.body);
+
+    if (parsed.role === 'SUB_ADMIN' || (targetUser.role === 'SUB_ADMIN' && !parsed.role)) {
+      if (parsed.permissions) {
+        for (const p of parsed.permissions) {
+          if (ADMIN_ONLY_SECTIONS.includes(p) || !ALLOWED_SUB_ADMIN_SECTIONS.includes(p as any)) {
+            sendError(res, `Forbidden permission key "${p}". Admin-only and unrecognized capabilities cannot be granted to Sub-Admin.`, 400);
+            return;
+          }
+        }
+      }
+    }
+
+    if (parsed.assignedRecruiterIds !== undefined) {
+      await prisma.user.updateMany({
+        where: { subAdminId: id },
+        data: { subAdminId: null },
+      });
+
+      if (parsed.assignedRecruiterIds.length > 0) {
+        await prisma.user.updateMany({
+          where: { id: { in: parsed.assignedRecruiterIds } },
+          data: { subAdminId: id },
+        });
+      }
+    }
 
     const updated = await prisma.user.update({
       where: { id },
@@ -764,6 +821,7 @@ export const updateEmployeeUser = async (req: Request, res: Response, next: Next
         ...(parsed.phone !== undefined ? { phone: parsed.phone } : {}),
         ...(parsed.role ? { role: parsed.role as any } : {}),
         ...(parsed.isActive !== undefined ? { isActive: parsed.isActive } : {}),
+        ...(parsed.permissions !== undefined ? { permissions: parsed.permissions } : {}),
       },
       select: {
         id: true,
@@ -772,6 +830,17 @@ export const updateEmployeeUser = async (req: Request, res: Response, next: Next
         role: true,
         phone: true,
         isActive: true,
+        permissions: true,
+        subAdminId: true,
+        assignedRecruiters: {
+          select: {
+            id: true,
+            fullName: true,
+            recruiterId: true,
+            email: true,
+            isActive: true,
+          },
+        },
       },
     });
 

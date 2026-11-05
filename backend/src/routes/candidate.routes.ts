@@ -29,6 +29,8 @@ import {
   authenticateJwt,
   requireRoles,
   requireRecruiterPermission,
+  requirePermission,
+  blockSubAdminExport,
 } from '../middlewares/auth.middleware';
 import {
   getSubAdminsList,
@@ -42,6 +44,7 @@ const router = Router();
 router.post(
   '/check-duplicate',
   authenticateJwt,
+  requirePermission('candidates'),
   checkDuplicateCandidate
 );
 
@@ -49,6 +52,7 @@ router.post(
   '/recruiter-submit',
   authenticateJwt,
   requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
+  requirePermission('candidates'),
   requireRecruiterPermission('candidates'),
   uploadResume.single('resume'),
   recruiterSubmitCandidate
@@ -58,6 +62,7 @@ router.get(
   '/',
   authenticateJwt,
   requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
+  requirePermission('candidates'),
   requireRecruiterPermission('candidates'),
   getCandidates
 );
@@ -66,6 +71,7 @@ router.get(
   '/walk-ins',
   authenticateJwt,
   requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
+  requirePermission('walkins'),
   requireRecruiterPermission('candidates'),
   getCandidates
 );
@@ -74,7 +80,7 @@ router.get(
 router.get(
   '/sub-admin/list',
   authenticateJwt,
-  requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN'),
+  requireRoles('SUPER_ADMIN', 'ADMIN'),
   getSubAdminsList
 );
 
@@ -82,13 +88,15 @@ router.get(
   '/sub-admin/selected-candidates',
   authenticateJwt,
   requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN'),
+  requirePermission('reports'),
   getSubAdminSelectedCandidates
 );
 
 router.get(
   '/sub-admin/export',
   authenticateJwt,
-  requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN'),
+  requireRoles('SUPER_ADMIN', 'ADMIN'),
+  blockSubAdminExport,
   exportSubAdminSelectedCandidates
 );
 
@@ -96,6 +104,7 @@ router.post(
   '/',
   authenticateJwt,
   requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
+  requirePermission('candidates'),
   requireRecruiterPermission('candidates'),
   createCandidate
 );
@@ -104,6 +113,7 @@ router.get(
   '/:id/activities',
   authenticateJwt,
   requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
+  requirePermission('candidates'),
   requireRecruiterPermission('candidates'),
   getCandidateActivities
 );
@@ -112,6 +122,7 @@ router.post(
   '/:id/activities',
   authenticateJwt,
   requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
+  requirePermission('candidates'),
   requireRecruiterPermission('candidates'),
   addCandidateActivity
 );
@@ -123,6 +134,7 @@ router.get(
   '/archived/count',
   authenticateJwt,
   requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
+  requirePermission('candidates'),
   requireRecruiterPermission('candidates'),
   getArchivedCandidatesCount
 );
@@ -181,6 +193,7 @@ router.get(
   '/:id',
   authenticateJwt,
   requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
+  requirePermission('candidates'),
   requireRecruiterPermission('candidates'),
   getCandidateById
 );
@@ -189,6 +202,7 @@ router.put(
   '/:id',
   authenticateJwt,
   requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
+  requirePermission('candidates'),
   requireRecruiterPermission('candidates'),
   updateCandidate
 );
@@ -197,6 +211,7 @@ router.patch(
   '/:id',
   authenticateJwt,
   requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
+  requirePermission('candidates'),
   requireRecruiterPermission('candidates'),
   updateCandidate
 );
@@ -205,6 +220,7 @@ router.patch(
   '/:id/status',
   authenticateJwt,
   requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
+  requirePermission('candidates'),
   requireRecruiterPermission('candidates'),
   updateCandidateStatus
 );
@@ -213,6 +229,7 @@ router.put(
   '/:id/status',
   authenticateJwt,
   requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
+  requirePermission('candidates'),
   requireRecruiterPermission('candidates'),
   updateCandidateStatus
 );
@@ -221,6 +238,7 @@ router.get(
   '/:id/timeline',
   authenticateJwt,
   requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
+  requirePermission('candidates'),
   requireRecruiterPermission('candidates'),
   getCandidateTimeline
 );
@@ -229,6 +247,7 @@ router.get(
   '/:id/history',
   authenticateJwt,
   requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
+  requirePermission('candidates'),
   requireRecruiterPermission('candidates'),
   getCandidateTimeline
 );
@@ -268,8 +287,8 @@ router.post(
 router.get(
   '/template/download',
   authenticateJwt,
-  requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
-  requireRecruiterPermission('candidates'),
+  requireRoles('SUPER_ADMIN', 'ADMIN'),
+  blockSubAdminExport,
   downloadCandidateImportTemplate
 );
 
@@ -277,8 +296,8 @@ router.get(
 router.post(
   '/bulk-import-validate',
   authenticateJwt,
-  requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
-  requireRecruiterPermission('candidates'),
+  requireRoles('SUPER_ADMIN', 'ADMIN'),
+  blockSubAdminExport,
   uploadSpreadsheet.single('file'),
   (req, res, next) => {
     req.body = req.body || {};
@@ -291,8 +310,8 @@ router.post(
 router.post(
   '/bulk-import',
   authenticateJwt,
-  requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
-  requireRecruiterPermission('candidates'),
+  requireRoles('SUPER_ADMIN', 'ADMIN'),
+  blockSubAdminExport,
   uploadSpreadsheet.single('file'),
   bulkImportCandidates
 );

@@ -145,6 +145,8 @@ export const login = async (req: Request, res: Response, next: NextFunction): Pr
         isActive: true,
         mfaSecret: true,
         mfaEnabled: true,
+        permissions: true,
+        subAdminId: true,
       },
     });
 
@@ -188,6 +190,8 @@ export const login = async (req: Request, res: Response, next: NextFunction): Pr
       mustSetPassword: user.mustSetPassword,
       lastLoginAt: user.lastLoginAt,
       mfaEnabled: user.mfaEnabled,
+      permissions: user.permissions || [],
+      subAdminId: user.subAdminId,
     };
 
     if (!user.mfaEnabled) {
@@ -453,6 +457,8 @@ export const getMe = async (req: Request, res: Response, next: NextFunction): Pr
         mustSetPassword: true,
         lastLoginAt: true,
         createdAt: true,
+        permissions: true,
+        subAdminId: true,
       },
     });
 

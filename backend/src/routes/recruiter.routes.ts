@@ -25,6 +25,7 @@ import {
   authenticateJwt,
   requireRoles,
   requireRecruiterPermission,
+  requirePermission,
 } from '../middlewares/auth.middleware';
 
 const router = Router();
@@ -41,8 +42,32 @@ const requireRecruiterSelfOrAdmin = async (
     return;
   }
 
-  if (user.role === 'SUPER_ADMIN' || user.role === 'ADMIN' || user.role === 'SUB_ADMIN') {
+  if (user.role === 'SUPER_ADMIN' || user.role === 'ADMIN') {
     next();
+    return;
+  }
+
+  if (user.role === 'SUB_ADMIN') {
+    const isAssigned = await prisma.user.findFirst({
+      where: {
+        id: req.params.id,
+        OR: [
+          { subAdminId: user.userId },
+          { teamLeaderId: user.userId },
+        ],
+      },
+      select: { id: true },
+    });
+
+    if (isAssigned) {
+      next();
+      return;
+    }
+
+    res.status(403).json({
+      success: false,
+      message: 'Forbidden: You may access only recruiters assigned to you.',
+    });
     return;
   }
 
@@ -93,6 +118,7 @@ router.get(
   '/',
   authenticateJwt,
   requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
+  requirePermission('recruiters'),
   getRecruiters
 );
 
@@ -148,14 +174,14 @@ router.patch(
 router.delete(
   '/:id',
   authenticateJwt,
-  requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN'),
+  requireRoles('SUPER_ADMIN', 'ADMIN'),
   deleteRecruiter
 );
 
 router.patch(
   '/:id/status',
   authenticateJwt,
-  requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN'),
+  requireRoles('SUPER_ADMIN', 'ADMIN'),
   updateRecruiterStatus
 );
 
@@ -186,21 +212,21 @@ router.get(
 router.put(
   '/:id/jobs',
   authenticateJwt,
-  requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN'),
+  requireRoles('SUPER_ADMIN', 'ADMIN'),
   updateRecruiterJobs
 );
 
 router.get(
   '/:id/permissions',
   authenticateJwt,
-  requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN'),
+  requireRoles('SUPER_ADMIN', 'ADMIN'),
   getRecruiterPermissions
 );
 
 router.put(
   '/:id/permissions',
   authenticateJwt,
-  requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN'),
+  requireRoles('SUPER_ADMIN', 'ADMIN'),
   updateRecruiterPermissions
 );
 
