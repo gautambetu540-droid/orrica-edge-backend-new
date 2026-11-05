@@ -293,6 +293,7 @@ export const getJobs = async (req: Request, res: Response, next: NextFunction): 
           salaryText: true,
           vacancies: true,
           skills: true,
+          contentHtml: true,
           hiringProcess: true,
           faqs: true,
           status: true,
@@ -306,8 +307,17 @@ export const getJobs = async (req: Request, res: Response, next: NextFunction): 
       }),
     ]);
 
+    const mappedJobs = jobs.map((j) => {
+      const cleanDesc = (j.contentHtml || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+      return {
+        ...j,
+        descriptionHtml: j.contentHtml || '',
+        description: cleanDesc,
+      };
+    });
+
     const result = {
-      jobs,
+      jobs: mappedJobs,
       pagination: {
         total,
         page: pageNum,
@@ -362,13 +372,20 @@ export const getJobBySlug = async (req: Request, res: Response, next: NextFuncti
       return;
     }
 
+    const cleanDesc = (job.contentHtml || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+    const formattedJob = {
+      ...job,
+      descriptionHtml: job.contentHtml || '',
+      description: cleanDesc,
+    };
+
     // Cache single job for 120 seconds
-    cache.set(cacheKey, job, 120);
+    cache.set(cacheKey, formattedJob, 120);
 
     // Asynchronous view increment (Fire and forget)
     prisma.job.update({ where: { id: job.id }, data: { views: { increment: 1 } } }).catch(() => {});
 
-    sendSuccess(res, { job });
+    sendSuccess(res, { job: formattedJob });
   } catch (err) {
     next(err);
   }
