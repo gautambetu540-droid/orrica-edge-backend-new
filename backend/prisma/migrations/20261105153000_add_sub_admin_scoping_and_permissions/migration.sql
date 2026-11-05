@@ -14,3 +14,4 @@ BEGIN
     ALTER TABLE "users" ADD CONSTRAINT "users_subAdminId_fkey" FOREIGN KEY ("subAdminId") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE CASCADE;
   END IF;
 END $$;
+
