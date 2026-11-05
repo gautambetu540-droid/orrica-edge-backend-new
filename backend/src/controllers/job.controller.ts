@@ -518,9 +518,13 @@ export const updateJob = async (req: Request, res: Response, next: NextFunction)
     for (const field of scalarFields) {
       if (body[field] === undefined) continue;
 
-      // requirements is a String in Prisma. The frontend editor may send
-      // its UI representation as an array, so ignore that invalid UI value.
-      if (field === 'requirements' && typeof body[field] !== 'string' && body[field] !== null) {
+      // requirements & eligibilityCriteria are Strings in Prisma. The frontend editor may send
+      // UI representations as an array, so ignore invalid non-string values.
+      if (
+        (field === 'requirements' || field === 'eligibilityCriteria') &&
+        typeof body[field] !== 'string' &&
+        body[field] !== null
+      ) {
         continue;
       }
 
@@ -533,11 +537,15 @@ export const updateJob = async (req: Request, res: Response, next: NextFunction)
     const normalized = normalizeJobNumericFields(body);
 
     if (normalized.experienceMin !== undefined && Number.isFinite(normalized.experienceMin)) {
-      updateData.experienceMin = normalized.experienceMin;
+      updateData.experienceMin = Math.max(0, Math.round(normalized.experienceMin));
+    } else if (updateData.experienceMin !== undefined) {
+      updateData.experienceMin = Math.max(0, Math.round(Number(updateData.experienceMin) || 0));
     }
 
     if (normalized.experienceMax !== undefined && Number.isFinite(normalized.experienceMax)) {
-      updateData.experienceMax = normalized.experienceMax;
+      updateData.experienceMax = Math.max(0, Math.round(normalized.experienceMax));
+    } else if (updateData.experienceMax !== undefined) {
+      updateData.experienceMax = Math.max(0, Math.round(Number(updateData.experienceMax) || 0));
     }
 
     if (normalized.salaryMin !== undefined && Number.isFinite(normalized.salaryMin)) {
@@ -548,8 +556,7 @@ export const updateJob = async (req: Request, res: Response, next: NextFunction)
       updateData.salaryMax = normalized.salaryMax;
     }
 
-    // Frontend sends clientId; Prisma relation updates use `client.connect`.
-    // Do NOT pass `clientId` directly in `updateData` to avoid Prisma validation conflicts.
+    // Frontend sends clientId; Prisma relation updates use clientId or client.
     if (body.clientId !== undefined && body.clientId !== null && body.clientId !== '') {
       const clientId = String(body.clientId).trim();
       const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(clientId);
@@ -606,9 +613,8 @@ export const updateJob = async (req: Request, res: Response, next: NextFunction)
         return;
       }
 
-      updateData.client = {
-        connect: { id: client.id },
-      };
+      delete updateData.client;
+      updateData.clientId = client.id;
     }
 
     if (body.vacancies !== undefined) {
@@ -619,15 +625,25 @@ export const updateJob = async (req: Request, res: Response, next: NextFunction)
       updateData.publishedAt = new Date();
     }
 
-    const updatedJob = await prisma.job.update({
-      where: { id: existing.id },
-      data: updateData,
-      include: {
-        client: {
-          select: { id: true, companyName: true, industry: true, website: true },
+    let updatedJob;
+    try {
+      updatedJob = await prisma.job.update({
+        where: { id: existing.id },
+        data: updateData,
+        include: {
+          client: {
+            select: { id: true, companyName: true, industry: true, website: true },
+          },
         },
-      },
-    });
+      });
+    } catch (updateErr: any) {
+      console.error('[updateJob] Prisma update failure:', {
+        jobId: existing.id,
+        updateData,
+        error: updateErr?.message || updateErr,
+      });
+      throw updateErr;
+    }
 
     // Invalidate every cached jobs-list variant after any update.
     cache.del('jobs:');

@@ -38,6 +38,19 @@ export const errorHandler = (
   }
 
   // 2. Prisma Known Request Errors
+  if (err instanceof Prisma.PrismaClientValidationError) {
+    const cleanMsg = (err.message || 'Payload validation failed').split('\n').filter(Boolean).pop() || 'Invalid data payload';
+    res.status(400).json({
+      success: false,
+      message: `Database validation failed: ${cleanMsg.trim()}`,
+      error: {
+        code: 'PRISMA_VALIDATION_ERROR',
+        message: cleanMsg.trim(),
+      },
+    });
+    return;
+  }
+
   if (err instanceof Prisma.PrismaClientKnownRequestError) {
     if (err.code === 'P2002') {
       const target = Array.isArray(err.meta?.target) ? err.meta.target.join(', ') : 'field';
