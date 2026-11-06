@@ -3126,6 +3126,24 @@ export const resendWalkInEmail = async (req: Request, res: Response, next: NextF
       return;
     }
 
+    // Role-based candidate access verification
+    const userRole = req.user?.role;
+    const currentUserId = req.user?.userId;
+    if (userRole === 'RECRUITER' || userRole === 'FREELANCE_RECRUITER') {
+      const isAuthorized =
+        Boolean(currentUserId) &&
+        (candidate.sourcingRecruiterId === currentUserId ||
+          candidate.ownerRecruiterId === currentUserId ||
+          candidate.createdById === currentUserId ||
+          (Array.isArray(candidate.assignedRecruiterIds) && (candidate.assignedRecruiterIds as string[]).includes(currentUserId!)) ||
+          (candidate.applications || []).some((app: any) => app.recruiterId === currentUserId) ||
+          (Array.isArray(candidate.tags) && (candidate.tags as string[]).includes(`assignedRecruiter:${currentUserId}`)));
+      if (!isAuthorized) {
+        sendError(res, 'You are not authorized to resend walk-in emails to this candidate.', 403);
+        return;
+      }
+    }
+
     // Email validation
     if (!candidate.email || !candidate.email.trim() || !candidate.email.includes('@')) {
       sendError(res, 'Candidate does not have a valid email address configured.', 400);

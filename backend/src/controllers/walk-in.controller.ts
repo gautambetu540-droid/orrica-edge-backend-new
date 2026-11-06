@@ -1126,6 +1126,23 @@ export const rejectWalkInCandidate = async (req: Request, res: Response, next: N
       return;
     }
 
+    // Role-based candidate access verification: Recruiter can only reject candidates assigned to them
+    if (currentUserRole === 'RECRUITER' || currentUserRole === 'FREELANCE_RECRUITER') {
+      const isAssigned =
+        Boolean(currentUserId) &&
+        (candidate.sourcingRecruiterId === currentUserId ||
+          candidate.ownerRecruiterId === currentUserId ||
+          candidate.createdById === currentUserId ||
+          (Array.isArray(candidate.assignedRecruiterIds) && (candidate.assignedRecruiterIds as string[]).includes(String(currentUserId))) ||
+          (candidate.applications || []).some((app: any) => app.recruiterId === currentUserId) ||
+          (Array.isArray(candidate.tags) && (candidate.tags as string[]).includes(`assignedRecruiter:${currentUserId}`)));
+
+      if (!isAssigned) {
+        sendError(res, 'Access denied: You can only reject candidates assigned to you', 403);
+        return;
+      }
+    }
+
     // 1. Update session-level walk-in status to REJECTED (Preserves master recruitment status)
     const updated = await prisma.candidate.update({
       where: { id: candidate.id },
