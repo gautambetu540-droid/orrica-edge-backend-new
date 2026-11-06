@@ -787,11 +787,12 @@ export const getCandidates = async (req: Request, res: Response, next: NextFunct
     const currentUserId = req.user?.userId;
 
     let recruiterUserIds: string[] = [currentUserId].filter(Boolean) as string[];
+    let recUser: any = null;
     if (currentUserId) {
       try {
-        const recUser = await prisma.user.findUnique({
+        recUser = await prisma.user.findUnique({
           where: { id: currentUserId },
-          select: { id: true, recruiterId: true, email: true },
+          select: { id: true, recruiterId: true, email: true, fullName: true },
         });
         if (recUser?.recruiterId) {
           recruiterUserIds.push(recUser.recruiterId);
@@ -815,6 +816,14 @@ export const getCandidates = async (req: Request, res: Response, next: NextFunct
           { applications: { some: { recruiterId: rId } } },
           { assignedRecruiterIds: { has: rId } },
           { tags: { has: `assignedRecruiter:${rId}` } }
+        );
+      }
+      if (recUser?.fullName) {
+        recruiterConditions.push(
+          { sourcingRecruiter: { fullName: { contains: recUser.fullName, mode: 'insensitive' } } },
+          { ownerRecruiter: { fullName: { contains: recUser.fullName, mode: 'insensitive' } } },
+          { createdBy: { fullName: { contains: recUser.fullName, mode: 'insensitive' } } },
+          { applications: { some: { recruiter: { fullName: { contains: recUser.fullName, mode: 'insensitive' } } } } }
         );
       }
       andFilters.push({ OR: recruiterConditions });
@@ -844,15 +853,16 @@ export const getCandidates = async (req: Request, res: Response, next: NextFunct
         });
       } else {
       let targetIds = [recIdStr];
+      let targetUser: any = null;
       try {
-        const targetUser = await prisma.user.findFirst({
+        targetUser = await prisma.user.findFirst({
           where: {
             OR: [
               { id: recIdStr },
               { recruiterId: recIdStr },
             ],
           },
-          select: { id: true, recruiterId: true },
+          select: { id: true, recruiterId: true, fullName: true },
         });
         if (targetUser) {
           if (targetUser.id) targetIds.push(targetUser.id);
@@ -874,6 +884,14 @@ export const getCandidates = async (req: Request, res: Response, next: NextFunct
           { tags: { has: `assignedRecruiter:${rId}` } }
         );
       }
+      if (targetUser?.fullName) {
+        filterConditions.push(
+          { sourcingRecruiter: { fullName: { contains: targetUser.fullName, mode: 'insensitive' } } },
+          { ownerRecruiter: { fullName: { contains: targetUser.fullName, mode: 'insensitive' } } },
+          { createdBy: { fullName: { contains: targetUser.fullName, mode: 'insensitive' } } },
+          { applications: { some: { recruiter: { fullName: { contains: targetUser.fullName, mode: 'insensitive' } } } } }
+        );
+      }
       andFilters.push({ OR: filterConditions });
     }
     }
@@ -889,7 +907,17 @@ export const getCandidates = async (req: Request, res: Response, next: NextFunct
     }
 
     if (String(walkInOnly).toLowerCase() === 'true') {
-      andFilters.push({ walkInStatus: { not: null } });
+      andFilters.push({
+        OR: [
+          { walkInStatus: { not: null } },
+          { walkInDate: { not: null } },
+          { walkInTime: { not: null } },
+          { walkInConfirmationStatus: { not: null } },
+          { walkInSessionId: { not: null } },
+          { venueName: { not: null } },
+          { isWalkIn: true },
+        ],
+      });
     }
 
     if (walkInStatus) {
