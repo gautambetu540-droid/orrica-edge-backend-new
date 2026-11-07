@@ -341,9 +341,11 @@ export const getJobBySlug = async (req: Request, res: Response, next: NextFuncti
   try {
     const { slug } = req.params;
 
-    const isAdmin = req.user?.role === 'ADMIN' || req.user?.role === 'SUPER_ADMIN';
-    const isRecruiter = req.user?.role === 'RECRUITER';
-    const scope = isAdmin ? req.user!.role : isRecruiter ? `recruiter:${req.user!.userId}` : 'public';
+    const userRole = req.user?.role;
+    const isAdmin = userRole === 'ADMIN' || userRole === 'SUPER_ADMIN' || userRole === 'SUB_ADMIN';
+    const isRecruiter = userRole === 'RECRUITER' || userRole === 'FREELANCE_RECRUITER';
+    const isStaff = isAdmin || isRecruiter || userRole === 'TEAM_LEADER';
+    const scope = isAdmin ? req.user!.role : isStaff ? `staff:${req.user!.userId}` : 'public';
     const cacheKey = `job:slug:${slug}:${scope}`;
     const cachedJob = cache.get(cacheKey) as unknown as ({ id: string } & Record<string, unknown>) | null;
     if (cachedJob) {
@@ -357,8 +359,7 @@ export const getJobBySlug = async (req: Request, res: Response, next: NextFuncti
       where: {
         AND: [
           { OR: [{ slug }, { id: slug }, { jobCode: slug }] },
-          ...(isAdmin ? [] : [{ status: 'PUBLISHED' as const }]),
-          ...(isRecruiter ? [{ assignedRecruiters: { some: { id: req.user!.userId } } }] : []),
+          ...(isStaff ? [] : [{ status: 'PUBLISHED' as const }]),
         ],
       },
       include: {
