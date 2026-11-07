@@ -64,8 +64,11 @@ export const config = {
   },
 
   email: {
-    from: process.env.EMAIL_FROM || 'Orrica Edge <no-reply@orricaedge.com>',
+    from: process.env.EMAIL_FROM || process.env.MAIL_FROM || 'Orrica Edge <no-reply@orricaedge.com>',
     supportEmail: process.env.SUPPORT_EMAIL || 'no-reply@orricaedge.com',
+    formRecipientEmail: process.env.FORM_RECIPIENT_EMAIL || 'sudhanshu@orricaedge.com',
+    formCcEmail: process.env.FORM_CC_EMAIL || '',
+    responseTimeText: process.env.RESPONSE_TIME_TEXT || 'within 4 business hours',
   },
 
   upload: {

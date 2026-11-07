@@ -792,3 +792,53 @@ model CandidateStageTransition {
   @@index([toStage, changedAt])
   @@map("candidate_stage_transitions")
 }
+
+enum FormEmailStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+model ContactInquiry {
+  id          String          @id @default(uuid())
+  fullName    String
+  email       String
+  phone       String
+  category    String
+  subject     String?
+  message     String          @db.Text
+  source      String?
+  emailStatus FormEmailStatus @default(PENDING)
+  emailError  String?         @db.Text
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  @@index([createdAt])
+  @@index([emailStatus])
+  @@map("contact_inquiries")
+}
+
+model EmployerRequirement {
+  id                String          @id @default(uuid())
+  fullName          String
+  companyName       String
+  workEmail         String
+  phone             String
+  jobTitle          String
+  openings          Int             @default(1)
+  location          String?
+  workMode          String?
+  jobType           String?
+  targetExperience  String?
+  additionalDetails String?         @db.Text
+  source            String?
+  emailStatus       FormEmailStatus @default(PENDING)
+  emailError        String?         @db.Text
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  @@index([createdAt])
+  @@index([emailStatus])
+  @@map("employer_requirements")
+}
+

@@ -259,7 +259,7 @@ export const ensureDatabaseSchema = async () => {
   await executeSafe(`CREATE INDEX IF NOT EXISTS "recruiter_applications_status_idx" ON "recruiter_applications"("status");`, 'Index recruiter_applications.status');
   await executeSafe(`CREATE INDEX IF NOT EXISTS "recruiter_applications_createdAt_idx" ON "recruiter_applications"("createdAt");`, 'Index recruiter_applications.createdAt');
 
-    // 8. PostgreSQL Sequence for Candidate Codes
+  // 8. PostgreSQL Sequence for Candidate Codes
   await executeSafe(
     'CREATE SEQUENCE IF NOT EXISTS candidate_code_seq START WITH 1 INCREMENT BY 1;',
     'Ensure candidate_code_seq exists'
@@ -269,6 +269,61 @@ export const ensureDatabaseSchema = async () => {
     'SELECT setval(\'candidate_code_seq\', GREATEST(1, COALESCE((SELECT MAX(NULLIF(regexp_replace("candidateCode", \'^[^0-9]+\', \'\'), \'\')::INTEGER) FROM "candidates"), 0) + 1), false);',
     'Synchronize candidate_code_seq'
   );
+
+  // 8.b Public Contact Inquiries and Employer Requirements tables
+  await executeSafe(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'FormEmailStatus') THEN
+        CREATE TYPE "FormEmailStatus" AS ENUM ('PENDING', 'SENT', 'FAILED');
+      END IF;
+    END $$;
+  `, 'Create FormEmailStatus enum');
+
+  await executeSafe(`
+    CREATE TABLE IF NOT EXISTS "contact_inquiries" (
+      "id" TEXT NOT NULL,
+      "fullName" TEXT NOT NULL,
+      "email" TEXT NOT NULL,
+      "phone" TEXT NOT NULL,
+      "category" TEXT NOT NULL,
+      "subject" TEXT,
+      "message" TEXT NOT NULL,
+      "source" TEXT,
+      "emailStatus" "FormEmailStatus" NOT NULL DEFAULT 'PENDING',
+      "emailError" TEXT,
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "contact_inquiries_pkey" PRIMARY KEY ("id")
+    );
+  `, 'Create contact_inquiries table');
+  await executeSafe(`CREATE INDEX IF NOT EXISTS "contact_inquiries_createdAt_idx" ON "contact_inquiries"("createdAt");`, 'Index contact_inquiries.createdAt');
+  await executeSafe(`CREATE INDEX IF NOT EXISTS "contact_inquiries_emailStatus_idx" ON "contact_inquiries"("emailStatus");`, 'Index contact_inquiries.emailStatus');
+
+  await executeSafe(`
+    CREATE TABLE IF NOT EXISTS "employer_requirements" (
+      "id" TEXT NOT NULL,
+      "fullName" TEXT NOT NULL,
+      "companyName" TEXT NOT NULL,
+      "workEmail" TEXT NOT NULL,
+      "phone" TEXT NOT NULL,
+      "jobTitle" TEXT NOT NULL,
+      "openings" INTEGER NOT NULL DEFAULT 1,
+      "location" TEXT,
+      "workMode" TEXT,
+      "jobType" TEXT,
+      "targetExperience" TEXT,
+      "additionalDetails" TEXT,
+      "source" TEXT,
+      "emailStatus" "FormEmailStatus" NOT NULL DEFAULT 'PENDING',
+      "emailError" TEXT,
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "employer_requirements_pkey" PRIMARY KEY ("id")
+    );
+  `, 'Create employer_requirements table');
+  await executeSafe(`CREATE INDEX IF NOT EXISTS "employer_requirements_createdAt_idx" ON "employer_requirements"("createdAt");`, 'Index employer_requirements.createdAt');
+  await executeSafe(`CREATE INDEX IF NOT EXISTS "employer_requirements_emailStatus_idx" ON "employer_requirements"("emailStatus");`, 'Index employer_requirements.emailStatus');
 
   // 9. Ensure canonical default clients exist in database
   const defaultClients = [

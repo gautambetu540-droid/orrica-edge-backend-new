@@ -32,6 +32,7 @@ import { ensureDatabaseSchema } from './scripts/bootstrap-db';
 import userRoutes from './routes/user.routes';
 import walkInRoutes from './routes/walk-in.routes';
 import clientRoutes from './routes/client.routes';
+import publicFormRoutes from './routes/publicForm.routes';
 import swaggerRouter from './swagger/swagger';
 
 const app = express();
@@ -192,11 +193,13 @@ const registerApiRoutes = (prefix: string) => {
   app.use(`${prefix}/universal-forms`, universalFormRoutes);
   app.use(`${prefix}/notifications`, notificationRoutes);
   app.use(`${prefix}/walk-in`, walkInRoutes);
+  app.use(`${prefix}/public`, publicFormRoutes);
 };
 
 registerApiRoutes('/api/v1');
 registerApiRoutes('/api');
 app.use('/walk-in', walkInRoutes);
+app.use('/api/public', publicFormRoutes);
 
 // 404 Route Handler
 app.use('*', (req, res) => {
