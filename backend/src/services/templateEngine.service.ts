@@ -120,29 +120,33 @@ export const DEFAULT_TEMPLATES: Record<string, DefaultTemplateDefinition> = {
 
   RECRUITER_WELCOME: {
     templateKey: 'RECRUITER_WELCOME',
-    name: 'Recruiter Account Welcome & Credentials',
+    name: 'Recruiter Account Welcome & Password Setup',
     category: 'Recruiter',
-    subject: 'Welcome to Orrica Edge — Your Recruiter Account Credentials ({{recruiter_id}})',
+    subject: 'Welcome to Orrica Edge — Activate Your Recruiter Account ({{recruiter_id}})',
     htmlBody:
       '<div style="max-width:600px;margin:0 auto;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Roboto,sans-serif;color:#1e293b;line-height:1.6;">' +
       '<h2 style="margin-top:0;color:#0f172a;font-size:22px;border-bottom:2px solid #f97316;padding-bottom:10px;">Welcome to Orrica Edge</h2>' +
       '<p>Dear <strong>{{recruiter_name}}</strong>,</p>' +
-      '<p>Your recruiter account has been approved and activated on the Orrica Edge Recruitment Platform.</p>' +
+      '<p>Your recruiter partner account has been approved and activated on the Orrica Edge Recruitment Platform.</p>' +
       '<div style="background:#f8fafc;border:1px solid #cbd5e1;border-radius:10px;padding:20px;margin:24px 0;">' +
-      '<h3 style="margin-top:0;margin-bottom:14px;color:#0f172a;font-size:16px;">Your Login Credentials</h3>' +
+      '<h3 style="margin-top:0;margin-bottom:14px;color:#0f172a;font-size:16px;">Account Details</h3>' +
       '<table style="width:100%;border-collapse:collapse;">' +
       '<tr><td style="padding:6px 0;color:#64748b;width:160px;font-size:14px;"><strong>Recruiter ID:</strong></td><td style="padding:6px 0;font-family:monospace;font-size:14px;color:#0f172a;font-weight:600;">{{recruiter_id}}</td></tr>' +
       '<tr><td style="padding:6px 0;color:#64748b;font-size:14px;"><strong>Registered Email:</strong></td><td style="padding:6px 0;font-size:14px;color:#0f172a;font-weight:600;">{{recruiter_email}}</td></tr>' +
-      '<tr><td style="padding:6px 0;color:#64748b;font-size:14px;"><strong>Temporary Password:</strong></td><td style="padding:6px 0;"><code style="background:#fee2e2;color:#991b1b;border:1px solid #fecaca;padding:4px 10px;border-radius:6px;font-size:15px;font-weight:bold;letter-spacing:0.5px;display:inline-block;">{{temporary_password}}</code></td></tr>' +
       '</table>' +
       '</div>' +
-      '<p>You can sign in immediately with your temporary password, or click below to set your permanent password:</p>' +
+      '<p style="margin:20px 0 10px;font-size:14px;color:#334155;">To access your workspace, please set your secure account password using the link below:</p>' +
       '<p style="margin:28px 0;text-align:center;">' +
-      '<a href="{{setup_url}}" style="background:#f97316;color:#ffffff;padding:12px 28px;text-decoration:none;border-radius:8px;font-weight:700;display:inline-block;font-size:15px;">Set Permanent Password &amp; Sign In</a>' +
+      '<a href="{{setup_url}}" style="background:#f97316;color:#ffffff;padding:12px 28px;text-decoration:none;border-radius:8px;font-weight:700;display:inline-block;font-size:15px;">Set Password &amp; Activate Account</a>' +
       '</p>' +
+      '<div style="background:#eff6ff;border-left:4px solid #3b82f6;padding:12px 16px;margin:20px 0;border-radius:4px;">' +
+      '<p style="margin:0;font-size:13px;color:#1e40af;line-height:1.5;">' +
+      '<strong>Security Notice:</strong> For your protection, passwords are never transmitted via email. This secure activation link expires in 24 hours.' +
+      '</p>' +
+      '</div>' +
       '<p style="font-size:13px;color:#64748b;line-height:1.5;">' +
-      'Direct Login URL: <a href="{{login_url}}" style="color:#f97316;text-decoration:none;font-weight:600;">{{login_url}}</a><br>' +
-      'For security purposes, you will be prompted to update your password upon first login.' +
+      'Direct Setup Link: <a href="{{setup_url}}" style="color:#2563eb;word-break:break-all;">{{setup_url}}</a><br>' +
+      'After setting your password, you can sign in directly at: <a href="{{login_url}}" style="color:#f97316;text-decoration:none;font-weight:600;">{{login_url}}</a>' +
       '</p>' +
       '<hr style="border:none;border-top:1px solid #e2e8f0;margin:24px 0;">' +
       '<p style="margin-bottom:0;color:#475569;font-size:14px;">Regards,<br><strong>Orrica Edge Talent Solutions Team</strong></p>' +
@@ -150,14 +154,15 @@ export const DEFAULT_TEMPLATES: Record<string, DefaultTemplateDefinition> = {
     plainText:
       'Welcome {{recruiter_name}}!\n\n' +
       'Your recruiter account on the Orrica Edge platform has been activated.\n\n' +
-      'ACCOUNT CREDENTIALS:\n' +
+      'ACCOUNT DETAILS:\n' +
       '- Recruiter ID: {{recruiter_id}}\n' +
-      '- Email: {{recruiter_email}}\n' +
-      '- Temporary Password: {{temporary_password}}\n\n' +
-      'Set your permanent password here:\n{{setup_url}}\n\n' +
-      'Or sign in directly at:\n{{login_url}}\n\n' +
+      '- Email: {{recruiter_email}}\n\n' +
+      'For security reasons, passwords are never transmitted via email.\n' +
+      'Click the secure link below to set your password and activate your account (valid for 24 hours):\n' +
+      '{{setup_url}}\n\n' +
+      'Login page: {{login_url}}\n\n' +
       'Regards,\nOrrica Edge Talent Solutions',
-    variables: ['recruiter_id', 'recruiter_name', 'recruiter_email', 'temporary_password', 'setup_url', 'login_url', 'support_email'],
+    variables: ['recruiter_id', 'recruiter_name', 'recruiter_email', 'setup_url', 'login_url', 'support_email'],
   },
 
 
@@ -484,7 +489,7 @@ export const compileEmailTemplate = async (
         plainText: `Notification regarding ${templateKey}`,
       };
     }
-  } else if (templateKey.startsWith('WALK_IN_') || (templateKey === 'RECRUITER_WELCOME' && template.htmlBody && !template.htmlBody.includes('temporary_password'))) {
+  } else if (templateKey.startsWith('WALK_IN_') || (templateKey === 'RECRUITER_WELCOME' && template.htmlBody && template.htmlBody.includes('temporary_password'))) {
     const canonicalTpl = DEFAULT_TEMPLATES[templateKey];
     if (canonicalTpl) {
       template = {

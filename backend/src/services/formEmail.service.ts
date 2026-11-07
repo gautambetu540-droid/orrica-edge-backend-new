@@ -12,6 +12,12 @@ export const FORM_CC_EMAIL = config.email.formCcEmail || process.env.FORM_CC_EMA
 export const RESEND_FROM_EMAIL = config.email.from;
 export const MAIL_FROM = RESEND_FROM_EMAIL;
 
+if (RESEND_FROM_EMAIL.includes('@orricaedge.com') && !RESEND_FROM_EMAIL.includes('@update.orricaedge.com')) {
+  throw new Error(
+    `[FATAL SENDER DOMAIN ERROR] Form email sender "${RESEND_FROM_EMAIL}" is blocked. Cannot send from root orricaedge.com; must use update.orricaedge.com.`
+  );
+}
+
 export const RESPONSE_TIME_TEXT =
   config.email.responseTimeText || process.env.RESPONSE_TIME_TEXT || 'within 4 business hours';
 

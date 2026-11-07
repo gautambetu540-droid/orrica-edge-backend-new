@@ -232,8 +232,10 @@ const repairLegacyClientNames = async () => {
 const validateEmailConfig = () => {
   const missing: string[] = [];
   if (!process.env.RESEND_API_KEY) missing.push('RESEND_API_KEY');
-  if (!process.env.RESEND_FROM_EMAIL && !process.env.EMAIL_FROM && !process.env.MAIL_FROM) {
-    missing.push('RESEND_FROM_EMAIL');
+  if (!process.env.RESEND_FROM_EMAIL) {
+    console.warn(
+      `[EMAIL CONFIG NOTICE] RESEND_FROM_EMAIL not explicitly set in environment. Defaulting to centralized: ${config.email.from}`
+    );
   }
   if (!process.env.FRONTEND_URL) missing.push('FRONTEND_URL');
 
@@ -241,8 +243,10 @@ const validateEmailConfig = () => {
     console.warn(`[EMAIL CONFIG WARNING] Missing email environment variables: ${missing.join(', ')}`);
     console.warn(`[EMAIL CONFIG WARNING] Outbound emails will run in local simulation mode.`);
   } else {
-    if (!config.email.from.includes('update.orricaedge.com')) {
-      console.warn(`[EMAIL CONFIG WARNING] Sender "${config.email.from}" does not match update.orricaedge.com. This may trigger 403 errors with domain-restricted API keys.`);
+    if (config.email.from.includes('@orricaedge.com') && !config.email.from.includes('@update.orricaedge.com')) {
+      throw new Error(
+        `[CRITICAL EMAIL CONFIG ERROR] Outbound sender "${config.email.from}" uses unauthorized domain orricaedge.com. Must use update.orricaedge.com.`
+      );
     }
     console.log(
       `[EMAIL CONFIG] Email provider verified: Resend active | Sender: ${config.email.from} | Domain: ${config.email.sendingDomain} | Reply-To: DISABLED (Not Configured)`

@@ -617,9 +617,9 @@ export const createEmployeeUser = async (req: Request, res: Response, next: Next
             recruiter_id: user.recruiterId || '',
             recruiter_name: user.fullName,
             recruiter_email: user.email,
-            temporary_password: temporaryPassword,
             setup_url: setupUrl,
             login_url: config.recruiter.loginUrl || loginUrl,
+            support_email: config.email.supportEmail || 'info@orricaedge.com',
           },
         });
         emailSent = true;
@@ -963,20 +963,29 @@ export const resetEmployeeCredentials = async (req: Request, res: Response, next
       where: { userId: targetUser.id },
     });
 
-    // 3. Update user passwordHash and mustSetPassword
+    // 3. Generate cryptographic setup token for secure password setup
+    const rawSetupToken = crypto.randomBytes(32).toString('hex');
+    const tokenHash = crypto.createHash('sha256').update(rawSetupToken).digest('hex');
+    const expiryHours = config.recruiter.passwordSetupExpiryHours || 24;
+    const tokenExpiry = new Date(Date.now() + expiryHours * 60 * 60 * 1000);
+
+    // 4. Update user passwordHash, setup token, and mustSetPassword
     await prisma.user.update({
       where: { id: targetUser.id },
       data: {
         passwordHash,
         mustSetPassword: true,
+        resetPasswordToken: tokenHash,
+        resetPasswordExpires: tokenExpiry,
         failedLoginAttempts: 0,
         lockUntil: null,
       },
     });
 
-    // 4. Send welcome email with new temporary password
+    // 5. Send welcome email with secure expiring password setup link
     const frontendBaseUrl = (process.env.FRONTEND_URL || 'https://orricaedge.com').replace(/\/+$/, '');
     const loginUrl = `${frontendBaseUrl}/login`;
+    const setupUrl = `${config.recruiter.passwordSetupUrl}?token=${rawSetupToken}&email=${encodeURIComponent(targetUser.email)}`;
     const isRecruiter = targetUser.role === 'RECRUITER' || targetUser.role === 'FREELANCE_RECRUITER';
     let emailSent = false;
     let emailErrorReason: string | undefined;
@@ -990,9 +999,9 @@ export const resetEmployeeCredentials = async (req: Request, res: Response, next
             recruiter_id: targetUser.recruiterId || '',
             recruiter_name: targetUser.fullName,
             recruiter_email: targetUser.email,
-            temporary_password: temporaryPassword,
-            setup_url: `${config.recruiter.passwordSetupUrl}?email=${encodeURIComponent(targetUser.email)}`,
+            setup_url: setupUrl,
             login_url: config.recruiter.loginUrl || loginUrl,
+            support_email: config.email.supportEmail || 'info@orricaedge.com',
           },
         });
       } else {

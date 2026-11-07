@@ -8,6 +8,19 @@ const resend = resendApiKey ? new Resend(resendApiKey) : null;
 
 export const RESEND_FROM_EMAIL = config.email.from;
 
+/**
+ * Sanitize email payload variables so credentials and secrets are NEVER logged in audit records.
+ */
+const sanitizePayload = (vars: Record<string, string>): Record<string, string> => {
+  const sanitized = { ...vars };
+  for (const key of Object.keys(sanitized)) {
+    if (/password|token|secret/i.test(key) && key !== 'job_code' && key !== 'application_id' && key !== 'recruiter_id') {
+      sanitized[key] = '[REDACTED]';
+    }
+  }
+  return sanitized;
+};
+
 export interface DispatchEmailPayload {
   templateKey: string;
   recipient: string;
@@ -26,6 +39,13 @@ export const sendDynamicEmail = async (
   const { templateKey, recipient, variables } = payload;
   // Centralized sender configuration strictly enforced to authorized sending domain update.orricaedge.com
   const fromAddress = RESEND_FROM_EMAIL;
+
+  // Hard assertion: Never dispatch with root domain orricaedge.com
+  if (fromAddress.includes('@orricaedge.com') && !fromAddress.includes('@update.orricaedge.com')) {
+    throw new Error(
+      `[FATAL SENDER DOMAIN ERROR] Outbound email sender "${fromAddress}" is blocked. Cannot send from root orricaedge.com; must use update.orricaedge.com.`
+    );
+  }
 
   try {
     // Compile template through dynamic engine (admin override -> in-memory cache -> default fallback)
@@ -52,7 +72,7 @@ export const sendDynamicEmail = async (
       console.log(`[EMAIL DISPATCH] To: ${recipient} | From: ${fromAddress} | Key: ${templateKey} | Subject: ${compiled.subject}`);
     }
 
-    // Persist email audit record
+    // Persist email audit record (sanitized)
     try {
       await prisma.emailLog.create({
         data: {
@@ -61,7 +81,7 @@ export const sendDynamicEmail = async (
           template: templateKey,
           status: 'SENT',
           messageId,
-          payload: variables,
+          payload: sanitizePayload(variables),
         },
       });
     } catch (logErr: any) {
@@ -80,7 +100,7 @@ export const sendDynamicEmail = async (
           template: templateKey,
           status: 'FAILED',
           error: err.message,
-          payload: variables,
+          payload: sanitizePayload(variables),
         },
       });
     } catch {

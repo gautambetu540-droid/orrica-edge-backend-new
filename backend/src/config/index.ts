@@ -21,12 +21,20 @@ if (isProduction) {
 }
 
 const resolveSenderAddress = (): string => {
-  const configured = (process.env.RESEND_FROM_EMAIL || process.env.EMAIL_FROM || process.env.MAIL_FROM || '').trim();
-  // Strictly prevent using unauthorized root domain orricaedge.com (which causes 403 Forbidden on domain-restricted keys)
-  if (!configured || (configured.includes('@orricaedge.com') && !configured.includes('@update.orricaedge.com'))) {
-    return 'Orrica Edge <noreply@update.orricaedge.com>';
+  const configured = (process.env.RESEND_FROM_EMAIL || '').trim();
+
+  // If explicitly configured with unauthorized root domain orricaedge.com
+  if (configured) {
+    if (configured.includes('@orricaedge.com') && !configured.includes('@update.orricaedge.com')) {
+      throw new Error(
+        `[CRITICAL CONFIG ERROR] RESEND_FROM_EMAIL ("${configured}") specifies unauthorized root domain "orricaedge.com". Resend API key is restricted to "update.orricaedge.com". All automated emails must send from "Orrica Edge <noreply@update.orricaedge.com>".`
+      );
+    }
+    return configured;
   }
-  return configured;
+
+  // Canonical centralized sender address
+  return 'Orrica Edge <noreply@update.orricaedge.com>';
 };
 
 export const config = {

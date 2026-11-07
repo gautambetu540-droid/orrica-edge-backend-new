@@ -149,32 +149,44 @@ async function runTestSuite() {
     'Temporary password hashes and verifies with bcrypt'
   );
 
-  // Check RECRUITER_WELCOME template variables & body interpolation
+  // Check RECRUITER_WELCOME template variables & secure password setup link
   const recruiterWelcomeTpl = DEFAULT_TEMPLATES.RECRUITER_WELCOME;
   assert(
-    recruiterWelcomeTpl.variables.includes('temporary_password'),
-    'RECRUITER_WELCOME template registers temporary_password variable'
+    recruiterWelcomeTpl.variables.includes('setup_url'),
+    'RECRUITER_WELCOME template registers secure setup_url variable'
   );
   assert(
-    recruiterWelcomeTpl.htmlBody.includes('{{temporary_password}}'),
-    'RECRUITER_WELCOME htmlBody contains {{temporary_password}} placeholder'
+    !recruiterWelcomeTpl.variables.includes('temporary_password'),
+    'RECRUITER_WELCOME template omits plaintext temporary_password variable for security'
   );
   assert(
-    recruiterWelcomeTpl.plainText.includes('{{temporary_password}}'),
-    'RECRUITER_WELCOME plainText contains {{temporary_password}} placeholder'
+    recruiterWelcomeTpl.htmlBody.includes('{{setup_url}}'),
+    'RECRUITER_WELCOME htmlBody contains {{setup_url}} placeholder'
+  );
+  assert(
+    !recruiterWelcomeTpl.htmlBody.includes('{{temporary_password}}'),
+    'RECRUITER_WELCOME htmlBody omits plaintext {{temporary_password}} placeholder'
+  );
+  assert(
+    recruiterWelcomeTpl.plainText.includes('{{setup_url}}'),
+    'RECRUITER_WELCOME plainText contains {{setup_url}} placeholder'
   );
 
+  const testSetupUrl = 'https://orricaedge.com/set-password?token=sec-token-abc123xyz';
   const renderedHtml = interpolateVariables(recruiterWelcomeTpl.htmlBody, {
     recruiter_id: 'REC-0099',
     recruiter_name: 'Anita Sharma',
     recruiter_email: 'anita@example.com',
-    temporary_password: tempPw,
-    setup_url: 'https://orricaedge.com/set-password?token=abc',
+    setup_url: testSetupUrl,
     login_url: 'https://orricaedge.com/login',
   });
   assert(
-    renderedHtml.includes(tempPw),
-    'Rendered welcome email HTML body contains the actual temporary password'
+    !renderedHtml.includes(tempPw),
+    'Rendered welcome email HTML body strictly omits plaintext temporary password'
+  );
+  assert(
+    renderedHtml.includes(testSetupUrl),
+    'Rendered welcome email HTML body contains the secure expiring setup link'
   );
   assert(
     renderedHtml.includes('REC-0099') && renderedHtml.includes('anita@example.com'),
@@ -185,13 +197,16 @@ async function runTestSuite() {
     recruiter_id: 'REC-0099',
     recruiter_name: 'Anita Sharma',
     recruiter_email: 'anita@example.com',
-    temporary_password: tempPw,
-    setup_url: 'https://orricaedge.com/set-password?token=abc',
+    setup_url: testSetupUrl,
     login_url: 'https://orricaedge.com/login',
   });
   assert(
-    renderedText.includes(tempPw),
-    'Rendered welcome email plain text body contains the actual temporary password'
+    !renderedText.includes(tempPw),
+    'Rendered welcome email plain text body strictly omits plaintext temporary password'
+  );
+  assert(
+    renderedText.includes(testSetupUrl),
+    'Rendered welcome email plain text body contains the secure expiring setup link'
   );
 
   // ----------------------------------------------------

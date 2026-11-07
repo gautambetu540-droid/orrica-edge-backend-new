@@ -168,9 +168,9 @@ export const createRecruiter = async (
       recruiter_id: recruiter.recruiterId || '',
       recruiter_name: recruiter.fullName,
       recruiter_email: recruiter.email,
-      temporary_password: temporaryPassword,
       setup_url: setupUrl,
       login_url: config.recruiter.loginUrl,
+      support_email: config.email.supportEmail,
     });
 
     sendSuccess(
@@ -1386,9 +1386,9 @@ export const sendRecruiterWelcomeEmail = async (
       recruiter_id: recruiter.recruiterId || '',
       recruiter_name: recruiter.fullName,
       recruiter_email: recruiter.email,
-      temporary_password: temporaryPassword,
       setup_url: setupUrl,
       login_url: config.recruiter.loginUrl,
+      support_email: config.email.supportEmail,
     });
 
     await logAudit({

@@ -432,9 +432,9 @@ export const approveRecruiterApplication = async (
       recruiter_id: createdRecruiter.recruiterId || '',
       recruiter_name: createdRecruiter.fullName,
       recruiter_email: createdRecruiter.email,
-      temporary_password: temporaryPassword,
       setup_url: setupUrl,
       login_url: config.recruiter.loginUrl,
+      support_email: config.email.supportEmail,
     });
 
     sendSuccess(

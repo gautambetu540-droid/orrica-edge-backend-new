@@ -29,13 +29,12 @@ interface TestCase {
 
 const testCases: TestCase[] = [
   {
-    name: '1. Recruiter Registration & Credentials',
+    name: '1. Recruiter Registration & Secure Password Setup Link',
     templateKey: 'RECRUITER_WELCOME',
     variables: {
       recruiter_name: 'Priya Sharma (Test Recruiter)',
       recruiter_email: testRecipient,
       recruiter_id: 'REC-TEST-2026',
-      temporary_password: 'TestPass@2026!',
       setup_url: 'https://orricaedge.com/set-password?token=test-token-123',
       login_url: 'https://orricaedge.com/login',
       support_email: config.email.supportEmail,
