@@ -641,7 +641,7 @@ export const createEmployeeUser = async (req: Request, res: Response, next: Next
             role: formattedRole,
             temporary_password: temporaryPassword,
             login_url: loginUrl,
-            support_email: 'support@orricaedge.com',
+            support_email: config.email.replyTo || 'info@orricaedge.com',
           },
         });
         emailSent = true;
@@ -1006,7 +1006,7 @@ export const resetEmployeeCredentials = async (req: Request, res: Response, next
             role: formattedRole,
             temporary_password: temporaryPassword,
             login_url: loginUrl,
-            support_email: 'support@orricaedge.com',
+            support_email: config.email.replyTo || 'info@orricaedge.com',
           },
         });
       }

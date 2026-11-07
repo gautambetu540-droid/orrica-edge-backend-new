@@ -11,6 +11,7 @@ import { dispatchEmail } from '../services/email.service';
 import { cache } from '../utils/cache';
 import { sendSuccess, sendError } from '../utils/response';
 import { logAudit } from '../services/audit.service';
+import { config } from '../config';
 
 const updateTemplateSchema = z.object({
   name: z.string().min(2).optional(),
@@ -219,7 +220,7 @@ export const previewEmailTemplate = async (req: Request, res: Response, next: Ne
       recruiter_name: 'Pooja Verma',
       client_name: 'Mr. Kapoor',
       dashboard_url: 'https://orricaedge.com',
-      support_email: 'no-reply@orricaedge.com',
+      support_email: config.email.replyTo || 'info@orricaedge.com',
       ...(sampleVariables || {}),
     };
 

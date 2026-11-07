@@ -232,14 +232,18 @@ const repairLegacyClientNames = async () => {
 const validateEmailConfig = () => {
   const missing: string[] = [];
   if (!process.env.RESEND_API_KEY) missing.push('RESEND_API_KEY');
-  if (!process.env.EMAIL_FROM) missing.push('EMAIL_FROM');
+  if (!process.env.RESEND_FROM_EMAIL && !process.env.EMAIL_FROM && !process.env.MAIL_FROM) {
+    missing.push('RESEND_FROM_EMAIL');
+  }
   if (!process.env.FRONTEND_URL) missing.push('FRONTEND_URL');
 
   if (missing.length > 0) {
     console.warn(`[EMAIL CONFIG WARNING] Missing email environment variables: ${missing.join(', ')}`);
     console.warn(`[EMAIL CONFIG WARNING] Outbound emails will run in local simulation mode.`);
   } else {
-    console.log(`[EMAIL CONFIG] Email provider verified (Resend active).`);
+    console.log(
+      `[EMAIL CONFIG] Email provider verified: Resend active | Sender: ${config.email.from} | Reply-To: ${config.email.replyTo}`
+    );
   }
 };
 

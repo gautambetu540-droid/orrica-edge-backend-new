@@ -1,20 +1,20 @@
 import { Resend } from 'resend';
+import { config } from '../config';
 
-const resendApiKey = process.env.RESEND_API_KEY || '';
+const resendApiKey = config.email.resendApiKey || process.env.RESEND_API_KEY || '';
 const resend = resendApiKey ? new Resend(resendApiKey) : null;
 
 export const FORM_RECIPIENT_EMAIL =
-  process.env.FORM_RECIPIENT_EMAIL || 'sudhanshu@orricaedge.com';
+  config.email.formRecipientEmail || process.env.FORM_RECIPIENT_EMAIL || 'sudhanshu@orricaedge.com';
 
-export const FORM_CC_EMAIL = process.env.FORM_CC_EMAIL || undefined;
+export const FORM_CC_EMAIL = config.email.formCcEmail || process.env.FORM_CC_EMAIL || undefined;
 
-export const MAIL_FROM =
-  process.env.MAIL_FROM ||
-  process.env.EMAIL_FROM ||
-  'Orrica Edge Website <no-reply@orricaedge.com>';
+export const MAIL_FROM = config.email.from;
+
+export const MAIL_REPLY_TO = config.email.replyTo;
 
 export const RESPONSE_TIME_TEXT =
-  process.env.RESPONSE_TIME_TEXT || 'within 4 business hours';
+  config.email.responseTimeText || process.env.RESPONSE_TIME_TEXT || 'within 4 business hours';
 
 /**
  * Escape HTML special characters in visitor text before interpolating into HTML emails.
@@ -267,6 +267,7 @@ const sendVisitorContactAutoReply = async (
   await resend.emails.send({
     from: MAIL_FROM,
     to: [safeEmail],
+    replyTo: MAIL_REPLY_TO,
     subject: autoReplySubject,
     html: autoReplyHtml,
     text: `Hello ${safeFullName},\n\nThank you for reaching out to Orrica Edge. We have received your inquiry regarding ${data.category}.\n\nOur team will review your message and get back to you ${RESPONSE_TIME_TEXT}.\n\nImportant: Orrica Edge never charges candidates any application or placement fees.\n\nWarm regards,\nOrrica Edge Team\nhttps://www.orricaedge.com`,
@@ -481,6 +482,7 @@ const sendVisitorEmployerAutoReply = async (
   await resend.emails.send({
     from: MAIL_FROM,
     to: [safeWorkEmail],
+    replyTo: MAIL_REPLY_TO,
     subject: autoReplySubject,
     html: autoReplyHtml,
     text: `Dear ${safeFullName},\n\nThank you for submitting your hiring requirement for ${data.companyName} (${data.jobTitle}).\n\nAn Orrica Edge Practice Lead will contact you ${RESPONSE_TIME_TEXT} to discuss the candidate pipeline.\n\nImportant: Orrica Edge never charges candidates any application or placement fees.\n\nWarm regards,\nOrrica Edge Enterprise Talent Desk\nhttps://www.orricaedge.com`,

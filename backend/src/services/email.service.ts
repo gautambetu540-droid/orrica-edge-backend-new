@@ -1,15 +1,20 @@
 import { Resend } from 'resend';
 import { prisma } from '../prisma/client';
 import { compileEmailTemplate } from './templateEngine.service';
+import { config } from '../config';
 
-const resendApiKey = process.env.RESEND_API_KEY || '';
+const resendApiKey = config.email.resendApiKey || process.env.RESEND_API_KEY || '';
 const resend = resendApiKey ? new Resend(resendApiKey) : null;
-const FROM_EMAIL = process.env.EMAIL_FROM || 'Orrica Edge <no-reply@orricaedge.com>';
+
+export const RESEND_FROM_EMAIL = config.email.from;
+export const RESEND_REPLY_TO = config.email.replyTo;
 
 export interface DispatchEmailPayload {
   templateKey: string;
   recipient: string;
   variables: Record<string, string>;
+  replyTo?: string;
+  from?: string;
 }
 
 /**
@@ -20,7 +25,9 @@ export interface DispatchEmailPayload {
 export const sendDynamicEmail = async (
   payload: DispatchEmailPayload
 ): Promise<{ success: boolean; messageId?: string }> => {
-  const { templateKey, recipient, variables } = payload;
+  const { templateKey, recipient, variables, replyTo, from } = payload;
+  const fromAddress = from || RESEND_FROM_EMAIL;
+  const replyToAddress = replyTo || RESEND_REPLY_TO;
 
   try {
     // Compile template through dynamic engine (admin override -> in-memory cache -> default fallback)
@@ -30,8 +37,9 @@ export const sendDynamicEmail = async (
 
     if (resend) {
       const response = await resend.emails.send({
-        from: FROM_EMAIL,
+        from: fromAddress,
         to: recipient,
+        replyTo: replyToAddress,
         subject: compiled.subject,
         html: compiled.html,
         text: compiled.plainText,
@@ -44,7 +52,7 @@ export const sendDynamicEmail = async (
     } else {
       // Local development simulation
       messageId = `sim-${Date.now()}`;
-      console.log(`[EMAIL DISPATCH] To: ${recipient} | Key: ${templateKey} | Subject: ${compiled.subject}`);
+      console.log(`[EMAIL DISPATCH] To: ${recipient} | From: ${fromAddress} | Reply-To: ${replyToAddress} | Key: ${templateKey} | Subject: ${compiled.subject}`);
     }
 
     // Persist email audit record
@@ -93,10 +101,11 @@ export const sendDynamicEmail = async (
 export const dispatchEmail = (
   templateKey: string,
   recipient: string,
-  variables: Record<string, string>
+  variables: Record<string, string>,
+  replyTo?: string
 ): void => {
   setImmediate(() => {
-    sendDynamicEmail({ templateKey, recipient, variables }).catch((err) => {
+    sendDynamicEmail({ templateKey, recipient, variables, replyTo }).catch((err) => {
       console.error('[UNCAUGHT EMAIL QUEUE ERROR]:', err);
     });
   });

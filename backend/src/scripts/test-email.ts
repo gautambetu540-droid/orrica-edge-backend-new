@@ -1,12 +1,14 @@
-import { sendDynamicEmail } from '../services/email.service';
+import { sendDynamicEmail, RESEND_FROM_EMAIL, RESEND_REPLY_TO } from '../services/email.service';
 import { prisma } from '../prisma/client';
+import { config } from '../config';
 
-const testRecipient = process.argv[2] || process.env.TEST_EMAIL_RECIPIENT || 'admin@orricaedge.com';
+const testRecipient = process.argv[2] || process.env.TEST_EMAIL_RECIPIENT || 'test@example.com';
 
 console.log(`=======================================================`);
 console.log(`🧪 Testing Email Delivery to: ${testRecipient}`);
 console.log(`🔑 RESEND_API_KEY: ${process.env.RESEND_API_KEY ? 'Present (length ' + process.env.RESEND_API_KEY.length + ')' : 'MISSING (running in simulation mode)'}`);
-console.log(`📨 EMAIL_FROM: ${process.env.EMAIL_FROM || 'Default (Orrica Edge <no-reply@orricaedge.com>)'}`);
+console.log(`📨 SENDER (FROM): ${RESEND_FROM_EMAIL}`);
+console.log(`↩️ REPLY-TO: ${RESEND_REPLY_TO}`);
 console.log(`🌐 FRONTEND_URL: ${process.env.FRONTEND_URL || 'Default (https://orricaedge.com)'}`);
 console.log(`=======================================================`);
 
@@ -19,7 +21,7 @@ sendDynamicEmail({
     role: 'Sub-Admin',
     temporary_password: 'TestPassword@2026!',
     login_url: `${(process.env.FRONTEND_URL || 'https://orricaedge.com').replace(/\/+$/, '')}/login`,
-    support_email: 'support@orricaedge.com',
+    support_email: config.email.replyTo,
   },
 })
   .then(async (res) => {
