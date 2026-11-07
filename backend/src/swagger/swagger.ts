@@ -10,7 +10,7 @@ const swaggerDocument = {
       'Enterprise Recruitment, Candidate ATS, Job Management, and Career Resources REST API for Orrica Edge.',
     contact: {
       name: 'Orrica Edge Engineering Team',
-      email: 'no-reply@orricaedge.com',
+      email: 'noreply@update.orricaedge.com',
       url: 'https://orricaedge.com',
     },
   },

@@ -231,6 +231,69 @@ export const DEFAULT_TEMPLATES: Record<string, DefaultTemplateDefinition> = {
     plainText: 'Reset password for {{user_email}}: {{reset_url}}',
     variables: ['user_name', 'user_email', 'reset_url'],
   },
+
+  OTP_VERIFICATION: {
+    templateKey: 'OTP_VERIFICATION',
+    name: 'OTP & Account Verification',
+    category: 'System',
+    subject: 'Your Orrica Edge Verification Code: {{otp_code}}',
+    htmlBody:
+      '<div style="max-width:600px;margin:0 auto;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Roboto,sans-serif;color:#1e293b;line-height:1.6;">' +
+      '<h2 style="margin-top:0;color:#0f172a;font-size:20px;border-bottom:2px solid #f97316;padding-bottom:10px;">Security Verification Code</h2>' +
+      '<p>Hello <strong>{{user_name}}</strong>,</p>' +
+      '<p>Use the one-time verification code below to verify your account or complete your sign-in to Orrica Edge:</p>' +
+      '<div style="background:#f8fafc;border:1px solid #cbd5e1;border-radius:10px;padding:20px;margin:24px 0;text-align:center;">' +
+      '<div style="font-size:32px;font-weight:800;letter-spacing:6px;color:#f97316;font-family:monospace;">{{otp_code}}</div>' +
+      '<p style="margin:8px 0 0;font-size:13px;color:#64748b;">This verification code expires in {{expiry_minutes}} minutes.</p>' +
+      '</div>' +
+      '<p style="font-size:13px;color:#64748b;line-height:1.5;">' +
+      'If you did not request this code, someone may have entered your email by mistake. You can safely ignore this message.' +
+      '</p>' +
+      '<hr style="border:none;border-top:1px solid #e2e8f0;margin:24px 0;">' +
+      '<p style="margin-bottom:0;color:#475569;font-size:14px;">Regards,<br><strong>Orrica Edge Security Team</strong></p>' +
+      '</div>',
+    plainText: 'Your Orrica Edge verification code is: {{otp_code}}. It expires in {{expiry_minutes}} minutes. Do not share this code with anyone.',
+    variables: ['user_name', 'user_email', 'otp_code', 'expiry_minutes'],
+  },
+
+  ASSESSMENT_INVITATION: {
+    templateKey: 'ASSESSMENT_INVITATION',
+    name: 'Candidate Assessment Invitation',
+    category: 'Candidate',
+    subject: 'Assessment Invitation: {{assessment_title}} for {{job_title}} — Orrica Edge',
+    htmlBody:
+      '<div style="max-width:600px;margin:0 auto;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Roboto,sans-serif;color:#1e293b;line-height:1.6;">' +
+      '<h2 style="margin-top:0;color:#0f172a;font-size:20px;border-bottom:2px solid #f97316;padding-bottom:10px;">Skill Assessment Invitation</h2>' +
+      '<p>Dear <strong>{{candidate_name}}</strong>,</p>' +
+      '<p>You have been invited to complete an online skill assessment for the role of <strong>{{job_title}}</strong>{{#if company_name}} at <strong>{{company_name}}</strong>{{/if}}.</p>' +
+      '<div style="background:#f8fafc;border:1px solid #cbd5e1;border-radius:10px;padding:20px;margin:24px 0;">' +
+      '<h3 style="margin-top:0;margin-bottom:12px;color:#0f172a;font-size:16px;">Assessment Overview</h3>' +
+      '<table style="width:100%;border-collapse:collapse;">' +
+      '<tr><td style="padding:6px 0;color:#64748b;width:150px;font-size:14px;"><strong>Assessment:</strong></td><td style="padding:6px 0;font-size:14px;color:#0f172a;font-weight:600;">{{assessment_title}}</td></tr>' +
+      '<tr><td style="padding:6px 0;color:#64748b;font-size:14px;"><strong>Time Limit:</strong></td><td style="padding:6px 0;font-size:14px;color:#0f172a;font-weight:600;">{{time_limit}} minutes</td></tr>' +
+      '<tr><td style="padding:6px 0;color:#64748b;font-size:14px;"><strong>Deadline:</strong></td><td style="padding:6px 0;font-size:14px;color:#0f172a;font-weight:600;">{{expiry_date}}</td></tr>' +
+      '</table>' +
+      '</div>' +
+      '<p style="margin:28px 0;text-align:center;">' +
+      '<a href="{{assessment_url}}" style="background:#f97316;color:#ffffff;padding:12px 28px;text-decoration:none;border-radius:8px;font-weight:700;display:inline-block;font-size:15px;">Start Online Assessment</a>' +
+      '</p>' +
+      '<div style="background:#eff6ff;border-left:4px solid #3b82f6;padding:14px;margin:20px 0;border-radius:4px;">' +
+      '<p style="margin:0 0 6px;font-weight:700;color:#1e3a8a;font-size:13px;">Guidelines before you begin:</p>' +
+      '<ul style="margin:0;padding-left:18px;font-size:12.5px;color:#1e40af;line-height:1.6;">' +
+      '<li>Ensure an uninterrupted, stable internet connection.</li>' +
+      '<li>Take the assessment on a laptop or desktop computer for optimal experience.</li>' +
+      '<li>The timer will start as soon as you begin the test.</li>' +
+      '</ul>' +
+      '</div>' +
+      '<p style="font-size:13px;color:#64748b;line-height:1.5;">' +
+      'Direct Link: <a href="{{assessment_url}}" style="color:#2563eb;word-break:break-all;">{{assessment_url}}</a>' +
+      '</p>' +
+      '<hr style="border:none;border-top:1px solid #e2e8f0;margin:24px 0;">' +
+      '<p style="margin-bottom:0;color:#475569;font-size:14px;">Best regards,<br><strong>Orrica Edge Talent Assessment Team</strong></p>' +
+      '</div>',
+    plainText: 'Dear {{candidate_name}}, You have been invited to complete the {{assessment_title}} assessment for {{job_title}}. Duration: {{time_limit}} mins. Start here: {{assessment_url}}',
+    variables: ['candidate_name', 'job_title', 'company_name', 'assessment_title', 'time_limit', 'expiry_date', 'assessment_url'],
+  },
 };
 
 export const wrapHtmlEmail = (contentHtml: string): string => {

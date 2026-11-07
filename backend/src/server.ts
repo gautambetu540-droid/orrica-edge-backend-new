@@ -241,8 +241,11 @@ const validateEmailConfig = () => {
     console.warn(`[EMAIL CONFIG WARNING] Missing email environment variables: ${missing.join(', ')}`);
     console.warn(`[EMAIL CONFIG WARNING] Outbound emails will run in local simulation mode.`);
   } else {
+    if (!config.email.from.includes('update.orricaedge.com')) {
+      console.warn(`[EMAIL CONFIG WARNING] Sender "${config.email.from}" does not match update.orricaedge.com. This may trigger 403 errors with domain-restricted API keys.`);
+    }
     console.log(
-      `[EMAIL CONFIG] Email provider verified: Resend active | Sender: ${config.email.from} | Reply-To: DISABLED (Not Configured)`
+      `[EMAIL CONFIG] Email provider verified: Resend active | Sender: ${config.email.from} | Domain: ${config.email.sendingDomain} | Reply-To: DISABLED (Not Configured)`
     );
   }
 };

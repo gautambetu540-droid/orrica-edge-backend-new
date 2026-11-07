@@ -20,6 +20,15 @@ if (isProduction) {
   }
 }
 
+const resolveSenderAddress = (): string => {
+  const configured = (process.env.RESEND_FROM_EMAIL || process.env.EMAIL_FROM || process.env.MAIL_FROM || '').trim();
+  // Strictly prevent using unauthorized root domain orricaedge.com (which causes 403 Forbidden on domain-restricted keys)
+  if (!configured || (configured.includes('@orricaedge.com') && !configured.includes('@update.orricaedge.com'))) {
+    return 'Orrica Edge <noreply@update.orricaedge.com>';
+  }
+  return configured;
+};
+
 export const config = {
   port: parseInt(process.env.PORT || '5000', 10),
   nodeEnv: process.env.NODE_ENV || 'development',
@@ -65,11 +74,7 @@ export const config = {
 
   email: {
     resendApiKey: process.env.RESEND_API_KEY || '',
-    from:
-      process.env.RESEND_FROM_EMAIL ||
-      process.env.EMAIL_FROM ||
-      process.env.MAIL_FROM ||
-      'Orrica Edge <noreply@update.orricaedge.com>',
+    from: resolveSenderAddress(),
     supportEmail: process.env.SUPPORT_EMAIL || 'info@orricaedge.com',
     formRecipientEmail: process.env.FORM_RECIPIENT_EMAIL || 'sudhanshu@orricaedge.com',
     formCcEmail: process.env.FORM_CC_EMAIL || '',

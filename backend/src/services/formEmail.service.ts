@@ -9,7 +9,8 @@ export const FORM_RECIPIENT_EMAIL =
 
 export const FORM_CC_EMAIL = config.email.formCcEmail || process.env.FORM_CC_EMAIL || undefined;
 
-export const MAIL_FROM = config.email.from;
+export const RESEND_FROM_EMAIL = config.email.from;
+export const MAIL_FROM = RESEND_FROM_EMAIL;
 
 export const RESPONSE_TIME_TEXT =
   config.email.responseTimeText || process.env.RESPONSE_TIME_TEXT || 'within 4 business hours';

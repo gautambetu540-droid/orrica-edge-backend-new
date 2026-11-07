@@ -23,8 +23,9 @@ export interface DispatchEmailPayload {
 export const sendDynamicEmail = async (
   payload: DispatchEmailPayload
 ): Promise<{ success: boolean; messageId?: string }> => {
-  const { templateKey, recipient, variables, from } = payload;
-  const fromAddress = from || RESEND_FROM_EMAIL;
+  const { templateKey, recipient, variables } = payload;
+  // Centralized sender configuration strictly enforced to authorized sending domain update.orricaedge.com
+  const fromAddress = RESEND_FROM_EMAIL;
 
   try {
     // Compile template through dynamic engine (admin override -> in-memory cache -> default fallback)
