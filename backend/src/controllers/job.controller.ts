@@ -224,9 +224,10 @@ export const getJobs = async (req: Request, res: Response, next: NextFunction): 
     const isAdmin = userRole === 'ADMIN' || userRole === 'SUPER_ADMIN' || userRole === 'SUB_ADMIN';
     const isRecruiter = userRole === 'RECRUITER' || userRole === 'FREELANCE_RECRUITER';
     const isTeamLeader = userRole === 'TEAM_LEADER';
+    const isStaff = isAdmin || isRecruiter || isTeamLeader;
 
     const where: any = {};
-    if (isAdmin) {
+    if (isStaff) {
       if (status && status !== 'ALL') {
         where.status = status as any;
       }
@@ -242,9 +243,9 @@ export const getJobs = async (req: Request, res: Response, next: NextFunction): 
       return;
     }
 
-    if (isRecruiter && currentUserId) {
+    if (req.query.assignedOnly === 'true' && isRecruiter && currentUserId) {
       where.assignedRecruiters = { some: { id: currentUserId } };
-    } else if (isTeamLeader && currentUserId) {
+    } else if (req.query.assignedOnly === 'true' && isTeamLeader && currentUserId) {
       where.assignedRecruiters = {
         some: {
           OR: [
