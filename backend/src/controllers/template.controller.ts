@@ -220,7 +220,7 @@ export const previewEmailTemplate = async (req: Request, res: Response, next: Ne
       recruiter_name: 'Pooja Verma',
       client_name: 'Mr. Kapoor',
       dashboard_url: 'https://orricaedge.com',
-      support_email: config.email.replyTo || 'info@orricaedge.com',
+      support_email: config.email.supportEmail || 'info@orricaedge.com',
       ...(sampleVariables || {}),
     };
 

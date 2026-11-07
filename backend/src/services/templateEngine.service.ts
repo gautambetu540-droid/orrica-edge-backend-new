@@ -253,7 +253,7 @@ export const wrapHtmlEmail = (contentHtml: string): string => {
         <tr><td style="padding:32px;color:#334155;font-size:15px;line-height:1.6;">${contentHtml}</td></tr>
         <tr><td style="background-color:#f8fafc;padding:24px 32px;border-top:1px solid #e2e8f0;font-size:12px;color:#64748b;text-align:center;">
           <p style="margin:0 0 8px;font-weight:600;color:#475569;">Orrica Edge Recruitment Solutions</p>
-          <p style="margin:0 0 8px;">This email was sent from an automated notification address (<a href="mailto:noreply@update.orricaedge.com" style="color:#f97316;text-decoration:none;">noreply@update.orricaedge.com</a>). All candidate replies and inquiries are routed directly to <a href="mailto:info@orricaedge.com" style="color:#f97316;text-decoration:none;">info@orricaedge.com</a>.</p>
+          <p style="margin:0 0 8px;">This email was sent from an automated notification address (<a href="mailto:noreply@update.orricaedge.com" style="color:#f97316;text-decoration:none;">noreply@update.orricaedge.com</a>).</p>
           <p style="margin:0;">© ${new Date().getFullYear()} Orrica Edge. All rights reserved. • <a href="https://orricaedge.com/privacy" style="color:#64748b;text-decoration:underline;">Privacy Policy</a> • <a href="https://orricaedge.com" style="color:#f97316;text-decoration:none;">orricaedge.com</a></p>
         </td></tr>
       </table>
@@ -377,7 +377,7 @@ export const compileEmailTemplate = async (
   const companyName = isGenericOrrica ? '' : rawCompanyName;
 
   const enrichedVars: Record<string, string> = {
-    support_email: config.email.replyTo || 'info@orricaedge.com',
+    support_email: config.email.supportEmail || 'info@orricaedge.com',
     dashboard_url: 'https://orricaedge.com',
     walkin_date: variables.walk_in_date || variables.walkin_date || '',
     walk_in_date: variables.walk_in_date || variables.walkin_date || '',

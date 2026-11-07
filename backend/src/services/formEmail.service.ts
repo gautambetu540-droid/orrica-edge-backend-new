@@ -11,8 +11,6 @@ export const FORM_CC_EMAIL = config.email.formCcEmail || process.env.FORM_CC_EMA
 
 export const MAIL_FROM = config.email.from;
 
-export const MAIL_REPLY_TO = config.email.replyTo;
-
 export const RESPONSE_TIME_TEXT =
   config.email.responseTimeText || process.env.RESPONSE_TIME_TEXT || 'within 4 business hours';
 
@@ -182,7 +180,6 @@ ${data.message}
       from: MAIL_FROM,
       to: [FORM_RECIPIENT_EMAIL],
       ...(FORM_CC_EMAIL ? { cc: [FORM_CC_EMAIL] } : {}),
-      replyTo: safeEmail,
       subject: teamSubject,
       html: teamHtml,
       text: teamText,
@@ -267,7 +264,6 @@ const sendVisitorContactAutoReply = async (
   await resend.emails.send({
     from: MAIL_FROM,
     to: [safeEmail],
-    replyTo: MAIL_REPLY_TO,
     subject: autoReplySubject,
     html: autoReplyHtml,
     text: `Hello ${safeFullName},\n\nThank you for reaching out to Orrica Edge. We have received your inquiry regarding ${data.category}.\n\nOur team will review your message and get back to you ${RESPONSE_TIME_TEXT}.\n\nImportant: Orrica Edge never charges candidates any application or placement fees.\n\nWarm regards,\nOrrica Edge Team\nhttps://www.orricaedge.com`,
@@ -395,7 +391,6 @@ ${data.additionalDetails || 'N/A'}
       from: MAIL_FROM,
       to: [FORM_RECIPIENT_EMAIL],
       ...(FORM_CC_EMAIL ? { cc: [FORM_CC_EMAIL] } : {}),
-      replyTo: safeWorkEmail,
       subject: teamSubject,
       html: teamHtml,
       text: teamText,
@@ -482,7 +477,6 @@ const sendVisitorEmployerAutoReply = async (
   await resend.emails.send({
     from: MAIL_FROM,
     to: [safeWorkEmail],
-    replyTo: MAIL_REPLY_TO,
     subject: autoReplySubject,
     html: autoReplyHtml,
     text: `Dear ${safeFullName},\n\nThank you for submitting your hiring requirement for ${data.companyName} (${data.jobTitle}).\n\nAn Orrica Edge Practice Lead will contact you ${RESPONSE_TIME_TEXT} to discuss the candidate pipeline.\n\nImportant: Orrica Edge never charges candidates any application or placement fees.\n\nWarm regards,\nOrrica Edge Enterprise Talent Desk\nhttps://www.orricaedge.com`,

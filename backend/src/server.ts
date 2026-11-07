@@ -242,7 +242,7 @@ const validateEmailConfig = () => {
     console.warn(`[EMAIL CONFIG WARNING] Outbound emails will run in local simulation mode.`);
   } else {
     console.log(
-      `[EMAIL CONFIG] Email provider verified: Resend active | Sender: ${config.email.from} | Reply-To: ${config.email.replyTo}`
+      `[EMAIL CONFIG] Email provider verified: Resend active | Sender: ${config.email.from} | Reply-To: DISABLED (Not Configured)`
     );
   }
 };
