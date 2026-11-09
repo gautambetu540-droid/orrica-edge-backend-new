@@ -244,6 +244,7 @@ export const validateSetupToken = async (
       res.status(400).json({
         success: false,
         status: 'invalid',
+        tokenStatus: 'invalid',
         message: 'Setup token and registered email are required.',
       });
       return;
@@ -268,6 +269,7 @@ export const validateSetupToken = async (
       res.status(404).json({
         success: false,
         status: 'invalid',
+        tokenStatus: 'invalid',
         message: 'This password setup link is invalid or the account is inactive.',
       });
       return;
@@ -277,6 +279,7 @@ export const validateSetupToken = async (
       res.status(400).json({
         success: false,
         status: 'already_set',
+        tokenStatus: 'already_set',
         message: 'Password has already been set for this account. Please use the login page.',
       });
       return;
@@ -286,6 +289,7 @@ export const validateSetupToken = async (
       res.status(400).json({
         success: false,
         status: 'invalid',
+        tokenStatus: 'invalid',
         message: 'This password setup link is invalid.',
       });
       return;
@@ -295,6 +299,7 @@ export const validateSetupToken = async (
       res.status(400).json({
         success: false,
         status: 'expired',
+        tokenStatus: 'expired',
         message: 'This password setup link has expired. Password setup links are valid for 24 hours.',
       });
       return;
@@ -303,6 +308,7 @@ export const validateSetupToken = async (
     res.json({
       success: true,
       status: 'valid',
+      tokenStatus: 'valid',
       message: 'Token is valid.',
       data: {
         email: user.email,
