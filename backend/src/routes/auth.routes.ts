@@ -5,6 +5,10 @@ import {
   login,
   setPassword,
   validateSetupToken,
+  forgotPassword,
+  resendForgotPasswordOtp,
+  verifyForgotPasswordOtp,
+  resetPasswordWithOtpToken,
   getMe,
   keepAlive,
   changeMyPassword,
@@ -51,6 +55,18 @@ const setupTokenLimiter = rateLimit({
   },
 });
 
+// Forgot password & OTP verification rate limiter
+const forgotPasswordLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 15,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    success: false,
+    message: 'Too many password reset requests from this network. Please try again later.',
+  },
+});
+
 // Public authentication endpoints
 router.post('/register', register);
 router.post('/login', login);
@@ -58,6 +74,12 @@ router.post('/login', login);
 // First-time password setup and validation (token-protected)
 router.get('/validate-setup-token', setupTokenLimiter, validateSetupToken);
 router.post('/set-password', setupTokenLimiter, setPassword);
+
+// Self-service password recovery with email OTP (all roles)
+router.post('/forgot-password', forgotPasswordLimiter, forgotPassword);
+router.post('/forgot-password/resend', forgotPasswordLimiter, resendForgotPasswordOtp);
+router.post('/forgot-password/verify', forgotPasswordLimiter, verifyForgotPasswordOtp);
+router.post('/reset-password', forgotPasswordLimiter, resetPasswordWithOtpToken);
 
 // Password change endpoints (supporting both PUT /me/password and POST /change-password)
 router.put('/me/password', authenticateJwt, changeMyPassword);
