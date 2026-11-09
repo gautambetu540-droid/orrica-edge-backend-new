@@ -807,19 +807,26 @@ async function getStoredLocations(): Promise<WalkInLocation[]> {
     });
     if (record && record.fields && typeof record.fields === 'object') {
       const f = record.fields as any;
-      if (Array.isArray(f.locations)) {
-        const cleaned = f.locations.filter((loc: WalkInLocation) => !isFakeWalkInLocation(loc));
-        if (cleaned.length !== f.locations.length) {
-          await saveStoredLocations(cleaned);
+      if (Array.isArray(f.locations) && f.locations.length > 0) {
+        const cleaned = f.locations.filter((loc: WalkInLocation) => !isFakeWalkInLocation(loc) && loc.isActive !== false);
+        if (cleaned.length > 0) {
+          if (cleaned.length !== f.locations.length) {
+            await saveStoredLocations(cleaned);
+          }
+          inMemoryLocations = cleaned;
+          return inMemoryLocations;
         }
-        inMemoryLocations = cleaned;
-        return inMemoryLocations;
       }
     }
   } catch (err: any) {
     console.warn('[WALK-IN LOCATIONS DB READ]:', err.message);
   }
-  inMemoryLocations = inMemoryLocations.filter((loc) => !isFakeWalkInLocation(loc));
+
+  // Ensure system always has verified official hubs active
+  inMemoryLocations = [...DEFAULT_WALK_IN_LOCATIONS];
+  try {
+    await saveStoredLocations(inMemoryLocations);
+  } catch {}
   return inMemoryLocations;
 }
 

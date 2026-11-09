@@ -22,13 +22,13 @@ router.post('/confirm/:token', submitWalkInConfirmation);
 
 // Admin/recruiter session management routes
 router.post('/candidates/:id/reject', authenticateJwt, requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'), requirePermission('walkins'), rejectWalkInCandidate);
-router.get('/sessions', authenticateJwt, requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN'), requirePermission('walkins'), getWalkInSessions);
+router.get('/sessions', authenticateJwt, requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER', 'EMPLOYEE'), getWalkInSessions);
 router.delete('/sessions/:id', authenticateJwt, requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN'), requirePermission('walkins'), deleteWalkInSession);
 router.put('/sessions/:id', authenticateJwt, requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN'), requirePermission('walkins'), updateWalkInSession);
 
 
-// Walk-in Location Management Routes (Admin Only)
-router.get('/locations', authenticateJwt, requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN'), requirePermission('walkins'), getWalkInLocations);
+// Walk-in Location Management Routes (Read allowed for all operational roles, mutations Admin Only)
+router.get('/locations', authenticateJwt, requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER', 'EMPLOYEE'), getWalkInLocations);
 router.post(
   '/locations',
   authenticateJwt,
