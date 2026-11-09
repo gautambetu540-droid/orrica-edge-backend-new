@@ -105,19 +105,19 @@ export const sendContactInquiryEmails = async (
 <head>
   <meta charset="utf-8">
   <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background: #f1f5f9; margin: 0; padding: 24px; color: #0f172a; }
-    .card { max-width: 620px; margin: 0 auto; background: #ffffff; border-radius: 16px; overflow: hidden; border: 1px solid #e2e8f0; box-shadow: 0 4px 16px rgba(15,23,42,0.06); }
-    .header { background: linear-gradient(135deg, #0B3B78 0%, #0F4A8F 50%, #2563EB 100%); padding: 28px 32px; color: #ffffff; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background: #F0F9FF; margin: 0; padding: 24px; color: #1E293B; }
+    .card { max-width: 620px; margin: 0 auto; background: #ffffff; border-radius: 16px; overflow: hidden; border: 1px solid #E0F2FE; box-shadow: 0 4px 16px rgba(12,74,110,0.06); }
+    .header { background: linear-gradient(135deg, #0284C7 0%, #0EA5E9 100%); padding: 28px 32px; color: #ffffff; }
     .header h1 { margin: 0; font-size: 20px; font-weight: 700; letter-spacing: -0.01em; }
-    .header p { margin: 6px 0 0; font-size: 13px; opacity: 0.9; color: #dbeafe; }
+    .header p { margin: 6px 0 0; font-size: 13px; opacity: 0.95; color: #E0F2FE; }
     .body { padding: 32px; }
     .table { width: 100%; border-collapse: collapse; margin-bottom: 24px; font-size: 14px; }
-    .table td { padding: 12px 14px; border-bottom: 1px solid #f1f5f9; vertical-align: top; }
-    .label { font-weight: 600; color: #64748b; width: 34%; }
-    .val { color: #0f172a; font-weight: 500; word-break: break-word; }
-    .source-tag { display: inline-block; padding: 4px 10px; background: #eff6ff; color: #2563eb; font-weight: 700; border-radius: 6px; font-size: 12px; }
-    .message-box { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px; margin-top: 8px; white-space: pre-wrap; font-size: 14px; line-height: 1.6; color: #334155; }
-    .footer { padding: 18px 32px; background: #f8fafc; border-top: 1px solid #e2e8f0; font-size: 12px; color: #64748b; text-align: center; }
+    .table td { padding: 12px 14px; border-bottom: 1px solid #F0F9FF; vertical-align: top; }
+    .label { font-weight: 600; color: #64748B; width: 34%; }
+    .val { color: #1E293B; font-weight: 500; word-break: break-word; }
+    .source-tag { display: inline-block; padding: 4px 10px; background: #F0F9FF; color: #0284C7; font-weight: 700; border-radius: 6px; font-size: 12px; border: 1px solid #BAE6FD; }
+    .message-box { background: #F8FAFC; border: 1px solid #E0F2FE; border-radius: 12px; padding: 16px; margin-top: 8px; white-space: pre-wrap; font-size: 14px; line-height: 1.6; color: #1E293B; }
+    .footer { padding: 18px 32px; background: #F0F9FF; border-top: 1px solid #E0F2FE; font-size: 12px; color: #64748B; text-align: center; }
   </style>
 </head>
 <body>
@@ -227,14 +227,14 @@ const sendVisitorContactAutoReply = async (
 <head>
   <meta charset="utf-8">
   <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background: #f8fafc; margin: 0; padding: 24px; color: #0f172a; }
-    .card { max-width: 580px; margin: 0 auto; background: #ffffff; border-radius: 16px; overflow: hidden; border: 1px solid #e2e8f0; }
-    .header { background: #0B3B78; padding: 24px 28px; color: #ffffff; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background: #F0F9FF; margin: 0; padding: 24px; color: #1E293B; }
+    .card { max-width: 580px; margin: 0 auto; background: #ffffff; border-radius: 16px; overflow: hidden; border: 1px solid #E0F2FE; box-shadow: 0 4px 16px rgba(12,74,110,0.06); }
+    .header { background: linear-gradient(135deg, #0284C7 0%, #0EA5E9 100%); padding: 24px 28px; color: #ffffff; }
     .header h2 { margin: 0; font-size: 19px; }
-    .body { padding: 28px; line-height: 1.6; font-size: 14px; color: #334155; }
-    .summary-box { background: #f1f5f9; border-radius: 10px; padding: 14px 18px; margin: 18px 0; font-size: 13px; }
-    .notice { background: #eff6ff; border-left: 4px solid #2563eb; padding: 12px 16px; margin: 18px 0; font-size: 13px; color: #1e40af; border-radius: 0 8px 8px 0; }
-    .footer { padding: 16px 28px; background: #f8fafc; border-top: 1px solid #e2e8f0; font-size: 12px; color: #64748b; text-align: center; }
+    .body { padding: 28px; line-height: 1.6; font-size: 14px; color: #1E293B; }
+    .summary-box { background: #F8FAFC; border: 1px solid #E0F2FE; border-radius: 10px; padding: 14px 18px; margin: 18px 0; font-size: 13px; }
+    .notice { background: #F0F9FF; border: 1px solid #BAE6FD; border-left: 4px solid #0EA5E9; padding: 12px 16px; margin: 18px 0; font-size: 13px; color: #0C4A6E; border-radius: 6px; }
+    .footer { padding: 16px 28px; background: #F0F9FF; border-top: 1px solid #E0F2FE; font-size: 12px; color: #64748B; text-align: center; }
   </style>
 </head>
 <body>
@@ -258,7 +258,7 @@ const sendVisitorContactAutoReply = async (
         <strong>Important Notice:</strong> Orrica Edge never charges candidates any application, registration, or placement fees. All recruitment services for job seekers are 100% free.
       </div>
 
-      <p>Warm regards,<br/><strong>Orrica Edge Talent &amp; Advisory Team</strong><br/><a href="https://www.orricaedge.com" style="color: #2563eb; text-decoration: none;">www.orricaedge.com</a></p>
+      <p>Warm regards,<br/><strong>Orrica Edge Talent &amp; Advisory Team</strong><br/><a href="https://www.orricaedge.com" style="color: #0284C7; text-decoration: none;">www.orricaedge.com</a></p>
     </div>
     <div class="footer">
       &copy; 2026 Orrica Edge LLP. All rights reserved.
@@ -297,19 +297,19 @@ export const sendEmployerRequirementEmails = async (
 <head>
   <meta charset="utf-8">
   <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background: #f1f5f9; margin: 0; padding: 24px; color: #0f172a; }
-    .card { max-width: 620px; margin: 0 auto; background: #ffffff; border-radius: 16px; overflow: hidden; border: 1px solid #e2e8f0; box-shadow: 0 4px 16px rgba(15,23,42,0.06); }
-    .header { background: linear-gradient(135deg, #0B3B78 0%, #0F4A8F 50%, #2563EB 100%); padding: 28px 32px; color: #ffffff; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background: #F0F9FF; margin: 0; padding: 24px; color: #1E293B; }
+    .card { max-width: 620px; margin: 0 auto; background: #ffffff; border-radius: 16px; overflow: hidden; border: 1px solid #E0F2FE; box-shadow: 0 4px 16px rgba(12,74,110,0.06); }
+    .header { background: linear-gradient(135deg, #0284C7 0%, #0EA5E9 100%); padding: 28px 32px; color: #ffffff; }
     .header h1 { margin: 0; font-size: 20px; font-weight: 700; letter-spacing: -0.01em; }
-    .header p { margin: 6px 0 0; font-size: 13px; opacity: 0.9; color: #dbeafe; }
+    .header p { margin: 6px 0 0; font-size: 13px; opacity: 0.95; color: #E0F2FE; }
     .body { padding: 32px; }
     .table { width: 100%; border-collapse: collapse; margin-bottom: 24px; font-size: 14px; }
-    .table td { padding: 12px 14px; border-bottom: 1px solid #f1f5f9; vertical-align: top; }
-    .label { font-weight: 600; color: #64748b; width: 34%; }
-    .val { color: #0f172a; font-weight: 500; word-break: break-word; }
-    .source-tag { display: inline-block; padding: 4px 10px; background: #eff6ff; color: #2563eb; font-weight: 700; border-radius: 6px; font-size: 12px; }
-    .message-box { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px; margin-top: 8px; white-space: pre-wrap; font-size: 14px; line-height: 1.6; color: #334155; }
-    .footer { padding: 18px 32px; background: #f8fafc; border-top: 1px solid #e2e8f0; font-size: 12px; color: #64748b; text-align: center; }
+    .table td { padding: 12px 14px; border-bottom: 1px solid #F0F9FF; vertical-align: top; }
+    .label { font-weight: 600; color: #64748B; width: 34%; }
+    .val { color: #1E293B; font-weight: 500; word-break: break-word; }
+    .source-tag { display: inline-block; padding: 4px 10px; background: #F0F9FF; color: #0284C7; font-weight: 700; border-radius: 6px; font-size: 12px; border: 1px solid #BAE6FD; }
+    .message-box { background: #F8FAFC; border: 1px solid #E0F2FE; border-radius: 12px; padding: 16px; margin-top: 8px; white-space: pre-wrap; font-size: 14px; line-height: 1.6; color: #1E293B; }
+    .footer { padding: 18px 32px; background: #F0F9FF; border-top: 1px solid #E0F2FE; font-size: 12px; color: #64748B; text-align: center; }
   </style>
 </head>
 <body>
@@ -438,14 +438,14 @@ const sendVisitorEmployerAutoReply = async (
 <head>
   <meta charset="utf-8">
   <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background: #f8fafc; margin: 0; padding: 24px; color: #0f172a; }
-    .card { max-width: 580px; margin: 0 auto; background: #ffffff; border-radius: 16px; overflow: hidden; border: 1px solid #e2e8f0; }
-    .header { background: #0B3B78; padding: 24px 28px; color: #ffffff; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background: #F0F9FF; margin: 0; padding: 24px; color: #1E293B; }
+    .card { max-width: 580px; margin: 0 auto; background: #ffffff; border-radius: 16px; overflow: hidden; border: 1px solid #E0F2FE; box-shadow: 0 4px 16px rgba(12,74,110,0.06); }
+    .header { background: linear-gradient(135deg, #0284C7 0%, #0EA5E9 100%); padding: 24px 28px; color: #ffffff; }
     .header h2 { margin: 0; font-size: 19px; }
-    .body { padding: 28px; line-height: 1.6; font-size: 14px; color: #334155; }
-    .summary-box { background: #f1f5f9; border-radius: 10px; padding: 14px 18px; margin: 18px 0; font-size: 13px; }
-    .notice { background: #eff6ff; border-left: 4px solid #2563eb; padding: 12px 16px; margin: 18px 0; font-size: 13px; color: #1e40af; border-radius: 0 8px 8px 0; }
-    .footer { padding: 16px 28px; background: #f8fafc; border-top: 1px solid #e2e8f0; font-size: 12px; color: #64748b; text-align: center; }
+    .body { padding: 28px; line-height: 1.6; font-size: 14px; color: #1E293B; }
+    .summary-box { background: #F8FAFC; border: 1px solid #E0F2FE; border-radius: 10px; padding: 14px 18px; margin: 18px 0; font-size: 13px; }
+    .notice { background: #F0F9FF; border: 1px solid #BAE6FD; border-left: 4px solid #0EA5E9; padding: 12px 16px; margin: 18px 0; font-size: 13px; color: #0C4A6E; border-radius: 6px; }
+    .footer { padding: 16px 28px; background: #F0F9FF; border-top: 1px solid #E0F2FE; font-size: 12px; color: #64748B; text-align: center; }
   </style>
 </head>
 <body>
@@ -471,7 +471,7 @@ const sendVisitorEmployerAutoReply = async (
         <strong>Integrity &amp; Candidate Policy:</strong> Orrica Edge strictly adheres to ethical recruitment standards. We never charge candidates any application or placement fees.
       </div>
 
-      <p>Warm regards,<br/><strong>Orrica Edge Enterprise Talent Desk</strong><br/><a href="https://www.orricaedge.com" style="color: #2563eb; text-decoration: none;">www.orricaedge.com</a></p>
+      <p>Warm regards,<br/><strong>Orrica Edge Enterprise Talent Desk</strong><br/><a href="https://www.orricaedge.com" style="color: #0284C7; text-decoration: none;">www.orricaedge.com</a></p>
     </div>
     <div class="footer">
       &copy; 2026 Orrica Edge LLP. All rights reserved.

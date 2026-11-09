@@ -70,10 +70,10 @@ export const config = {
   recruiter: {
     passwordSetupUrl:
       process.env.RECRUITER_PASSWORD_SETUP_URL ||
-      'https://orricaedge.com/set-password',
+      `${(process.env.FRONTEND_URL || 'https://orricaedge.com').replace(/\/+$/, '')}/set-password`,
     loginUrl:
       process.env.RECRUITER_LOGIN_URL ||
-      'https://orricaedge.com/login',
+      `${(process.env.FRONTEND_URL || 'https://orricaedge.com').replace(/\/+$/, '')}/login`,
     passwordSetupExpiryHours: parseInt(
       process.env.RECRUITER_PASSWORD_SETUP_EXPIRY_HOURS || '24',
       10

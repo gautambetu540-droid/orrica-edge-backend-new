@@ -48,7 +48,7 @@ async function main() {
       name: 'Interview Scheduled',
       category: 'Candidate',
       subject: 'Interview Scheduled: {{interview_round}} for {{job_title}} — Orrica Edge',
-      htmlBody: '<h2>Interview Invitation</h2><p>Dear <strong>{{candidate_name}}</strong>,</p><p>You are invited for {{interview_round}} on {{interview_date}} at {{interview_time}}.</p><p><a href="{{meeting_link}}" style="background-color:#f97316;color:#ffffff;padding:10px 20px;text-decoration:none;border-radius:6px;font-weight:bold;display:inline-block;">Join Video Interview</a></p>',
+      htmlBody: '<h2 style="color:#0C4A6E;">Interview Invitation</h2><p>Dear <strong>{{candidate_name}}</strong>,</p><p>You are invited for {{interview_round}} on {{interview_date}} at {{interview_time}}.</p><p><a href="{{meeting_link}}" style="background-color:#0284C7;color:#ffffff;padding:10px 20px;text-decoration:none;border-radius:6px;font-weight:bold;display:inline-block;">Join Video Interview</a></p>',
       plainText: 'Interview for {{job_title}} on {{interview_date}} at {{interview_time}}. Link: {{meeting_link}}',
       variables: ['candidate_name', 'job_title', 'interview_round', 'interview_date', 'interview_time', 'meeting_link'],
       isActive: true,

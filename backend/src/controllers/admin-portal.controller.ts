@@ -688,6 +688,7 @@ export const getEmployeeUsers = async (req: Request, res: Response, next: NextFu
       role: true,
       phone: true,
       isActive: true,
+      mfaEnabled: true,
       recruiterId: true,
       recruiterType: true,
       teamLeaderId: true,

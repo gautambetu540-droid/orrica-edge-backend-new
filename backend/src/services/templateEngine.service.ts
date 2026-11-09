@@ -1,6 +1,7 @@
 import { prisma } from '../prisma/client';
 import { cache } from '../utils/cache';
 import { config } from '../config';
+import { wrapWithSkyBlueLayout } from './emailLayout.service';
 
 export interface DefaultTemplateDefinition {
   templateKey: string;
@@ -18,7 +19,29 @@ export const DEFAULT_TEMPLATES: Record<string, DefaultTemplateDefinition> = {
     name: 'Walk-in Interview Invitation',
     category: 'Candidate',
     subject: 'Walk-in Interview Invitation – {{job_title}}{{#if company_name}} at {{company_name}}{{/if}}',
-    htmlBody: '<h2 style="font-size:17px;margin:0 0 16px;color:#0f172a;font-weight:700;">Walk-in Interview Invitation</h2><p style="font-size:12.75px;line-height:1.6;margin:0 0 12px;color:#334155;">Dear <strong>{{candidate_name}}</strong>,</p><p style="font-size:12.75px;line-height:1.6;margin:0 0 16px;color:#334155;">You have been invited to attend a walk-in interview session for the position of <strong>{{job_title}}</strong>{{#if company_name}} at <strong>{{company_name}}</strong>{{/if}}.</p><div style="background-color:#f8fafc;border:1px solid #e2e8f0;padding:18px;border-radius:8px;margin:20px 0;font-size:12.75px;line-height:1.6;color:#334155;">{{#if company_name}}<p style="margin:4px 0;font-size:12.75px;color:#334155;"><strong>Company:</strong> {{company_name}}</p>{{/if}}<p style="margin:4px 0;font-size:12.75px;color:#334155;"><strong>Date:</strong> {{walk_in_date}}</p><p style="margin:4px 0;font-size:12.75px;color:#334155;"><strong>Reporting Time:</strong> {{reporting_time}}</p><p style="margin:4px 0;font-size:12.75px;color:#334155;"><strong>Venue:</strong> {{venue_name}}</p><p style="margin:4px 0;font-size:12.75px;color:#334155;"><strong>Address:</strong> {{venue_address}}</p><p style="margin:4px 0;font-size:12.75px;"><strong style="color:#334155;">Google Maps:</strong> <a href="{{google_maps_link}}" target="_blank" style="color:#f97316;font-size:12.75px;text-decoration:none;font-weight:600;">View Location on Maps</a></p></div><div style="background-color:#fff7ed;border-left:4px solid #f97316;padding:12px;margin:16px 0;"><p style="margin:0;font-weight:bold;color:#9a3412;font-size:11.9px;">Instructions:</p><p style="margin:4px 0 0;font-size:11.9px;line-height:1.5;color:#7c2d12;">{{instructions}}</p></div><p style="font-size:12.75px;margin:18px 0 10px;color:#334155;font-weight:500;">Please indicate your availability using the options below:</p><div style="margin:20px 0;"><a href="{{confirm_url}}" style="background-color:#16a34a;color:#ffffff;padding:10px 18px;text-decoration:none;border-radius:6px;font-weight:bold;display:inline-block;margin-right:10px;font-size:11.9px;line-height:1.2;">Confirm Attendance</a><a href="{{reschedule_url}}" style="background-color:#f59e0b;color:#ffffff;padding:10px 18px;text-decoration:none;border-radius:6px;font-weight:bold;display:inline-block;margin-right:10px;font-size:11.9px;line-height:1.2;">Request Another Date</a><a href="{{not_interested_url}}" style="background-color:#64748b;color:#ffffff;padding:10px 18px;text-decoration:none;border-radius:6px;font-weight:bold;display:inline-block;font-size:11.9px;line-height:1.2;">Not Interested</a></div><p style="font-size:11.05px;color:#64748b;margin-top:16px;">If the buttons above do not open, please copy and paste this link: <a href="{{confirmation_url}}" style="color:#2563eb;word-break:break-all;font-size:11.05px;">{{confirmation_url}}</a></p>',
+    htmlBody:
+      '<h2 style="font-size:18px;margin:0 0 16px;color:#0C4A6E;font-weight:700;">Walk-in Interview Invitation</h2>' +
+      '<p style="font-size:14px;line-height:1.6;margin:0 0 12px;color:#1E293B;">Dear <strong>{{candidate_name}}</strong>,</p>' +
+      '<p style="font-size:14px;line-height:1.6;margin:0 0 16px;color:#1E293B;">You have been invited to attend a walk-in interview session for the position of <strong>{{job_title}}</strong>{{#if company_name}} at <strong>{{company_name}}</strong>{{/if}}.</p>' +
+      '<div style="background-color:#F8FAFC;border:1px solid #E0F2FE;padding:18px;border-radius:10px;margin:20px 0;font-size:13.5px;line-height:1.6;color:#1E293B;">' +
+      '{{#if company_name}}<p style="margin:4px 0;font-size:13.5px;color:#1E293B;"><strong>Company:</strong> {{company_name}}</p>{{/if}}' +
+      '<p style="margin:4px 0;font-size:13.5px;color:#1E293B;"><strong>Date:</strong> {{walk_in_date}}</p>' +
+      '<p style="margin:4px 0;font-size:13.5px;color:#1E293B;"><strong>Reporting Time:</strong> {{reporting_time}}</p>' +
+      '<p style="margin:4px 0;font-size:13.5px;color:#1E293B;"><strong>Venue:</strong> {{venue_name}}</p>' +
+      '<p style="margin:4px 0;font-size:13.5px;color:#1E293B;"><strong>Address:</strong> {{venue_address}}</p>' +
+      '<p style="margin:4px 0;font-size:13.5px;"><strong style="color:#1E293B;">Google Maps:</strong> <a href="{{google_maps_link}}" target="_blank" style="color:#0284C7;font-size:13.5px;text-decoration:none;font-weight:600;">View Location on Maps</a></p>' +
+      '</div>' +
+      '<div style="background-color:#F0F9FF;border:1px solid #BAE6FD;border-left:4px solid #0EA5E9;padding:14px 16px;margin:18px 0;border-radius:6px;">' +
+      '<p style="margin:0;font-weight:700;color:#0C4A6E;font-size:13px;">Instructions:</p>' +
+      '<p style="margin:4px 0 0;font-size:13px;line-height:1.5;color:#0C4A6E;">{{instructions}}</p>' +
+      '</div>' +
+      '<p style="font-size:14px;margin:18px 0 12px;color:#1E293B;font-weight:500;">Please indicate your availability using the options below:</p>' +
+      '<div style="margin:22px 0;">' +
+      '<a href="{{confirm_url}}" style="background-color:#0284C7;color:#FFFFFF;padding:12px 22px;text-decoration:none;border-radius:8px;font-weight:700;display:inline-block;margin-right:10px;font-size:13px;line-height:1.2;box-shadow:0 2px 4px rgba(2,132,199,0.25);">Confirm Attendance</a>' +
+      '<a href="{{reschedule_url}}" style="background-color:#F0F9FF;color:#0284C7;border:1px solid #BAE6FD;padding:11px 20px;text-decoration:none;border-radius:8px;font-weight:700;display:inline-block;margin-right:10px;font-size:13px;line-height:1.2;">Request Another Date</a>' +
+      '<a href="{{not_interested_url}}" style="background-color:#F1F5F9;color:#64748B;border:1px solid #CBD5E1;padding:11px 20px;text-decoration:none;border-radius:8px;font-weight:700;display:inline-block;font-size:13px;line-height:1.2;">Not Interested</a>' +
+      '</div>' +
+      '<p style="font-size:11.5px;color:#64748B;margin-top:18px;">If the buttons above do not open, please copy and paste this link: <a href="{{confirmation_url}}" style="color:#0284C7;word-break:break-all;font-size:11.5px;">{{confirmation_url}}</a></p>',
     plainText: 'Dear {{candidate_name}}, You have been invited to attend a walk-in interview session for {{job_title}}{{#if company_name}} at {{company_name}}{{/if}} on {{walk_in_date}} at {{reporting_time}}. Venue: {{venue_name}}, {{venue_address}}. Please indicate your availability: {{confirmation_url}}',
     variables: ['candidate_name', 'candidate_email', 'job_title', 'job_id', 'walk_in_date', 'walkin_date', 'reporting_time', 'walk_in_time', 'venue_name', 'venue_address', 'google_maps_link', 'instructions', 'candidate_instructions', 'confirmation_url', 'confirmation_link', 'confirm_url', 'reschedule_url', 'not_interested_url'],
   },
@@ -27,7 +50,7 @@ export const DEFAULT_TEMPLATES: Record<string, DefaultTemplateDefinition> = {
     name: 'Walk-in Attendance Confirmed Acknowledgement',
     category: 'Candidate',
     subject: 'Attendance Confirmed | Walk-in Interview – {{job_title}}',
-    htmlBody: '<h2 style="font-size:18px;margin:0 0 16px;color:#0f172a;font-weight:700;">Attendance Confirmed</h2><p style="font-size:13px;line-height:1.6;margin:0 0 12px;color:#334155;">Dear <strong>{{candidate_name}}</strong>,</p><p style="font-size:13px;line-height:1.6;margin:0 0 16px;color:#334155;">Your attendance has been successfully confirmed for the walk-in interview for <strong>{{job_title}}</strong>{{#if company_name}} at <strong>{{company_name}}</strong>{{/if}}.</p><div style="background-color:#f8fafc;border:1px solid #e2e8f0;padding:18px;border-radius:8px;margin:20px 0;font-size:13px;line-height:1.6;color:#334155;"><p style="margin:0 0 8px;font-weight:700;color:#0f172a;">Interview Details</p>{{#if company_name}}<p style="margin:4px 0;font-size:13px;color:#334155;"><strong>Company:</strong> {{company_name}}</p>{{/if}}<p style="margin:4px 0;font-size:13px;color:#334155;"><strong>Date:</strong> {{walk_in_date}}</p><p style="margin:4px 0;font-size:13px;color:#334155;"><strong>Reporting Time:</strong> {{reporting_time}}</p><p style="margin:4px 0;font-size:13px;color:#334155;"><strong>Venue:</strong> {{venue_name}}</p><p style="margin:4px 0;font-size:13px;color:#334155;"><strong>Address:</strong> {{venue_address}}</p><p style="margin:4px 0;font-size:13px;"><strong style="color:#334155;">Google Maps:</strong> <a href="{{google_maps_link}}" target="_blank" style="color:#f97316;font-size:13px;text-decoration:none;font-weight:600;">View Location on Maps</a></p></div><div style="background-color:#eff6ff;border-left:4px solid #3b82f6;padding:14px;margin:16px 0;border-radius:4px;"><p style="margin:0 0 6px;font-weight:700;color:#1e3a8a;font-size:12.5px;">Important Instructions:</p><ul style="margin:0;padding-left:18px;font-size:12.5px;color:#1e40af;line-height:1.6;"><li>Please arrive 15 minutes before your reporting time.</li><li>Carry two printed copies of your resume.</li><li>Carry your original government-issued photo ID.</li><li>Carry relevant academic certificates.</li><li>Mention &ldquo;Orrica Edge LLP&rdquo; at the top of your resume.</li><li>Follow the venue-specific registration instructions.</li></ul></div><div style="background-color:#fffbeb;border:1px solid #fef3c7;border-left:4px solid #f59e0b;padding:14px;margin:16px 0;border-radius:4px;"><p style="margin:0 0 4px;font-weight:700;color:#92400e;font-size:12.5px;">Candidate Declaration:</p><p style="margin:0;font-size:12px;line-height:1.5;color:#78350f;">Orrica Edge LLP does not charge candidates for recruitment or interview opportunities. Candidates should not pay recruitment or interview charges to Orrica Edge LLP.</p></div><p style="font-size:13px;line-height:1.6;color:#334155;margin:16px 0 6px;">Best of luck with your interview! The team looks forward to welcoming you at the office.</p><p style="font-size:13px;line-height:1.6;color:#334155;margin:0;">Regards,<br /><strong>Team Orrica Edge LLP</strong></p>',
+    htmlBody: '<h2 style="font-size:18px;margin:0 0 16px;color:#0C4A6E;font-weight:700;">Attendance Confirmed</h2><p style="font-size:13.5px;line-height:1.6;margin:0 0 12px;color:#1E293B;">Dear <strong>{{candidate_name}}</strong>,</p><p style="font-size:13.5px;line-height:1.6;margin:0 0 16px;color:#1E293B;">Your attendance has been successfully confirmed for the walk-in interview for <strong>{{job_title}}</strong>{{#if company_name}} at <strong>{{company_name}}</strong>{{/if}}.</p><div style="background-color:#F8FAFC;border:1px solid #E0F2FE;padding:18px;border-radius:8px;margin:20px 0;font-size:13.5px;line-height:1.6;color:#1E293B;"><p style="margin:0 0 8px;font-weight:700;color:#0C4A6E;">Interview Details</p>{{#if company_name}}<p style="margin:4px 0;font-size:13.5px;color:#1E293B;"><strong>Company:</strong> {{company_name}}</p>{{/if}}<p style="margin:4px 0;font-size:13.5px;color:#1E293B;"><strong>Date:</strong> {{walk_in_date}}</p><p style="margin:4px 0;font-size:13.5px;color:#1E293B;"><strong>Reporting Time:</strong> {{reporting_time}}</p><p style="margin:4px 0;font-size:13.5px;color:#1E293B;"><strong>Venue:</strong> {{venue_name}}</p><p style="margin:4px 0;font-size:13.5px;color:#1E293B;"><strong>Address:</strong> {{venue_address}}</p><p style="margin:4px 0;font-size:13.5px;"><strong style="color:#1E293B;">Google Maps:</strong> <a href="{{google_maps_link}}" target="_blank" style="color:#0284C7;font-size:13.5px;text-decoration:none;font-weight:600;">View Location on Maps</a></p></div><div style="background-color:#F0F9FF;border:1px solid #BAE6FD;border-left:4px solid #0EA5E9;padding:14px;margin:16px 0;border-radius:6px;"><p style="margin:0 0 6px;font-weight:700;color:#0C4A6E;font-size:13px;">Important Instructions:</p><ul style="margin:0;padding-left:18px;font-size:12.5px;color:#0C4A6E;line-height:1.6;"><li>Please arrive 15 minutes before your reporting time.</li><li>Carry two printed copies of your resume.</li><li>Carry your original government-issued photo ID.</li><li>Carry relevant academic certificates.</li><li>Mention &ldquo;Orrica Edge LLP&rdquo; at the top of your resume.</li><li>Follow the venue-specific registration instructions.</li></ul></div><div style="background-color:#FFFBEB;border:1px solid #FEF3C7;border-left:4px solid #F59E0B;padding:14px;margin:16px 0;border-radius:6px;"><p style="margin:0 0 4px;font-weight:700;color:#92400E;font-size:12.5px;">Candidate Declaration:</p><p style="margin:0;font-size:12px;line-height:1.5;color:#78350F;">Orrica Edge LLP does not charge candidates for recruitment or interview opportunities. Candidates should not pay recruitment or interview charges to Orrica Edge LLP.</p></div><p style="font-size:13.5px;line-height:1.6;color:#1E293B;margin:16px 0 6px;">Best of luck with your interview! The team looks forward to welcoming you.</p>',
     plainText: 'Dear {{candidate_name}},\n\nYour attendance has been successfully confirmed for the walk-in interview for {{job_title}}.\n\nInterview Details\nDate: {{walk_in_date}}\nReporting Time: {{reporting_time}}\nVenue: {{venue_name}}\nAddress: {{venue_address}}\nGoogle Maps: {{google_maps_link}}\n\nImportant Instructions:\n• Please arrive 15 minutes before your reporting time.\n• Carry two printed copies of your resume.\n• Carry your original government-issued photo ID.\n• Carry relevant academic certificates.\n• Mention “Orrica Edge LLP” at the top of your resume.\n• Follow the venue-specific registration instructions.\n\nCandidate Declaration:\nOrrica Edge LLP does not charge candidates for recruitment or interview opportunities. Candidates should not pay recruitment or interview charges to Orrica Edge LLP.\n\nBest of luck with your interview! The team looks forward to welcoming you at the office.\n\nRegards,\nTeam Orrica Edge LLP',
     variables: ['candidate_name', 'job_title', 'job_id', 'walk_in_date', 'reporting_time', 'venue_name', 'venue_address', 'google_maps_link', 'instructions'],
   },
@@ -36,7 +59,7 @@ export const DEFAULT_TEMPLATES: Record<string, DefaultTemplateDefinition> = {
     name: 'Walk-in Reschedule Request Acknowledgement',
     category: 'Candidate',
     subject: 'Reschedule Request Received: {{job_title}} Walk-in',
-    htmlBody: '<h2 style="font-size:17px;margin:0 0 16px;color:#0f172a;font-weight:700;">Reschedule Request Received</h2><p style="font-size:12.75px;line-height:1.6;margin:0 0 12px;color:#334155;">Dear <strong>{{candidate_name}}</strong>,</p><p style="font-size:12.75px;line-height:1.6;margin:0 0 16px;color:#334155;">We have received your request to reschedule your walk-in interview for <strong>{{job_title}}</strong>.</p><div style="background-color:#f8fafc;border:1px solid #e2e8f0;padding:18px;border-radius:8px;margin:20px 0;font-size:12.75px;line-height:1.6;color:#334155;"><p style="margin:4px 0;font-size:12.75px;color:#334155;"><strong>Preferred Date:</strong> {{preferred_date}}</p><p style="margin:4px 0;font-size:12.75px;color:#334155;"><strong>Your Comments:</strong> {{comments}}</p></div><p style="font-size:12.75px;line-height:1.6;color:#334155;">Our recruitment team is reviewing your requested date and will contact you shortly with an updated schedule.</p>',
+    htmlBody: '<h2 style="font-size:18px;margin:0 0 16px;color:#0C4A6E;font-weight:700;">Reschedule Request Received</h2><p style="font-size:13.5px;line-height:1.6;margin:0 0 12px;color:#1E293B;">Dear <strong>{{candidate_name}}</strong>,</p><p style="font-size:13.5px;line-height:1.6;margin:0 0 16px;color:#1E293B;">We have received your request to reschedule your walk-in interview for <strong>{{job_title}}</strong>.</p><div style="background-color:#F8FAFC;border:1px solid #E0F2FE;padding:18px;border-radius:8px;margin:20px 0;font-size:13.5px;line-height:1.6;color:#1E293B;"><p style="margin:4px 0;font-size:13.5px;color:#1E293B;"><strong>Preferred Date:</strong> {{preferred_date}}</p><p style="margin:4px 0;font-size:13.5px;color:#1E293B;"><strong>Your Comments:</strong> {{comments}}</p></div><p style="font-size:13.5px;line-height:1.6;color:#1E293B;">Our recruitment team is reviewing your requested date and will contact you shortly with an updated schedule.</p>',
     plainText: 'Dear {{candidate_name}}, We received your request to reschedule your walk-in interview for {{job_title}} to {{preferred_date}}. Our recruitment team will contact you shortly with an updated schedule.',
     variables: ['candidate_name', 'job_title', 'job_id', 'preferred_date', 'comments'],
   },
@@ -45,7 +68,7 @@ export const DEFAULT_TEMPLATES: Record<string, DefaultTemplateDefinition> = {
     name: 'Walk-in Not Interested Acknowledgement',
     category: 'Candidate',
     subject: 'Walk-in Interview Response: {{job_title}}',
-    htmlBody: '<h2 style="font-size:17px;margin:0 0 16px;color:#0f172a;font-weight:700;">Response Received</h2><p style="font-size:12.75px;line-height:1.6;margin:0 0 12px;color:#334155;">Dear <strong>{{candidate_name}}</strong>,</p><p style="font-size:12.75px;line-height:1.6;margin:0 0 12px;color:#334155;">Thank you for letting us know that you are not interested in attending the walk-in interview for <strong>{{job_title}}</strong>.</p><p style="font-size:12.75px;line-height:1.6;color:#334155;">We have updated your response for this session. Your profile remains active in our talent network for future opportunities matching your background.</p>',
+    htmlBody: '<h2 style="font-size:18px;margin:0 0 16px;color:#0C4A6E;font-weight:700;">Response Received</h2><p style="font-size:13.5px;line-height:1.6;margin:0 0 12px;color:#1E293B;">Dear <strong>{{candidate_name}}</strong>,</p><p style="font-size:13.5px;line-height:1.6;margin:0 0 12px;color:#1E293B;">Thank you for letting us know that you are not interested in attending the walk-in interview for <strong>{{job_title}}</strong>.</p><p style="font-size:13.5px;line-height:1.6;color:#1E293B;">We have updated your response for this session. Your profile remains active in our talent network for future opportunities matching your background.</p>',
     plainText: 'Dear {{candidate_name}}, Thank you for letting us know you are not interested in attending the walk-in interview for {{job_title}}. Your profile remains active in our talent network for future opportunities.',
     variables: ['candidate_name', 'job_title', 'job_id'],
   },
@@ -54,7 +77,7 @@ export const DEFAULT_TEMPLATES: Record<string, DefaultTemplateDefinition> = {
     name: 'Walk-in Schedule Changed & Reconfirmation Required',
     category: 'Candidate',
     subject: 'Schedule Changed — Reconfirmation Required: {{job_title}} Walk-in',
-    htmlBody: '<h2 style="font-size:17px;margin:0 0 16px;color:#0f172a;font-weight:700;">Walk-in Schedule Updated</h2><p style="font-size:12.75px;line-height:1.6;margin:0 0 12px;color:#334155;">Dear <strong>{{candidate_name}}</strong>,</p><p style="font-size:12.75px;line-height:1.6;margin:0 0 16px;color:#334155;">Please be advised that the scheduled walk-in interview details for <strong>{{job_title}}</strong> have been updated.</p><div style="background-color:#f8fafc;border:1px solid #e2e8f0;padding:18px;border-radius:8px;margin:20px 0;font-size:12.75px;line-height:1.6;color:#334155;"><p style="margin:4px 0;font-size:12.75px;color:#334155;"><strong>Updated Date:</strong> {{walk_in_date}}</p><p style="margin:4px 0;font-size:12.75px;color:#334155;"><strong>Reporting Time:</strong> {{reporting_time}}</p><p style="margin:4px 0;font-size:12.75px;color:#334155;"><strong>Venue:</strong> {{venue_name}}</p><p style="margin:4px 0;font-size:12.75px;color:#334155;"><strong>Address:</strong> {{venue_address}}</p><p style="margin:4px 0;font-size:12.75px;"><strong style="color:#334155;">Google Maps:</strong> <a href="{{google_maps_link}}" target="_blank" style="color:#f97316;font-size:12.75px;text-decoration:none;font-weight:600;">View Location</a></p></div><p style="font-size:12.75px;margin:18px 0 10px;color:#334155;font-weight:500;">Because details have changed, please reconfirm your availability below:</p><div style="margin:20px 0;"><a href="{{confirm_url}}" style="background-color:#16a34a;color:#ffffff;padding:10px 18px;text-decoration:none;border-radius:6px;font-weight:bold;display:inline-block;margin-right:10px;font-size:11.9px;line-height:1.2;">Confirm Updated Date</a><a href="{{reschedule_url}}" style="background-color:#f59e0b;color:#ffffff;padding:10px 18px;text-decoration:none;border-radius:6px;font-weight:bold;display:inline-block;margin-right:10px;font-size:11.9px;line-height:1.2;">Request Another Date</a><a href="{{not_interested_url}}" style="background-color:#64748b;color:#ffffff;padding:10px 18px;text-decoration:none;border-radius:6px;font-weight:bold;display:inline-block;font-size:11.9px;line-height:1.2;">Not Interested</a></div>',
+    htmlBody: '<h2 style="font-size:18px;margin:0 0 16px;color:#0C4A6E;font-weight:700;">Walk-in Schedule Updated</h2><p style="font-size:13.5px;line-height:1.6;margin:0 0 12px;color:#1E293B;">Dear <strong>{{candidate_name}}</strong>,</p><p style="font-size:13.5px;line-height:1.6;margin:0 0 16px;color:#1E293B;">Please be advised that the scheduled walk-in interview details for <strong>{{job_title}}</strong> have been updated.</p><div style="background-color:#F8FAFC;border:1px solid #E0F2FE;padding:18px;border-radius:8px;margin:20px 0;font-size:13.5px;line-height:1.6;color:#1E293B;"><p style="margin:4px 0;font-size:13.5px;color:#1E293B;"><strong>Updated Date:</strong> {{walk_in_date}}</p><p style="margin:4px 0;font-size:13.5px;color:#1E293B;"><strong>Reporting Time:</strong> {{reporting_time}}</p><p style="margin:4px 0;font-size:13.5px;color:#1E293B;"><strong>Venue:</strong> {{venue_name}}</p><p style="margin:4px 0;font-size:13.5px;color:#1E293B;"><strong>Address:</strong> {{venue_address}}</p><p style="margin:4px 0;font-size:13.5px;"><strong style="color:#1E293B;">Google Maps:</strong> <a href="{{google_maps_link}}" target="_blank" style="color:#0284C7;font-size:13.5px;text-decoration:none;font-weight:600;">View Location</a></p></div><p style="font-size:13.5px;margin:18px 0 12px;color:#1E293B;font-weight:500;">Because details have changed, please reconfirm your availability below:</p><div style="margin:20px 0;"><a href="{{confirm_url}}" style="background-color:#0284C7;color:#FFFFFF;padding:11px 20px;text-decoration:none;border-radius:8px;font-weight:700;display:inline-block;margin-right:10px;font-size:13px;line-height:1.2;">Confirm Updated Date</a><a href="{{reschedule_url}}" style="background-color:#F0F9FF;color:#0284C7;border:1px solid #BAE6FD;padding:10px 18px;text-decoration:none;border-radius:8px;font-weight:700;display:inline-block;margin-right:10px;font-size:13px;line-height:1.2;">Request Another Date</a><a href="{{not_interested_url}}" style="background-color:#F1F5F9;color:#64748B;border:1px solid #CBD5E1;padding:10px 18px;text-decoration:none;border-radius:8px;font-weight:700;display:inline-block;font-size:13px;line-height:1.2;">Not Interested</a></div>',
     plainText: 'Dear {{candidate_name}}, The walk-in interview schedule for {{job_title}} has been updated to {{walk_in_date}} at {{reporting_time}}. Please reconfirm your attendance: {{confirmation_url}}',
     variables: ['candidate_name', 'job_title', 'job_id', 'walk_in_date', 'reporting_time', 'venue_name', 'venue_address', 'google_maps_link', 'confirmation_url', 'confirm_url', 'reschedule_url', 'not_interested_url'],
   },
@@ -63,7 +86,7 @@ export const DEFAULT_TEMPLATES: Record<string, DefaultTemplateDefinition> = {
     name: 'Walk-in Reschedule Approved',
     category: 'Candidate',
     subject: 'Reschedule Approved: Walk-in Interview for {{job_title}} on {{walk_in_date}}',
-    htmlBody: '<h2>Reschedule Request Approved</h2><p>Dear <strong>{{candidate_name}}</strong>,</p><p>Your request to reschedule the walk-in interview for <strong>{{job_title}}</strong> has been approved by the recruitment team.</p><div style="background-color:#f8fafc;border:1px solid #e2e8f0;padding:18px;border-radius:8px;margin:20px 0;"><p style="margin:4px 0;"><strong>Approved Date:</strong> {{walk_in_date}}</p><p style="margin:4px 0;"><strong>Reporting Time:</strong> {{reporting_time}}</p><p style="margin:4px 0;"><strong>Venue:</strong> {{venue_name}}</p><p style="margin:4px 0;"><strong>Address:</strong> {{venue_address}}</p></div><p>We look forward to meeting you for your interview. Please arrive on time with your required documents.</p>',
+    htmlBody: '<h2 style="font-size:18px;margin:0 0 16px;color:#0C4A6E;font-weight:700;">Reschedule Request Approved</h2><p style="font-size:13.5px;line-height:1.6;margin:0 0 12px;color:#1E293B;">Dear <strong>{{candidate_name}}</strong>,</p><p style="font-size:13.5px;line-height:1.6;margin:0 0 16px;color:#1E293B;">Your request to reschedule the walk-in interview for <strong>{{job_title}}</strong> has been approved by the recruitment team.</p><div style="background-color:#F8FAFC;border:1px solid #E0F2FE;padding:18px;border-radius:8px;margin:20px 0;font-size:13.5px;line-height:1.6;color:#1E293B;"><p style="margin:4px 0;"><strong>Approved Date:</strong> {{walk_in_date}}</p><p style="margin:4px 0;"><strong>Reporting Time:</strong> {{reporting_time}}</p><p style="margin:4px 0;"><strong>Venue:</strong> {{venue_name}}</p><p style="margin:4px 0;"><strong>Address:</strong> {{venue_address}}</p></div><p style="font-size:13.5px;line-height:1.6;color:#1E293B;">We look forward to meeting you for your interview. Please arrive on time with your required documents.</p>',
     plainText: 'Dear {{candidate_name}}, Your reschedule request for {{job_title}} has been approved for {{walk_in_date}} at {{reporting_time}}. Venue: {{venue_name}}, {{venue_address}}.',
     variables: ['candidate_name', 'job_title', 'job_id', 'walk_in_date', 'reporting_time', 'venue_name', 'venue_address'],
   },
@@ -73,7 +96,7 @@ export const DEFAULT_TEMPLATES: Record<string, DefaultTemplateDefinition> = {
     name: 'Candidate Application Received',
     category: 'Candidate',
     subject: 'Application Received: {{job_title}} — Orrica Edge',
-    htmlBody: '<h2>Application Received</h2><p>Dear <strong>{{candidate_name}}</strong>,</p><p>Thank you for applying for the position of <strong>{{job_title}}</strong> ({{job_code}}) based in <strong>{{job_location}}</strong>.</p><p>Your resume and application details have been safely registered under Application ID: <strong>{{application_id}}</strong>. Our recruitment team will review your qualifications against our client\'s hiring benchmarks.</p><div style="background-color:#f8fafc;border-left:4px solid #f97316;padding:16px;margin:20px 0;border-radius:4px;"><p style="margin:0;font-weight:bold;color:#0f172a;">What\'s next?</p><p style="margin:4px 0 0;font-size:14px;color:#64748b;">If your profile matches the client\'s requirements, a recruiter will reach out for the initial screening or assessment round.</p></div><p>We appreciate your interest in building your career through Orrica Edge.</p>',
+    htmlBody: '<h2 style="font-size:18px;margin:0 0 16px;color:#0C4A6E;font-weight:700;">Application Received</h2><p style="font-size:13.5px;line-height:1.6;margin:0 0 12px;color:#1E293B;">Dear <strong>{{candidate_name}}</strong>,</p><p style="font-size:13.5px;line-height:1.6;margin:0 0 16px;color:#1E293B;">Thank you for applying for the position of <strong>{{job_title}}</strong> ({{job_code}}) based in <strong>{{job_location}}</strong>.</p><p style="font-size:13.5px;line-height:1.6;margin:0 0 16px;color:#1E293B;">Your resume and application details have been safely registered under Application ID: <strong>{{application_id}}</strong>. Our recruitment team will review your qualifications against our client\'s hiring benchmarks.</p><div style="background-color:#F0F9FF;border:1px solid #BAE6FD;border-left:4px solid #0EA5E9;padding:16px;margin:20px 0;border-radius:6px;"><p style="margin:0;font-weight:700;color:#0C4A6E;">What\'s next?</p><p style="margin:4px 0 0;font-size:13px;color:#0C4A6E;line-height:1.5;">If your profile matches the client\'s requirements, a recruiter will reach out for the initial screening or assessment round.</p></div><p style="font-size:13.5px;line-height:1.6;color:#1E293B;">We appreciate your interest in building your career through Orrica Edge.</p>',
     plainText: 'Dear {{candidate_name}}, Thank you for applying for {{job_title}} ({{job_code}}). Application ID: {{application_id}}. Our recruitment team is reviewing your profile.',
     variables: ['candidate_name', 'candidate_email', 'job_title', 'job_code', 'job_location', 'application_id', 'support_email'],
   },
@@ -83,7 +106,7 @@ export const DEFAULT_TEMPLATES: Record<string, DefaultTemplateDefinition> = {
     name: 'Interview Scheduled',
     category: 'Candidate',
     subject: 'Interview Scheduled: {{interview_round}} for {{job_title}}{{#if company_name}} at {{company_name}}{{/if}} — Orrica Edge',
-    htmlBody: '<h2>Interview Invitation</h2><p>Dear <strong>{{candidate_name}}</strong>,</p><p>Congratulations! You have been shortlisted for an interview round for the <strong>{{job_title}}</strong> position.</p><div style="background-color:#f1f5f9;border:1px solid #e2e8f0;padding:18px;border-radius:8px;margin:20px 0;"><p style="margin:4px 0;"><strong>Round:</strong> {{interview_round}}</p><p style="margin:4px 0;"><strong>Date:</strong> {{interview_date}}</p><p style="margin:4px 0;"><strong>Time:</strong> {{interview_time}}</p><p style="margin:4px 0;"><strong>Interviewer:</strong> {{interviewer_name}}</p>{{#if meeting_link}}<p style="margin:12px 0 4px;"><a href="{{meeting_link}}" style="background-color:#f97316;color:#ffffff;padding:10px 20px;text-decoration:none;border-radius:6px;font-weight:bold;display:inline-block;">Join Video Interview</a></p>{{/if}}</div><p>Please make sure you are in a quiet room with good network connectivity and your camera enabled.</p><p>If you need to reschedule, please contact your recruiter at {{support_email}} at least 4 hours in advance.</p>',
+    htmlBody: '<h2 style="font-size:18px;margin:0 0 16px;color:#0C4A6E;font-weight:700;">Interview Invitation</h2><p style="font-size:13.5px;line-height:1.6;margin:0 0 12px;color:#1E293B;">Dear <strong>{{candidate_name}}</strong>,</p><p style="font-size:13.5px;line-height:1.6;margin:0 0 16px;color:#1E293B;">Congratulations! You have been shortlisted for an interview round for the <strong>{{job_title}}</strong> position.</p><div style="background-color:#F8FAFC;border:1px solid #E0F2FE;padding:18px;border-radius:8px;margin:20px 0;font-size:13.5px;line-height:1.6;color:#1E293B;"><p style="margin:4px 0;"><strong>Round:</strong> {{interview_round}}</p><p style="margin:4px 0;"><strong>Date:</strong> {{interview_date}}</p><p style="margin:4px 0;"><strong>Time:</strong> {{interview_time}}</p><p style="margin:4px 0;"><strong>Interviewer:</strong> {{interviewer_name}}</p>{{#if meeting_link}}<p style="margin:14px 0 4px;"><a href="{{meeting_link}}" style="background-color:#0284C7;color:#FFFFFF;padding:11px 22px;text-decoration:none;border-radius:8px;font-weight:700;display:inline-block;font-size:13px;line-height:1.2;">Join Video Interview</a></p>{{/if}}</div><p style="font-size:13.5px;line-height:1.6;color:#1E293B;">Please make sure you are in a quiet room with good network connectivity and your camera enabled.</p><p style="font-size:13px;line-height:1.6;color:#64748B;">If you need to reschedule, please contact your recruiter at {{support_email}} at least 4 hours in advance.</p>',
     plainText: 'Dear {{candidate_name}}, Your interview for {{job_title}}{{#if company_name}} at {{company_name}}{{/if}} is scheduled on {{interview_date}} at {{interview_time}}. Meeting link: {{meeting_link}}.',
     variables: ['candidate_name', 'job_title', 'company_name', 'client_name', 'interview_round', 'interview_date', 'interview_time', 'interviewer_name', 'meeting_link', 'support_email'],
   },
@@ -93,7 +116,7 @@ export const DEFAULT_TEMPLATES: Record<string, DefaultTemplateDefinition> = {
     name: 'Application Shortlisted',
     category: 'Candidate',
     subject: 'Great News! Your profile is shortlisted for {{job_title}}',
-    htmlBody: '<h2>Profile Shortlisted</h2><p>Dear <strong>{{candidate_name}}</strong>,</p><p>We are delighted to share that your application for <strong>{{job_title}}</strong> has successfully passed the initial evaluation.</p><p>Our team is coordinating with <strong>{{company_name}}</strong> to finalize the interview round. Your dedicated talent partner is <strong>{{recruiter_name}}</strong>.</p><p>Keep your contact phone active for the interview briefing.</p>',
+    htmlBody: '<h2 style="font-size:18px;margin:0 0 16px;color:#0C4A6E;font-weight:700;">Profile Shortlisted</h2><p style="font-size:13.5px;line-height:1.6;margin:0 0 12px;color:#1E293B;">Dear <strong>{{candidate_name}}</strong>,</p><p style="font-size:13.5px;line-height:1.6;margin:0 0 16px;color:#1E293B;">We are delighted to share that your application for <strong>{{job_title}}</strong> has successfully passed the initial evaluation.</p><p style="font-size:13.5px;line-height:1.6;margin:0 0 16px;color:#1E293B;">Our team is coordinating with <strong>{{company_name}}</strong> to finalize the interview round. Your dedicated talent partner is <strong>{{recruiter_name}}</strong>.</p><p style="font-size:13.5px;line-height:1.6;color:#1E293B;">Keep your contact phone active for the interview briefing.</p>',
     plainText: 'Dear {{candidate_name}}, You have been shortlisted for {{job_title}}. Our recruiter {{recruiter_name}} will contact you shortly.',
     variables: ['candidate_name', 'job_title', 'company_name', 'recruiter_name', 'dashboard_url'],
   },
@@ -103,7 +126,7 @@ export const DEFAULT_TEMPLATES: Record<string, DefaultTemplateDefinition> = {
     name: 'Application Not Selected',
     category: 'Candidate',
     subject: 'Update regarding your application for {{job_title}}',
-    htmlBody: '<h2>Application Status Update</h2><p>Dear <strong>{{candidate_name}}</strong>,</p><p>Thank you for taking the time to apply for <strong>{{job_title}}</strong> and participating in our evaluation process.</p><p>After careful review of all submissions against the current client requirements, we have decided to proceed with other candidates whose experience more closely matches the specific parameters of this role.</p><p>Your resume remains active in our talent network, and our recruiters will reach out as soon as a relevant opportunity emerges that matches your skills.</p><p>We wish you every success in your career journey.</p>',
+    htmlBody: '<h2 style="font-size:18px;margin:0 0 16px;color:#0C4A6E;font-weight:700;">Application Status Update</h2><p style="font-size:13.5px;line-height:1.6;margin:0 0 12px;color:#1E293B;">Dear <strong>{{candidate_name}}</strong>,</p><p style="font-size:13.5px;line-height:1.6;margin:0 0 16px;color:#1E293B;">Thank you for taking the time to apply for <strong>{{job_title}}</strong> and participating in our evaluation process.</p><p style="font-size:13.5px;line-height:1.6;margin:0 0 16px;color:#1E293B;">After careful review of all submissions against the current client requirements, we have decided to proceed with other candidates whose experience more closely matches the specific parameters of this role.</p><p style="font-size:13.5px;line-height:1.6;margin:0 0 16px;color:#1E293B;">Your resume remains active in our talent network, and our recruiters will reach out as soon as a relevant opportunity emerges that matches your skills.</p><p style="font-size:13.5px;line-height:1.6;color:#1E293B;">We wish you every success in your career journey.</p>',
     plainText: 'Dear {{candidate_name}}, Thank you for applying for {{job_title}}. We have decided to move forward with other candidates, but your profile remains in our talent network for future roles.',
     variables: ['candidate_name', 'job_title', 'support_email'],
   },
@@ -113,7 +136,7 @@ export const DEFAULT_TEMPLATES: Record<string, DefaultTemplateDefinition> = {
     name: 'Candidate Welcome & Onboarding',
     category: 'Candidate',
     subject: 'Welcome to Orrica Edge — Accelerate Your Career',
-    htmlBody: '<h2>Welcome to Orrica Edge</h2><p>Dear <strong>{{candidate_name}}</strong>,</p><p>Welcome to the Orrica Edge Career Community! Your candidate account has been created successfully.</p><p>You can now browse verified job openings, track application statuses, take assessments, and prepare for interviews using our Career & Industry Insights.</p><p><a href="{{dashboard_url}}" style="background-color:#f97316;color:#ffffff;padding:10px 20px;text-decoration:none;border-radius:6px;font-weight:bold;display:inline-block;">Access Candidate Portal</a></p>',
+    htmlBody: '<h2 style="font-size:18px;margin:0 0 16px;color:#0C4A6E;font-weight:700;">Welcome to Orrica Edge</h2><p style="font-size:13.5px;line-height:1.6;margin:0 0 12px;color:#1E293B;">Dear <strong>{{candidate_name}}</strong>,</p><p style="font-size:13.5px;line-height:1.6;margin:0 0 16px;color:#1E293B;">Welcome to the Orrica Edge Career Community! Your candidate account has been created successfully.</p><p style="font-size:13.5px;line-height:1.6;margin:0 0 20px;color:#1E293B;">You can now browse verified job openings, track application statuses, take assessments, and prepare for interviews using our Career &amp; Industry Insights.</p><p style="margin:22px 0;"><a href="{{dashboard_url}}" style="background-color:#0284C7;color:#FFFFFF;padding:11px 22px;text-decoration:none;border-radius:8px;font-weight:700;display:inline-block;font-size:13.5px;line-height:1.2;">Access Candidate Portal</a></p>',
     plainText: 'Welcome {{candidate_name}}! Your Orrica Edge account is active. Visit {{dashboard_url}}',
     variables: ['candidate_name', 'candidate_email', 'dashboard_url'],
   },
@@ -124,33 +147,29 @@ export const DEFAULT_TEMPLATES: Record<string, DefaultTemplateDefinition> = {
     category: 'Recruiter',
     subject: 'Welcome to Orrica Edge — Activate Your Recruiter Account ({{recruiter_id}})',
     htmlBody:
-      '<div style="max-width:600px;margin:0 auto;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Roboto,sans-serif;color:#1e293b;line-height:1.6;">' +
-      '<h2 style="margin-top:0;color:#0f172a;font-size:22px;border-bottom:2px solid #f97316;padding-bottom:10px;">Welcome to Orrica Edge</h2>' +
-      '<p>Dear <strong>{{recruiter_name}}</strong>,</p>' +
-      '<p>Your recruiter partner account has been approved and activated on the Orrica Edge Recruitment Platform.</p>' +
-      '<div style="background:#f8fafc;border:1px solid #cbd5e1;border-radius:10px;padding:20px;margin:24px 0;">' +
-      '<h3 style="margin-top:0;margin-bottom:14px;color:#0f172a;font-size:16px;">Account Details</h3>' +
+      '<h2 style="font-size:18px;margin:0 0 16px;color:#0C4A6E;font-weight:700;">Welcome to Orrica Edge</h2>' +
+      '<p style="font-size:13.5px;line-height:1.6;margin:0 0 12px;color:#1E293B;">Dear <strong>{{recruiter_name}}</strong>,</p>' +
+      '<p style="font-size:13.5px;line-height:1.6;margin:0 0 16px;color:#1E293B;">Your recruiter partner account has been approved and activated on the Orrica Edge Recruitment Platform.</p>' +
+      '<div style="background-color:#F8FAFC;border:1px solid #E0F2FE;border-radius:8px;padding:18px;margin:20px 0;">' +
+      '<h3 style="margin:0 0 12px;color:#0C4A6E;font-size:14.5px;font-weight:700;">Account Details</h3>' +
       '<table style="width:100%;border-collapse:collapse;">' +
-      '<tr><td style="padding:6px 0;color:#64748b;width:160px;font-size:14px;"><strong>Recruiter ID:</strong></td><td style="padding:6px 0;font-family:monospace;font-size:14px;color:#0f172a;font-weight:600;">{{recruiter_id}}</td></tr>' +
-      '<tr><td style="padding:6px 0;color:#64748b;font-size:14px;"><strong>Registered Email:</strong></td><td style="padding:6px 0;font-size:14px;color:#0f172a;font-weight:600;">{{recruiter_email}}</td></tr>' +
+      '<tr><td style="padding:6px 0;color:#64748B;width:150px;font-size:13.5px;"><strong>Recruiter ID:</strong></td><td style="padding:6px 0;font-family:monospace;font-size:13.5px;color:#0C4A6E;font-weight:600;">{{recruiter_id}}</td></tr>' +
+      '<tr><td style="padding:6px 0;color:#64748B;font-size:13.5px;"><strong>Registered Email:</strong></td><td style="padding:6px 0;font-size:13.5px;color:#1E293B;font-weight:600;">{{recruiter_email}}</td></tr>' +
       '</table>' +
       '</div>' +
-      '<p style="margin:20px 0 10px;font-size:14px;color:#334155;">To access your workspace, please set your secure account password using the link below:</p>' +
-      '<p style="margin:28px 0;text-align:center;">' +
-      '<a href="{{setup_url}}" style="background:#f97316;color:#ffffff;padding:12px 28px;text-decoration:none;border-radius:8px;font-weight:700;display:inline-block;font-size:15px;">Set Password &amp; Activate Account</a>' +
+      '<p style="margin:20px 0 12px;font-size:13.5px;color:#1E293B;">To access your workspace, please set your secure account password using the link below:</p>' +
+      '<p style="margin:24px 0;text-align:center;">' +
+      '<a href="{{setup_url}}" style="background-color:#0284C7;color:#FFFFFF;padding:12px 28px;text-decoration:none;border-radius:8px;font-weight:700;display:inline-block;font-size:14px;line-height:1.2;">Set Password &amp; Activate Account</a>' +
       '</p>' +
-      '<div style="background:#eff6ff;border-left:4px solid #3b82f6;padding:12px 16px;margin:20px 0;border-radius:4px;">' +
-      '<p style="margin:0;font-size:13px;color:#1e40af;line-height:1.5;">' +
+      '<div style="background-color:#F0F9FF;border:1px solid #BAE6FD;border-left:4px solid #0EA5E9;padding:14px 16px;margin:20px 0;border-radius:6px;">' +
+      '<p style="margin:0;font-size:12.5px;color:#0C4A6E;line-height:1.5;">' +
       '<strong>Security Notice:</strong> For your protection, passwords are never transmitted via email. This secure activation link expires in 24 hours.' +
       '</p>' +
       '</div>' +
-      '<p style="font-size:13px;color:#64748b;line-height:1.5;">' +
-      'Direct Setup Link: <a href="{{setup_url}}" style="color:#2563eb;word-break:break-all;">{{setup_url}}</a><br>' +
-      'After setting your password, you can sign in directly at: <a href="{{login_url}}" style="color:#f97316;text-decoration:none;font-weight:600;">{{login_url}}</a>' +
-      '</p>' +
-      '<hr style="border:none;border-top:1px solid #e2e8f0;margin:24px 0;">' +
-      '<p style="margin-bottom:0;color:#475569;font-size:14px;">Regards,<br><strong>Orrica Edge Talent Solutions Team</strong></p>' +
-      '</div>',
+      '<p style="font-size:12.5px;color:#64748B;line-height:1.6;margin-top:18px;">' +
+      'Direct Setup Link: <a href="{{setup_url}}" style="color:#0284C7;word-break:break-all;">{{setup_url}}</a><br>' +
+      'After setting your password, you can sign in directly at: <a href="{{login_url}}" style="color:#0284C7;text-decoration:none;font-weight:600;">{{login_url}}</a>' +
+      '</p>',
     plainText:
       'Welcome {{recruiter_name}}!\n\n' +
       'Your recruiter account on the Orrica Edge platform has been activated.\n\n' +
@@ -165,13 +184,12 @@ export const DEFAULT_TEMPLATES: Record<string, DefaultTemplateDefinition> = {
     variables: ['recruiter_id', 'recruiter_name', 'recruiter_email', 'setup_url', 'login_url', 'support_email'],
   },
 
-
   RECRUITER_APPROVED: {
     templateKey: 'RECRUITER_APPROVED',
     name: 'Recruiter Partner Approved',
     category: 'Recruiter',
     subject: 'Your Orrica Edge Recruiter Partner Account is Approved!',
-    htmlBody: '<h2>Partner Account Activated</h2><p>Dear <strong>{{recruiter_name}}</strong>,</p><p>Congratulations! Your recruiter partnership application has been approved by the Orrica Edge management team.</p><p>You now have access to open mandates, candidate submission pipeline, automated ATS screening, and payout tracking.</p><p><a href="{{dashboard_url}}" style="background-color:#f97316;color:#ffffff;padding:10px 20px;text-decoration:none;border-radius:6px;font-weight:bold;display:inline-block;">Open Recruiter Workspace</a></p>',
+    htmlBody: '<h2 style="font-size:18px;margin:0 0 16px;color:#0C4A6E;font-weight:700;">Partner Account Activated</h2><p style="font-size:13.5px;line-height:1.6;margin:0 0 12px;color:#1E293B;">Dear <strong>{{recruiter_name}}</strong>,</p><p style="font-size:13.5px;line-height:1.6;margin:0 0 16px;color:#1E293B;">Congratulations! Your recruiter partnership application has been approved by the Orrica Edge management team.</p><p style="font-size:13.5px;line-height:1.6;margin:0 0 20px;color:#1E293B;">You now have access to open mandates, candidate submission pipeline, automated ATS screening, and payout tracking.</p><p style="margin:22px 0;"><a href="{{dashboard_url}}" style="background-color:#0284C7;color:#FFFFFF;padding:11px 22px;text-decoration:none;border-radius:8px;font-weight:700;display:inline-block;font-size:13.5px;line-height:1.2;">Open Recruiter Workspace</a></p>',
     plainText: 'Dear {{recruiter_name}}, your Orrica Edge recruiter partner account is approved. Access: {{dashboard_url}}',
     variables: ['recruiter_name', 'recruiter_email', 'dashboard_url'],
   },
@@ -181,7 +199,7 @@ export const DEFAULT_TEMPLATES: Record<string, DefaultTemplateDefinition> = {
     name: 'Corporate Client Onboarding',
     category: 'Client',
     subject: 'Welcome to Orrica Edge Talent Solutions — {{company_name}}',
-    htmlBody: '<h2>Welcome to Enterprise Hiring</h2><p>Dear <strong>{{client_name}}</strong>,</p><p>Welcome to Orrica Edge! We are thrilled to partner with <strong>{{company_name}}</strong> for your strategic hiring and staffing requirements.</p><p>Your dedicated account manager will connect with you to review active requisitions, job descriptions, and customized screening benchmarks.</p>',
+    htmlBody: '<h2 style="font-size:18px;margin:0 0 16px;color:#0C4A6E;font-weight:700;">Welcome to Enterprise Hiring</h2><p style="font-size:13.5px;line-height:1.6;margin:0 0 12px;color:#1E293B;">Dear <strong>{{client_name}}</strong>,</p><p style="font-size:13.5px;line-height:1.6;margin:0 0 16px;color:#1E293B;">Welcome to Orrica Edge! We are thrilled to partner with <strong>{{company_name}}</strong> for your strategic hiring and staffing requirements.</p><p style="font-size:13.5px;line-height:1.6;color:#1E293B;">Your dedicated account manager will connect with you to review active requisitions, job descriptions, and customized screening benchmarks.</p>',
     plainText: 'Welcome {{client_name}} from {{company_name}} to Orrica Edge Recruitment Solutions.',
     variables: ['client_name', 'company_name', 'support_email'],
   },
@@ -192,28 +210,24 @@ export const DEFAULT_TEMPLATES: Record<string, DefaultTemplateDefinition> = {
     category: 'System',
     subject: 'Welcome to Orrica Edge — Your Employee Account Credentials',
     htmlBody:
-      '<div style="max-width:600px;margin:0 auto;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Roboto,sans-serif;color:#1e293b;line-height:1.6;">' +
-      '<h2 style="margin-top:0;color:#0f172a;font-size:20px;border-bottom:2px solid #f97316;padding-bottom:10px;">Welcome to the Orrica Edge Team</h2>' +
-      '<p>Dear <strong>{{employee_name}}</strong>,</p>' +
-      '<p>Your employee account (<strong>{{role}}</strong>) has been created on the Orrica Edge Platform.</p>' +
-      '<div style="background:#f8fafc;border:1px solid #cbd5e1;border-radius:10px;padding:20px;margin:24px 0;">' +
-      '<h3 style="margin-top:0;margin-bottom:14px;color:#0f172a;font-size:16px;">Your Login Credentials</h3>' +
+      '<h2 style="font-size:18px;margin:0 0 16px;color:#0C4A6E;font-weight:700;">Welcome to the Orrica Edge Team</h2>' +
+      '<p style="font-size:13.5px;line-height:1.6;margin:0 0 12px;color:#1E293B;">Dear <strong>{{employee_name}}</strong>,</p>' +
+      '<p style="font-size:13.5px;line-height:1.6;margin:0 0 16px;color:#1E293B;">Your employee account (<strong>{{role}}</strong>) has been created on the Orrica Edge Platform.</p>' +
+      '<div style="background-color:#F8FAFC;border:1px solid #E0F2FE;border-radius:8px;padding:18px;margin:20px 0;">' +
+      '<h3 style="margin:0 0 12px;color:#0C4A6E;font-size:14.5px;font-weight:700;">Your Login Credentials</h3>' +
       '<table style="width:100%;border-collapse:collapse;">' +
-      '<tr><td style="padding:6px 0;color:#64748b;width:160px;font-size:14px;"><strong>Role:</strong></td><td style="padding:6px 0;font-size:14px;color:#0f172a;font-weight:600;">{{role}}</td></tr>' +
-      '<tr><td style="padding:6px 0;color:#64748b;font-size:14px;"><strong>Login Email:</strong></td><td style="padding:6px 0;font-size:14px;color:#0f172a;font-weight:600;">{{employee_email}}</td></tr>' +
-      '<tr><td style="padding:6px 0;color:#64748b;font-size:14px;"><strong>Temporary Password:</strong></td><td style="padding:6px 0;"><code style="background:#fee2e2;color:#991b1b;border:1px solid #fecaca;padding:4px 10px;border-radius:6px;font-size:15px;font-weight:bold;letter-spacing:0.5px;display:inline-block;">{{temporary_password}}</code></td></tr>' +
+      '<tr><td style="padding:6px 0;color:#64748B;width:150px;font-size:13.5px;"><strong>Role:</strong></td><td style="padding:6px 0;font-size:13.5px;color:#0C4A6E;font-weight:600;">{{role}}</td></tr>' +
+      '<tr><td style="padding:6px 0;color:#64748B;font-size:13.5px;"><strong>Login Email:</strong></td><td style="padding:6px 0;font-size:13.5px;color:#1E293B;font-weight:600;">{{employee_email}}</td></tr>' +
+      '<tr><td style="padding:6px 0;color:#64748B;font-size:13.5px;"><strong>Temporary Password:</strong></td><td style="padding:6px 0;"><code style="background-color:#F0F9FF;color:#0284C7;border:1px solid #BAE6FD;padding:4px 10px;border-radius:6px;font-size:14.5px;font-weight:700;letter-spacing:0.5px;display:inline-block;">{{temporary_password}}</code></td></tr>' +
       '</table>' +
       '</div>' +
-      '<p>You can sign in immediately using the link below. For security purposes, you will be required to set a new permanent password on your first login.</p>' +
-      '<p style="margin:28px 0;text-align:center;">' +
-      '<a href="{{login_url}}" style="background:#f97316;color:#ffffff;padding:12px 28px;text-decoration:none;border-radius:8px;font-weight:700;display:inline-block;font-size:15px;">Sign In to Orrica Edge</a>' +
+      '<p style="font-size:13.5px;line-height:1.6;margin:16px 0 12px;color:#1E293B;">You can sign in immediately using the link below. For security purposes, you will be required to set a new permanent password on your first login.</p>' +
+      '<p style="margin:24px 0;text-align:center;">' +
+      '<a href="{{login_url}}" style="background-color:#0284C7;color:#FFFFFF;padding:12px 28px;text-decoration:none;border-radius:8px;font-weight:700;display:inline-block;font-size:14px;line-height:1.2;">Sign In to Orrica Edge</a>' +
       '</p>' +
-      '<p style="font-size:13px;color:#64748b;line-height:1.5;">' +
-      'Direct Login URL: <a href="{{login_url}}" style="color:#f97316;text-decoration:none;font-weight:600;">{{login_url}}</a>' +
-      '</p>' +
-      '<hr style="border:none;border-top:1px solid #e2e8f0;margin:24px 0;">' +
-      '<p style="margin-bottom:0;color:#475569;font-size:14px;">Regards,<br><strong>Orrica Edge Administration Team</strong></p>' +
-      '</div>',
+      '<p style="font-size:12.5px;color:#64748B;line-height:1.6;">' +
+      'Direct Login URL: <a href="{{login_url}}" style="color:#0284C7;text-decoration:none;font-weight:600;">{{login_url}}</a>' +
+      '</p>',
     plainText:
       'Welcome {{employee_name}}!\n\n' +
       'Your employee account ({{role}}) has been created on the Orrica Edge Platform.\n\n' +
@@ -232,7 +246,7 @@ export const DEFAULT_TEMPLATES: Record<string, DefaultTemplateDefinition> = {
     name: 'Password Reset Request',
     category: 'System',
     subject: 'Reset Your Orrica Edge Password',
-    htmlBody: '<h2>Password Reset Request</h2><p>Hello <strong>{{user_name}}</strong>,</p><p>We received a request to reset your password for your Orrica Edge account ({{user_email}}).</p><p>Click the secure button below to set a new password. This link is valid for 60 minutes.</p><p><a href="{{reset_url}}" style="background-color:#f97316;color:#ffffff;padding:10px 20px;text-decoration:none;border-radius:6px;font-weight:bold;display:inline-block;">Reset Password</a></p><p style="color:#64748b;font-size:13px;">If you did not request this, you can safely ignore this email.</p>',
+    htmlBody: '<h2 style="font-size:18px;margin:0 0 16px;color:#0C4A6E;font-weight:700;">Password Reset Request</h2><p style="font-size:13.5px;line-height:1.6;margin:0 0 12px;color:#1E293B;">Hello <strong>{{user_name}}</strong>,</p><p style="font-size:13.5px;line-height:1.6;margin:0 0 16px;color:#1E293B;">We received a request to reset your password for your Orrica Edge account ({{user_email}}).</p><p style="font-size:13.5px;line-height:1.6;margin:0 0 20px;color:#1E293B;">Click the secure button below to set a new password. This link is valid for 60 minutes.</p><p style="margin:22px 0;"><a href="{{reset_url}}" style="background-color:#0284C7;color:#FFFFFF;padding:11px 22px;text-decoration:none;border-radius:8px;font-weight:700;display:inline-block;font-size:13.5px;line-height:1.2;">Reset Password</a></p><p style="color:#64748B;font-size:12.5px;line-height:1.5;">If you did not request this, you can safely ignore this email.</p>',
     plainText: 'Reset password for {{user_email}}: {{reset_url}}',
     variables: ['user_name', 'user_email', 'reset_url'],
   },
@@ -243,20 +257,16 @@ export const DEFAULT_TEMPLATES: Record<string, DefaultTemplateDefinition> = {
     category: 'System',
     subject: 'Your Orrica Edge Verification Code: {{otp_code}}',
     htmlBody:
-      '<div style="max-width:600px;margin:0 auto;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Roboto,sans-serif;color:#1e293b;line-height:1.6;">' +
-      '<h2 style="margin-top:0;color:#0f172a;font-size:20px;border-bottom:2px solid #f97316;padding-bottom:10px;">Security Verification Code</h2>' +
-      '<p>Hello <strong>{{user_name}}</strong>,</p>' +
-      '<p>Use the one-time verification code below to verify your account or complete your sign-in to Orrica Edge:</p>' +
-      '<div style="background:#f8fafc;border:1px solid #cbd5e1;border-radius:10px;padding:20px;margin:24px 0;text-align:center;">' +
-      '<div style="font-size:32px;font-weight:800;letter-spacing:6px;color:#f97316;font-family:monospace;">{{otp_code}}</div>' +
-      '<p style="margin:8px 0 0;font-size:13px;color:#64748b;">This verification code expires in {{expiry_minutes}} minutes.</p>' +
+      '<h2 style="font-size:18px;margin:0 0 16px;color:#0C4A6E;font-weight:700;">Security Verification Code</h2>' +
+      '<p style="font-size:13.5px;line-height:1.6;margin:0 0 12px;color:#1E293B;">Hello <strong>{{user_name}}</strong>,</p>' +
+      '<p style="font-size:13.5px;line-height:1.6;margin:0 0 16px;color:#1E293B;">Use the one-time verification code below to verify your account or complete your sign-in to Orrica Edge:</p>' +
+      '<div style="background-color:#F0F9FF;border:1px solid #BAE6FD;border-radius:8px;padding:22px;margin:24px 0;text-align:center;">' +
+      '<div style="font-size:32px;font-weight:800;letter-spacing:6px;color:#0284C7;font-family:monospace;">{{otp_code}}</div>' +
+      '<p style="margin:8px 0 0;font-size:12.5px;color:#64748B;">This verification code expires in {{expiry_minutes}} minutes.</p>' +
       '</div>' +
-      '<p style="font-size:13px;color:#64748b;line-height:1.5;">' +
+      '<p style="font-size:12.5px;color:#64748B;line-height:1.5;">' +
       'If you did not request this code, someone may have entered your email by mistake. You can safely ignore this message.' +
-      '</p>' +
-      '<hr style="border:none;border-top:1px solid #e2e8f0;margin:24px 0;">' +
-      '<p style="margin-bottom:0;color:#475569;font-size:14px;">Regards,<br><strong>Orrica Edge Security Team</strong></p>' +
-      '</div>',
+      '</p>',
     plainText: 'Your Orrica Edge verification code is: {{otp_code}}. It expires in {{expiry_minutes}} minutes. Do not share this code with anyone.',
     variables: ['user_name', 'user_email', 'otp_code', 'expiry_minutes'],
   },
@@ -267,69 +277,38 @@ export const DEFAULT_TEMPLATES: Record<string, DefaultTemplateDefinition> = {
     category: 'Candidate',
     subject: 'Assessment Invitation: {{assessment_title}} for {{job_title}} — Orrica Edge',
     htmlBody:
-      '<div style="max-width:600px;margin:0 auto;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Roboto,sans-serif;color:#1e293b;line-height:1.6;">' +
-      '<h2 style="margin-top:0;color:#0f172a;font-size:20px;border-bottom:2px solid #f97316;padding-bottom:10px;">Skill Assessment Invitation</h2>' +
-      '<p>Dear <strong>{{candidate_name}}</strong>,</p>' +
-      '<p>You have been invited to complete an online skill assessment for the role of <strong>{{job_title}}</strong>{{#if company_name}} at <strong>{{company_name}}</strong>{{/if}}.</p>' +
-      '<div style="background:#f8fafc;border:1px solid #cbd5e1;border-radius:10px;padding:20px;margin:24px 0;">' +
-      '<h3 style="margin-top:0;margin-bottom:12px;color:#0f172a;font-size:16px;">Assessment Overview</h3>' +
+      '<h2 style="font-size:18px;margin:0 0 16px;color:#0C4A6E;font-weight:700;">Skill Assessment Invitation</h2>' +
+      '<p style="font-size:13.5px;line-height:1.6;margin:0 0 12px;color:#1E293B;">Dear <strong>{{candidate_name}}</strong>,</p>' +
+      '<p style="font-size:13.5px;line-height:1.6;margin:0 0 16px;color:#1E293B;">You have been invited to complete an online skill assessment for the role of <strong>{{job_title}}</strong>{{#if company_name}} at <strong>{{company_name}}</strong>{{/if}}.</p>' +
+      '<div style="background-color:#F8FAFC;border:1px solid #E0F2FE;border-radius:8px;padding:18px;margin:20px 0;">' +
+      '<h3 style="margin:0 0 12px;color:#0C4A6E;font-size:14.5px;font-weight:700;">Assessment Overview</h3>' +
       '<table style="width:100%;border-collapse:collapse;">' +
-      '<tr><td style="padding:6px 0;color:#64748b;width:150px;font-size:14px;"><strong>Assessment:</strong></td><td style="padding:6px 0;font-size:14px;color:#0f172a;font-weight:600;">{{assessment_title}}</td></tr>' +
-      '<tr><td style="padding:6px 0;color:#64748b;font-size:14px;"><strong>Time Limit:</strong></td><td style="padding:6px 0;font-size:14px;color:#0f172a;font-weight:600;">{{time_limit}} minutes</td></tr>' +
-      '<tr><td style="padding:6px 0;color:#64748b;font-size:14px;"><strong>Deadline:</strong></td><td style="padding:6px 0;font-size:14px;color:#0f172a;font-weight:600;">{{expiry_date}}</td></tr>' +
+      '<tr><td style="padding:6px 0;color:#64748B;width:150px;font-size:13.5px;"><strong>Assessment:</strong></td><td style="padding:6px 0;font-size:13.5px;color:#0C4A6E;font-weight:600;">{{assessment_title}}</td></tr>' +
+      '<tr><td style="padding:6px 0;color:#64748B;font-size:13.5px;"><strong>Time Limit:</strong></td><td style="padding:6px 0;font-size:13.5px;color:#0C4A6E;font-weight:600;">{{time_limit}} minutes</td></tr>' +
+      '<tr><td style="padding:6px 0;color:#64748B;font-size:13.5px;"><strong>Deadline:</strong></td><td style="padding:6px 0;font-size:13.5px;color:#0C4A6E;font-weight:600;">{{expiry_date}}</td></tr>' +
       '</table>' +
       '</div>' +
-      '<p style="margin:28px 0;text-align:center;">' +
-      '<a href="{{assessment_url}}" style="background:#f97316;color:#ffffff;padding:12px 28px;text-decoration:none;border-radius:8px;font-weight:700;display:inline-block;font-size:15px;">Start Online Assessment</a>' +
+      '<p style="margin:24px 0;text-align:center;">' +
+      '<a href="{{assessment_url}}" style="background-color:#0284C7;color:#FFFFFF;padding:12px 28px;text-decoration:none;border-radius:8px;font-weight:700;display:inline-block;font-size:14px;line-height:1.2;">Start Online Assessment</a>' +
       '</p>' +
-      '<div style="background:#eff6ff;border-left:4px solid #3b82f6;padding:14px;margin:20px 0;border-radius:4px;">' +
-      '<p style="margin:0 0 6px;font-weight:700;color:#1e3a8a;font-size:13px;">Guidelines before you begin:</p>' +
-      '<ul style="margin:0;padding-left:18px;font-size:12.5px;color:#1e40af;line-height:1.6;">' +
+      '<div style="background-color:#F0F9FF;border:1px solid #BAE6FD;border-left:4px solid #0EA5E9;padding:14px 16px;margin:20px 0;border-radius:6px;">' +
+      '<p style="margin:0 0 6px;font-weight:700;color:#0C4A6E;font-size:13px;">Guidelines before you begin:</p>' +
+      '<ul style="margin:0;padding-left:18px;font-size:12.5px;color:#0C4A6E;line-height:1.6;">' +
       '<li>Ensure an uninterrupted, stable internet connection.</li>' +
       '<li>Take the assessment on a laptop or desktop computer for optimal experience.</li>' +
       '<li>The timer will start as soon as you begin the test.</li>' +
       '</ul>' +
       '</div>' +
-      '<p style="font-size:13px;color:#64748b;line-height:1.5;">' +
-      'Direct Link: <a href="{{assessment_url}}" style="color:#2563eb;word-break:break-all;">{{assessment_url}}</a>' +
-      '</p>' +
-      '<hr style="border:none;border-top:1px solid #e2e8f0;margin:24px 0;">' +
-      '<p style="margin-bottom:0;color:#475569;font-size:14px;">Best regards,<br><strong>Orrica Edge Talent Assessment Team</strong></p>' +
-      '</div>',
+      '<p style="font-size:12.5px;color:#64748B;line-height:1.6;">' +
+      'Direct Link: <a href="{{assessment_url}}" style="color:#0284C7;word-break:break-all;">{{assessment_url}}</a>' +
+      '</p>',
     plainText: 'Dear {{candidate_name}}, You have been invited to complete the {{assessment_title}} assessment for {{job_title}}. Duration: {{time_limit}} mins. Start here: {{assessment_url}}',
     variables: ['candidate_name', 'job_title', 'company_name', 'assessment_title', 'time_limit', 'expiry_date', 'assessment_url'],
   },
 };
 
-export const wrapHtmlEmail = (contentHtml: string): string => {
-  return `
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Orrica Edge</title>
-</head>
-<body style="margin:0;padding:0;background-color:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased;">
-  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background-color:#f8fafc;padding:30px 10px;">
-    <tr><td align="center">
-      <table role="presentation" width="600" cellspacing="0" cellpadding="0" border="0" style="max-width:600px;width:100%;background-color:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #e2e8f0;box-shadow:0 4px 6px -1px rgba(0,0,0,.05);">
-        <tr><td style="background-color:#0b1220;padding:24px 32px;border-bottom:3px solid #f97316;">
-          <span style="font-size:22px;font-weight:800;color:#ffffff;letter-spacing:-.5px;">ORRICA <span style="color:#f97316;">EDGE</span></span>
-          <span style="display:block;font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:1px;margin-top:2px;">Recruitment • Staffing • Talent Solutions</span>
-        </td></tr>
-        <tr><td style="padding:32px;color:#334155;font-size:15px;line-height:1.6;">${contentHtml}</td></tr>
-        <tr><td style="background-color:#f8fafc;padding:24px 32px;border-top:1px solid #e2e8f0;font-size:12px;color:#64748b;text-align:center;">
-          <p style="margin:0 0 8px;font-weight:600;color:#475569;">Orrica Edge Recruitment Solutions</p>
-          <p style="margin:0 0 8px;">This email was sent from an automated notification address (<a href="mailto:noreply@update.orricaedge.com" style="color:#f97316;text-decoration:none;">noreply@update.orricaedge.com</a>).</p>
-          <p style="margin:0;">© ${new Date().getFullYear()} Orrica Edge. All rights reserved. • <a href="https://orricaedge.com/privacy" style="color:#64748b;text-decoration:underline;">Privacy Policy</a> • <a href="https://orricaedge.com" style="color:#f97316;text-decoration:none;">orricaedge.com</a></p>
-        </td></tr>
-      </table>
-    </td></tr>
-  </table>
-</body>
-</html>
-  `.trim();
+export const wrapHtmlEmail = (contentHtml: string, preheader?: string): string => {
+  return wrapWithSkyBlueLayout({ contentHtml, preheader });
 };
 
 /**
@@ -444,6 +423,21 @@ export const compileEmailTemplate = async (
   const isGenericOrrica = ['orrica edge', 'orrica edge llp', 'orrica edge partner', 'orrica'].includes(rawCompanyName.toLowerCase());
   const companyName = isGenericOrrica ? '' : rawCompanyName;
 
+  const rawRecruiterName = (variables.recruiter_name || variables.fullName || variables.name || '').trim();
+  const safeRecruiterName = (rawRecruiterName && !rawRecruiterName.toLowerCase().includes('sample dashboard'))
+    ? rawRecruiterName
+    : 'Recruiter';
+
+  const rawCandidateName = (variables.candidate_name || variables.fullName || variables.name || '').trim();
+  const safeCandidateName = (rawCandidateName && !rawCandidateName.toLowerCase().includes('sample dashboard'))
+    ? rawCandidateName
+    : 'Candidate';
+
+  const rawUserName = (variables.user_name || variables.fullName || variables.name || '').trim();
+  const safeUserName = (rawUserName && !rawUserName.toLowerCase().includes('sample dashboard'))
+    ? rawUserName
+    : (safeRecruiterName !== 'Recruiter' ? safeRecruiterName : 'there');
+
   const enrichedVars: Record<string, string> = {
     support_email: config.email.supportEmail || 'info@orricaedge.com',
     dashboard_url: 'https://orricaedge.com',
@@ -458,6 +452,9 @@ export const compileEmailTemplate = async (
     ...variables,
     company_name: companyName,
     client_name: companyName,
+    recruiter_name: safeRecruiterName,
+    candidate_name: safeCandidateName,
+    user_name: safeUserName,
   };
 
   const cacheKey = `email_tpl:${templateKey}`;
@@ -518,9 +515,13 @@ export const compileEmailTemplate = async (
   const interpolatedHtmlContent = interpolateVariables(template.htmlBody, enrichedVars);
   const interpolatedPlainText = interpolateVariables(template.plainText || '', enrichedVars);
 
-  // The template body is now the complete email HTML.
-  // No automatic Orrica Edge header, footer, wrapper, or branding is injected.
-  const fullHtml = interpolatedHtmlContent;
+  // Apply consistent SKY BLUE email layout wrapper
+  const fullHtml = interpolatedHtmlContent.includes('<!DOCTYPE') || interpolatedHtmlContent.includes('<html')
+    ? interpolatedHtmlContent
+    : wrapWithSkyBlueLayout({
+        contentHtml: interpolatedHtmlContent,
+        preheader: interpolatedSubject,
+      });
 
   return {
     subject: interpolatedSubject,

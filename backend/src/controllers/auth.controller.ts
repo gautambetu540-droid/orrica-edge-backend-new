@@ -195,19 +195,15 @@ export const login = async (req: Request, res: Response, next: NextFunction): Pr
     };
 
     if (!user.mfaEnabled) {
-      const accessToken = jwt.sign(
-        { userId: user.id, email: user.email, role: user.role },
-        config.jwt.accessSecret,
-        { expiresIn: '1d' }
-      );
+      const mfaSetupToken = buildMfaPendingToken(user, 'SETUP_REQUIRED');
 
       res.json({
         success: true,
-        message: 'Login successful.',
+        message: 'Password verified. Multi-factor authentication setup is required to continue.',
         data: {
-          token: accessToken,
-          accessToken,
-          requiresMfaSetup: false,
+          token: mfaSetupToken,
+          mfaSetupToken,
+          requiresMfaSetup: true,
           requiresMfa: false,
           requiresPasswordChange: Boolean(user.mustSetPassword),
           user: userData,
@@ -228,6 +224,89 @@ export const login = async (req: Request, res: Response, next: NextFunction): Pr
         requiresMfa: true,
         requiresPasswordChange: Boolean(user.mustSetPassword),
         user: userData,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const validateSetupToken = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const rawToken = typeof req.query.token === 'string' ? req.query.token.trim() : '';
+    const rawEmail = typeof req.query.email === 'string' ? req.query.email.trim().toLowerCase() : '';
+
+    if (!rawToken || !rawEmail) {
+      res.status(400).json({
+        success: false,
+        status: 'invalid',
+        message: 'Setup token and registered email are required.',
+      });
+      return;
+    }
+
+    const tokenHash = hashSetupToken(rawToken);
+
+    const user = await prisma.user.findUnique({
+      where: { email: rawEmail },
+      select: {
+        id: true,
+        email: true,
+        fullName: true,
+        mustSetPassword: true,
+        resetPasswordToken: true,
+        resetPasswordExpires: true,
+        isActive: true,
+      },
+    });
+
+    if (!user || !user.isActive) {
+      res.status(404).json({
+        success: false,
+        status: 'invalid',
+        message: 'This password setup link is invalid or the account is inactive.',
+      });
+      return;
+    }
+
+    if (!user.mustSetPassword) {
+      res.status(400).json({
+        success: false,
+        status: 'already_set',
+        message: 'Password has already been set for this account. Please use the login page.',
+      });
+      return;
+    }
+
+    if (!user.resetPasswordToken || user.resetPasswordToken !== tokenHash) {
+      res.status(400).json({
+        success: false,
+        status: 'invalid',
+        message: 'This password setup link is invalid.',
+      });
+      return;
+    }
+
+    if (!user.resetPasswordExpires || user.resetPasswordExpires.getTime() < Date.now()) {
+      res.status(400).json({
+        success: false,
+        status: 'expired',
+        message: 'This password setup link has expired. Password setup links are valid for 24 hours.',
+      });
+      return;
+    }
+
+    res.json({
+      success: true,
+      status: 'valid',
+      message: 'Token is valid.',
+      data: {
+        email: user.email,
+        name: user.fullName || 'User',
       },
     });
   } catch (err) {
@@ -266,15 +345,6 @@ export const setPassword = async (
       return;
     }
 
-    if (user.role !== 'RECRUITER' && user.role !== 'FREELANCE_RECRUITER') {
-      res.status(400).json({
-        success: false,
-        message: 'Password setup is only available for recruiter accounts',
-      });
-      return;
-    }
-
-
     if (!user.mustSetPassword) {
       res.status(400).json({
         success: false,
@@ -299,6 +369,11 @@ export const setPassword = async (
     }
 
     const passwordHash = await bcrypt.hash(data.password, 12);
+
+    // Revoke any previous refresh tokens
+    await prisma.refreshToken.deleteMany({
+      where: { userId: user.id },
+    }).catch(() => {});
 
     const updatedUser = await prisma.user.update({
       where: { id: user.id },

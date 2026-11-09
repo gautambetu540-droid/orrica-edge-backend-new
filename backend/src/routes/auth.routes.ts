@@ -4,6 +4,7 @@ import {
   register,
   login,
   setPassword,
+  validateSetupToken,
   getMe,
   keepAlive,
   changeMyPassword,
@@ -37,14 +38,26 @@ const mfaVerificationLimiter = rateLimit({
   },
 });
 
+// Password setup token endpoints rate limiter
+const setupTokenLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    success: false,
+    status: 'rate_limited',
+    message: 'Too many password setup attempts from this network. Please try again later.',
+  },
+});
+
 // Public authentication endpoints
 router.post('/register', register);
 router.post('/login', login);
 
-// Recruiter first-time password setup.
-// This is token-protected at the controller level using the
-// one-time token sent in the recruiter welcome email.
-router.post('/set-password', setPassword);
+// First-time password setup and validation (token-protected)
+router.get('/validate-setup-token', setupTokenLimiter, validateSetupToken);
+router.post('/set-password', setupTokenLimiter, setPassword);
 
 // Password change endpoints (supporting both PUT /me/password and POST /change-password)
 router.put('/me/password', authenticateJwt, changeMyPassword);
