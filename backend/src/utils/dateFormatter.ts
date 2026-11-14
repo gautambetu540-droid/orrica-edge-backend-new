@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Shared Indian Standard Time (Asia/Kolkata, UTC+05:30) Date and Weekday Formatter
  * Prevents date shifts across UTC/local timezone boundaries.
  */
