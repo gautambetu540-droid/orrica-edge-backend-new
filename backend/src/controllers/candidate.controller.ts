@@ -16,19 +16,37 @@ import { sendDynamicEmail } from '../services/email.service';
 import { formatCandidateGreetingName, formatCandidateGreeting } from '../utils/nameFormatter';
 import { formatWalkInDate, formatReadableInterviewDate } from '../utils/dateFormatter';
 import { findWalkInLocationById } from './walk-in.controller';
+import {
+  PIPELINE_STAGES,
+  PipelineStage,
+  PIPELINE_STAGE_SET,
+  OPERATIONAL_STATUSES,
+  OperationalStatus,
+  OPERATIONAL_STATUS_SET,
+  resolvePipelineStage,
+  resolveOperationalStatus,
+  deriveStatus,
+  statusRules,
+  isTerminal,
+  OFFICIAL_10_PIPELINE_STATUSES,
+  OfficialPipelineStatus,
+} from '../shared/candidateStatusConfig';
 
-export const OFFICIAL_10_PIPELINE_STATUSES = [
-  'Not Interested',
-  'No Response',
-  'Callback Scheduled',
-  'On Hold – After 7 Days',
-  'Screening – Under Evaluation',
-  'Shortlisted by Recruiter',
-  'Ready to Go – Walk-in Scheduled',
-  'Client Select',
-  'Onboarding Under Process',
-  'Joined – Winning Option',
-] as const;
+export {
+  PIPELINE_STAGES,
+  PipelineStage,
+  PIPELINE_STAGE_SET,
+  OPERATIONAL_STATUSES,
+  OperationalStatus,
+  OPERATIONAL_STATUS_SET,
+  resolvePipelineStage,
+  resolveOperationalStatus,
+  deriveStatus,
+  statusRules,
+  isTerminal,
+  OFFICIAL_10_PIPELINE_STATUSES,
+  OfficialPipelineStatus,
+};
 
 export const CANONICAL_PIPELINE_STAGES = [
   ...OFFICIAL_10_PIPELINE_STATUSES,
@@ -2836,20 +2854,6 @@ export const getCandidateTimeline = async (req: Request, res: Response, next: Ne
 /**
  * Dedicated Candidate Status Update: PATCH /api/candidates/:id/status
  */
-const OFFICIAL_PIPELINE_STAGES_LIST = [
-  'Not Called',
-  'No Response',
-  'Callback Scheduled',
-  'On Hold – After 7 Days',
-  'Screening – Under Evaluation',
-  'Shortlisted by Recruiter',
-  'Ready to Go – Walk-in Scheduled',
-  'Client Select',
-  'Onboarding Under Process',
-  'Joined – Winning Option',
-] as const;
-const OFFICIAL_PIPELINE_SET = new Set<string>(OFFICIAL_PIPELINE_STAGES_LIST);
-
 export const updateCandidateStatus = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const identifier = req.params.id;
@@ -2868,8 +2872,15 @@ export const updateCandidateStatus = async (req: Request, res: Response, next: N
       sourceActivity,
     } = req.body;
 
-    const opStatus = operationalStatus || (status && !OFFICIAL_PIPELINE_SET.has(status) ? normalizeCandidateStatus(status) : undefined);
-    const pipeStage = pipelineStage !== undefined ? pipelineStage : (stage !== undefined ? stage : (status && OFFICIAL_PIPELINE_SET.has(status) ? status : undefined));
+    // Robust resolution tolerant of hyphens, en-dashes, case, and legacy aliases
+    const rawStageInput = pipelineStage !== undefined ? pipelineStage : (stage !== undefined ? stage : undefined);
+    const resolvedPipeFromStage = rawStageInput !== undefined ? (resolvePipelineStage(rawStageInput) || String(rawStageInput).trim()) : undefined;
+    const resolvedPipeFromStatus = status ? resolvePipelineStage(status) : null;
+    const pipeStage = resolvedPipeFromStage !== undefined ? resolvedPipeFromStage : (resolvedPipeFromStatus || undefined);
+
+    const rawOpInput = operationalStatus !== undefined ? operationalStatus : (pipeStage ? undefined : status);
+    const resolvedOp = rawOpInput ? (resolveOperationalStatus(rawOpInput) || normalizeCandidateStatus(rawOpInput)) : undefined;
+    const opStatus = operationalStatus !== undefined ? (resolveOperationalStatus(operationalStatus) || operationalStatus) : resolvedOp;
 
     if (!opStatus && pipeStage === undefined) {
       sendError(res, 'A valid operational status or pipeline stage is required.', 400);
@@ -2993,11 +3004,16 @@ export const updateCandidateStatus = async (req: Request, res: Response, next: N
     const updateData: any = {};
     if (opStatus !== undefined) {
       updateData.operationalStatus = opStatus;
-      updateData.status = opStatus;
     }
     if (pipeStage !== undefined) {
       updateData.pipelineStage = pipeStage ? String(pipeStage).trim() : null;
     }
+    // Single Source of Truth: deriveStatus computes candidate display status
+    updateData.status = deriveStatus({
+      pipelineStage: updateData.pipelineStage !== undefined ? updateData.pipelineStage : existing.pipelineStage,
+      operationalStatus: updateData.operationalStatus !== undefined ? updateData.operationalStatus : existing.operationalStatus,
+      status: existing.status,
+    });
     if (finalRemarks) {
       updateData.notes = finalRemarks;
       updateData.feedback = finalRemarks;
