@@ -14,6 +14,8 @@ import {
   checkDuplicateCandidate,
   getCandidateTimeline,
   updateCandidateStatus,
+  bulkUpdateCandidateStatus,
+  getCandidateChanges,
   resendWalkInEmail,
   sendWalkInInvitation,
   approveWalkInReschedule,
@@ -214,6 +216,22 @@ router.patch(
   requirePermission('candidates'),
   requireRecruiterPermission('candidates'),
   updateCandidate
+);
+
+router.get(
+  '/changes',
+  authenticateJwt,
+  requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
+  getCandidateChanges
+);
+
+router.post(
+  '/status/bulk',
+  authenticateJwt,
+  requireRoles('SUPER_ADMIN', 'ADMIN', 'SUB_ADMIN', 'TEAM_LEADER', 'RECRUITER', 'FREELANCE_RECRUITER'),
+  requirePermission('candidates'),
+  requireRecruiterPermission('candidates'),
+  bulkUpdateCandidateStatus
 );
 
 router.patch(
