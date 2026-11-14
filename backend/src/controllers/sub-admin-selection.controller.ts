@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { prisma } from '../prisma/client';
 import { sendSuccess, sendError } from '../utils/response';
 import { computeWorkingDays } from '../utils/workingDays';
+import { normalizeIndianPhone } from '../utils/phone';
 
 const SELECTED_STATUSES = [
   'Selected',
@@ -379,7 +380,7 @@ export const getSubAdminSelectedCandidates = async (req: Request, res: Response,
     // Search filter
     if (search) {
       const q = String(search).trim();
-      const phoneDigits = q.replace(/\D/g, '');
+      const phoneDigits = normalizeIndianPhone(q) || q.replace(/\D/g, '');
       const searchOr: any[] = [
         { candidateCode: { contains: q, mode: 'insensitive' } },
         { name: { contains: q, mode: 'insensitive' } },
@@ -730,7 +731,7 @@ export const exportSubAdminSelectedCandidates = async (req: Request, res: Respon
 
     if (search) {
       const q = String(search).trim();
-      const phoneDigits = q.replace(/\D/g, '');
+      const phoneDigits = normalizeIndianPhone(q) || q.replace(/\D/g, '');
       const searchOr: any[] = [
         { candidateCode: { contains: q, mode: 'insensitive' } },
         { fullName: { contains: q, mode: 'insensitive' } },

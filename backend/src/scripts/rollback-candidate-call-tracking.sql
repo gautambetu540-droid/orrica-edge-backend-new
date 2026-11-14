@@ -5,3 +5,4 @@ ALTER TABLE "candidates"
 DROP COLUMN IF EXISTS "lastCallOutcome",
 DROP COLUMN IF EXISTS "callAttempts",
 DROP COLUMN IF EXISTS "lastCallAt";
+

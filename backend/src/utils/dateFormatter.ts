@@ -110,3 +110,50 @@ export function formatReadableInterviewDate(input: string | Date | null | undefi
   const date = new Date(Date.UTC(y, m - 1, d, 12, 0, 0));
   return date.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
 }
+
+/**
+ * Formats a Date or date string to YYYY-MM-DD in Indian Standard Time (Asia/Kolkata).
+ * Prevents UTC off-by-one date shift issues.
+ */
+export function toISODate(input: Date | string | null | undefined): string {
+  if (!input) return '';
+  if (typeof input === 'string') {
+    const trimmed = input.trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+      return trimmed;
+    }
+  }
+  const d = input instanceof Date ? input : new Date(input);
+  if (isNaN(d.getTime())) return '';
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Kolkata',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(d);
+}
+
+/**
+ * Formats a Date or date string to readable display format in Asia/Kolkata timezone.
+ * e.g. "14 Nov 2026" or "14 November 2026"
+ */
+export function formatDate(
+  input: Date | string | null | undefined,
+  options?: { month?: 'short' | 'long' | 'numeric'; showWeekday?: boolean }
+): string {
+  if (!input) return '';
+  const d = input instanceof Date ? input : new Date(input);
+  if (isNaN(d.getTime())) return String(input);
+
+  const monthStyle = options?.month || 'short';
+  const weekdayStyle = options?.showWeekday ? 'short' : undefined;
+
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Kolkata',
+    year: 'numeric',
+    month: monthStyle,
+    day: 'numeric',
+    ...(weekdayStyle ? { weekday: weekdayStyle } : {}),
+  }).format(d);
+}
+

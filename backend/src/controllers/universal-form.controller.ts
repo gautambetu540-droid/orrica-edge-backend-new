@@ -5,6 +5,7 @@ import { uploadResumeFile } from '../services/storage.service';
 import { sendSuccess, sendError } from '../utils/response';
 import { createNotification, createNotifications } from '../services/notification.service';
 import { generateCandidateCode, generateApplicationCode } from '../utils/codeGenerators';
+import { normalizeIndianPhone } from '../utils/phone';
 
 const universalFormBodySchema = z.object({
   name: z.string().min(2).max(120).optional(),
@@ -64,8 +65,7 @@ const getUniqueSlug = async (requestedSlug: string, excludeId?: string): Promise
 const getDigits = (value: unknown): string => String(value ?? '').replace(/\D/g, '');
 
 const getLast10Digits = (value: unknown): string => {
-  const digits = getDigits(value);
-  return digits.length > 10 ? digits.slice(-10) : digits;
+  return normalizeIndianPhone(value) || getDigits(value).slice(-10);
 };
 
 const parseList = (value: unknown): string[] => {
@@ -498,9 +498,9 @@ export const submitPublicUniversalForm = async (req: Request, res: Response, nex
       return;
     }
 
-    const phoneDigits = getLast10Digits(phone);
-    if (phoneDigits.length < 10) {
-      sendError(res, 'Please provide a valid 10-digit phone number.', 400);
+    const phoneDigits = normalizeIndianPhone(phone);
+    if (!phoneDigits) {
+      sendError(res, 'Please provide a valid 10-digit Indian phone number.', 400);
       return;
     }
 

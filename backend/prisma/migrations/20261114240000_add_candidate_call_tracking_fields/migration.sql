@@ -10,3 +10,4 @@ ADD COLUMN IF NOT EXISTS "lastCallOutcome" TEXT;
 
 -- 2. Create index for high-performance recruiter calling aggregation
 CREATE INDEX IF NOT EXISTS "candidates_ownerRecruiterId_lastCallAt_idx" ON "candidates"("ownerRecruiterId", "lastCallAt");
+

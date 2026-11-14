@@ -35,6 +35,8 @@ import {
   applyCandidateStatusChange,
   bulkCandidateStatusChange,
 } from '../services/candidateStatus.service';
+import { normalizeIndianPhone, formatIndianPhone, isValidIndianPhone } from '../utils/phone';
+import { findDuplicateCandidate } from '../services/duplicateCandidate.service';
 
 export {
   PIPELINE_STAGES,
@@ -553,52 +555,23 @@ export const checkDuplicateCandidate = async (
   try {
     const phone = req.body.phone ? String(req.body.phone).trim() : undefined;
     const email = req.body.email ? String(req.body.email).trim().toLowerCase() : undefined;
+    const targetJobId = req.body.targetJobId || req.body.jobId;
 
     if (!phone && !email) {
       sendError(res, 'At least one of phone or email is required to check for duplicates.', 400);
       return;
     }
 
-    const candidate = await prisma.candidate.findFirst({
-      where: {
-        OR: [
-          ...(phone ? [{ phone }] : []),
-          ...(email ? [{ email }] : []),
-        ],
-      },
-      include: {
-        sourcingRecruiter: {
-          select: { id: true, fullName: true, email: true },
-        },
-        teamLeader: {
-          select: { id: true, fullName: true, email: true },
-        },
-        ownerRecruiter: {
-          select: { id: true, fullName: true, email: true },
-        },
-        applications: {
-          orderBy: { appliedDate: 'desc' },
-          take: 1,
-          include: {
-            job: {
-              select: { id: true, jobCode: true, title: true, department: true },
-            },
-          },
-        },
-      },
-    });
+    const dupResult = await findDuplicateCandidate({ phone, email, targetJobId });
 
-    if (candidate) {
-      const latestApp = candidate.applications[0];
-      const sourcingRecruiterName =
-        candidate.sourcingRecruiter?.fullName ||
-        candidate.ownerRecruiter?.fullName ||
-        null;
-      const teamLeaderName = candidate.teamLeader?.fullName || null;
-
+    if (dupResult.isDuplicate && dupResult.matchedCandidate) {
+      const candidate = dupResult.matchedCandidate;
       sendSuccess(res, {
         exists: true,
+        isDuplicate: true,
         candidateId: candidate.candidateCode || candidate.id,
+        matchedSignal: dupResult.matchedSignal,
+        hasAlreadyAppliedToJob: dupResult.hasAlreadyAppliedToJob,
         candidate: {
           id: candidate.id,
           candidateCode: candidate.candidateCode,
@@ -606,13 +579,16 @@ export const checkDuplicateCandidate = async (
           phone: req.user?.role === 'SUB_ADMIN' ? maskPhone(candidate.phone) : candidate.phone,
           email: req.user?.role === 'SUB_ADMIN' ? maskEmail(candidate.email) : candidate.email,
           status: candidate.status,
-          sourcingRecruiterName,
-          teamLeaderName,
-          currentApplication: latestApp
+          operationalStatus: candidate.operationalStatus,
+          pipelineStage: candidate.pipelineStage,
+          sourcingRecruiterName: candidate.sourcingRecruiterName,
+          teamLeaderName: candidate.teamLeaderName,
+          assignedRecruiterName: candidate.assignedRecruiterName,
+          currentApplication: candidate.currentApplication
             ? {
-                jobCode: latestApp.job.jobCode,
-                jobTitle: latestApp.job.title,
-                status: latestApp.status || latestApp.stage,
+                jobCode: candidate.currentApplication.jobCode,
+                jobTitle: candidate.currentApplication.jobTitle,
+                status: candidate.currentApplication.status,
               }
             : null,
         },
@@ -622,6 +598,7 @@ export const checkDuplicateCandidate = async (
 
     sendSuccess(res, {
       exists: false,
+      isDuplicate: false,
       candidate: null,
     });
   } catch (err) {
@@ -1183,45 +1160,23 @@ export const createCandidate = async (req: Request, res: Response, next: NextFun
     const userRole = req.user?.role;
     const currentUserId = req.user?.userId;
 
-    const cleanPhone = data.phone.trim();
-    const cleanEmail = (data.email && data.email.trim()) ? data.email.trim().toLowerCase() : ('bulk.' + cleanPhone.replace(/\D/g, '') + '@orricaedge.internal');
+    const cleanPhone = normalizeIndianPhone(data.phone) || data.phone.trim();
+    const cleanEmail = (data.email && data.email.trim()) ? data.email.trim().toLowerCase() : ('bulk.' + cleanPhone + '@orricaedge.internal');
 
-    // 2. Hard server-side duplicate check (Critical Requirement)
-    const existingCandidate = await prisma.candidate.findFirst({
-      where: {
-        OR: [
-          { phone: cleanPhone },
-          { email: cleanEmail },
-        ],
-      },
-      include: {
-        sourcingRecruiter: { select: { id: true, fullName: true, email: true } },
-        teamLeader: { select: { id: true, fullName: true, email: true } },
-        ownerRecruiter: { select: { id: true, fullName: true, email: true } },
-        applications: {
-          orderBy: { appliedDate: 'desc' },
-          take: 1,
-          include: {
-            job: { select: { id: true, jobCode: true, title: true } },
-          },
-        },
-      },
-    });
+    // 2. Hard server-side duplicate check (Critical Requirement via SSOT service)
+    const dupCheck = await findDuplicateCandidate({ phone: cleanPhone, email: cleanEmail, targetJobId: data.targetJobId });
 
-    if (existingCandidate) {
-      const latestApp = existingCandidate.applications[0];
-      const sourcingRecruiterName =
-        existingCandidate.sourcingRecruiter?.fullName ||
-        existingCandidate.ownerRecruiter?.fullName ||
-        null;
-      const teamLeaderName = existingCandidate.teamLeader?.fullName || null;
-
+    if (dupCheck.isDuplicate && dupCheck.matchedCandidate) {
+      const existingCandidate = dupCheck.matchedCandidate;
       res.status(409).json({
         success: false,
         code: 'DUPLICATE_CANDIDATE',
         message: 'A candidate with this phone number or email already exists in the system.',
         data: {
           exists: true,
+          isDuplicate: true,
+          matchedSignal: dupCheck.matchedSignal,
+          hasAlreadyAppliedToJob: dupCheck.hasAlreadyAppliedToJob,
           candidateId: existingCandidate.candidateCode || existingCandidate.id,
           candidate: {
             id: existingCandidate.id,
@@ -1230,15 +1185,9 @@ export const createCandidate = async (req: Request, res: Response, next: NextFun
             phone: existingCandidate.phone,
             email: existingCandidate.email,
             status: existingCandidate.status,
-            sourcingRecruiterName,
-            teamLeaderName,
-            currentApplication: latestApp
-              ? {
-                  jobCode: latestApp.job.jobCode,
-                  jobTitle: latestApp.job.title,
-                  status: latestApp.status || latestApp.stage,
-                }
-              : null,
+            sourcingRecruiterName: existingCandidate.sourcingRecruiterName,
+            teamLeaderName: existingCandidate.teamLeaderName,
+            currentApplication: existingCandidate.currentApplication,
           },
         },
       });
@@ -2567,34 +2516,26 @@ export const recruiterSubmitCandidate = async (req: Request, res: Response, next
     const feedback = String(body.feedback || '').trim() || undefined;
     const recruiterRemarks = String(body.recruiterRemarks || '').trim();
 
-    const existingCandidate = await prisma.candidate.findFirst({
-      where: {
-        OR: [
-          { email },
-          { phone },
-        ],
-      },
-      select: {
-        id: true,
-        candidateCode: true,
-        fullName: true,
-        email: true,
-        phone: true,
-        ownerRecruiterId: true,
-        sourcingRecruiterId: true,
-        teamLeaderId: true,
-        resumeUrl: true,
-      },
-    });
+    const dupCheck = await findDuplicateCandidate({ phone, email, targetJobId: jobId });
+    const existingCandidate = dupCheck.matchedCandidate;
 
     if (
-      existingCandidate?.ownerRecruiterId &&
-      existingCandidate.ownerRecruiterId !== recruiter.id &&
+      existingCandidate &&
+      existingCandidate.sourcingRecruiterName &&
       req.user?.role !== 'ADMIN' &&
       req.user?.role !== 'SUPER_ADMIN'
     ) {
-      sendError(res, 'This candidate is owned by another recruiter. Ask an admin to reassign them.', 409);
-      return;
+      const existingDbCandidate = await prisma.candidate.findUnique({
+        where: { id: existingCandidate.id },
+        select: { ownerRecruiterId: true, sourcingRecruiterId: true, teamLeaderId: true, resumeUrl: true },
+      });
+      if (
+        existingDbCandidate?.ownerRecruiterId &&
+        existingDbCandidate.ownerRecruiterId !== recruiter.id
+      ) {
+        sendError(res, 'This candidate is owned by another recruiter. Ask an admin to reassign them.', 409);
+        return;
+      }
     }
 
     if (existingCandidate) {
@@ -3710,28 +3651,14 @@ export const CANONICAL_BULK_IMPORT_HEADERS = [
 export const normalizePhoneNumber = (raw: any): { phone: string; isValid: boolean; error?: string } => {
   if (!raw) return { phone: '', isValid: false, error: 'Phone number is required.' };
   const rawStr = String(raw).trim();
-
-  // Guard against scientific notation (e.g. 7.86E+09 or 9.87e+09)
-  if (/[eE]\+?[0-9]/.test(rawStr)) {
-    return {
-      phone: rawStr,
-      isValid: false,
-      error: `Invalid phone number format: scientific notation detected ('${rawStr}'). Ensure Phone column is formatted as Text in Excel.`,
-    };
+  const normalized = normalizeIndianPhone(raw);
+  if (normalized) {
+    return { phone: normalized, isValid: true };
   }
-
-  let cleaned = rawStr.replace(/\D/g, '');
-  if (cleaned.length === 12 && cleaned.startsWith('91')) {
-    cleaned = cleaned.slice(2);
-  } else if (cleaned.length === 11 && cleaned.startsWith('0')) {
-    cleaned = cleaned.slice(1);
-  }
-
-  const isValid = /^[6-9]\d{9}$/.test(cleaned);
   return {
-    phone: cleaned,
-    isValid,
-    error: isValid ? undefined : `Invalid phone number '${rawStr}'. Must be a valid 10-digit Indian mobile number.`,
+    phone: rawStr,
+    isValid: false,
+    error: `Invalid phone number '${rawStr}'. Must be a valid 10-digit Indian mobile number.`,
   };
 };
 
