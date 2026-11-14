@@ -7,6 +7,7 @@ import {
   getTeamMembers,
 } from '../controllers/team-leader.controller';
 import { getTLDashboard } from '../controllers/dashboard.controller';
+import { getTeamCallingSummary } from '../controllers/team-calling.controller';
 import { authenticateJwt, requireRoles } from '../middlewares/auth.middleware';
 
 const router = Router();
@@ -15,6 +16,7 @@ const router = Router();
 router.use(authenticateJwt, requireRoles('TEAM_LEADER', 'ADMIN', 'SUPER_ADMIN'));
 
 router.get('/dashboard', getTLDashboard);
+router.get('/team-calling/summary', getTeamCallingSummary);
 router.get('/', getPendingApprovals);
 router.get('/pending', getPendingApprovals);
 router.get('/queue', getPendingApprovals);

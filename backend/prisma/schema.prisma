@@ -349,6 +349,9 @@ model Candidate {
   followUpAt          DateTime?
   followUpCompletedAt DateTime?
   rescheduleCount     Int                 @default(0)
+  lastCallAt          DateTime?
+  callAttempts        Int                 @default(0)
+  lastCallOutcome     String?
   status              String              @default("New")
   operationalStatus   String?
   pipelineStage       String?
@@ -401,6 +404,7 @@ model Candidate {
   @@index([nextActionDate])
   @@index([ownerRecruiterId, followUpAt])
   @@index([ownerRecruiterId, walkInDate])
+  @@index([ownerRecruiterId, lastCallAt])
   @@index([createdById])
   @@map("candidates")
 }

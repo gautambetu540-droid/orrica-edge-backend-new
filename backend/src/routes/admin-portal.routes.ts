@@ -8,6 +8,7 @@ import {
   deleteEmployeeUser,
   resetEmployeeCredentials,
 } from '../controllers/admin-portal.controller';
+import { getTeamCallingSummary } from '../controllers/team-calling.controller';
 import rateLimit from 'express-rate-limit';
 import {
   getMyProfile,
@@ -40,6 +41,7 @@ router.put('/settings', updateMySettings);
 
 // Portal operations & employees
 router.get('/portal-data', getAdminPortalData);
+router.get('/team-calling/summary', getTeamCallingSummary);
 router.get('/audit-logs', getAuditLogs);
 router.get('/employees', getEmployeeUsers);
 router.post('/employees', createEmployeeUser);

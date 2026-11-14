@@ -172,6 +172,11 @@ export async function applyCandidateStatusChange(
   const updateData: any = {};
   if (opStatus !== undefined) {
     updateData.operationalStatus = opStatus;
+    if (opStatus && opStatus !== 'Not Called') {
+      updateData.lastCallAt = new Date();
+      updateData.callAttempts = { increment: 1 };
+      updateData.lastCallOutcome = opStatus;
+    }
   }
   if (pipeStage !== undefined) {
     updateData.pipelineStage = pipeStage ? String(pipeStage).trim() : null;
