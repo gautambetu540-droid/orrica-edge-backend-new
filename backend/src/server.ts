@@ -67,6 +67,8 @@ app.use(
       'X-Requested-With',
       'Accept',
       'Origin',
+      'Idempotency-Key',
+      'idempotency-key',
     ],
     exposedHeaders: ['Authorization'],
   })
