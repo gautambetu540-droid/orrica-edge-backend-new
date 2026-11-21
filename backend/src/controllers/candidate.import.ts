@@ -59,6 +59,13 @@ export const CANONICAL_BULK_IMPORT_HEADERS = [
 export const normalizePhoneNumber = (raw: any): { phone: string; isValid: boolean; error?: string } => {
   if (!raw) return { phone: '', isValid: false, error: 'Phone number is required.' };
   const rawStr = String(raw).trim();
+  if (/[eE][+-]?\d+/.test(rawStr)) {
+    return {
+      phone: rawStr,
+      isValid: false,
+      error: `Invalid phone number '${rawStr}': scientific notation detected. Format cell as text in Excel.`,
+    };
+  }
   const normalized = normalizeIndianPhone(raw);
   if (normalized) {
     return { phone: normalized, isValid: true };

@@ -180,6 +180,14 @@ export function deriveStatus(candidate: {
   operationalStatus?: string | null;
   status?: string | null;
 }): string {
+  // If explicitly rejected, prioritize Rejected
+  const pipeNorm = candidate.pipelineStage ? normalizeDashAndCase(candidate.pipelineStage) : '';
+  const opNorm = candidate.operationalStatus ? normalizeDashAndCase(candidate.operationalStatus) : '';
+  const stNorm = candidate.status ? normalizeDashAndCase(candidate.status) : '';
+  if (pipeNorm === 'rejected' || opNorm === 'rejected' || stNorm === 'rejected') {
+    return 'Rejected';
+  }
+
   // If a valid pipeline stage exists and is not the default initial stage, it defines candidate progress
   if (candidate.pipelineStage) {
     const resolvedPipe = resolvePipelineStage(candidate.pipelineStage);
